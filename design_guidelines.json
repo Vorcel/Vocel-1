@@ -1,0 +1,106 @@
+{
+  "theme_and_archetype": {
+    "theme": "Light mode default, Dark mode toggle",
+    "archetype": "Archetype 4 (Swiss & High-Contrast) adapted for Dashboards",
+    "vibe": "Authority, Clarity, Data-Dense, Professional",
+    "domain": "Enterprise SaaS / ERP"
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Work Sans",
+      "body": "IBM Plex Sans",
+      "monospace": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-semibold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-sm leading-relaxed",
+      "table_header": "text-xs font-semibold tracking-wider uppercase text-slate-500",
+      "table_data": "text-sm font-medium",
+      "alert_time": "text-5xl font-black tracking-tighter text-red-600",
+      "labels": "text-xs font-bold tracking-[0.1em] uppercase"
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "primary": "#0C7B93",
+      "primary_hover": "#095F73",
+      "positive": "#10B981",
+      "alert": "#EF4444",
+      "warning": "#F59E0B",
+      "inactive": "#94A3B8",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B",
+      "border": "#E2E8F0",
+      "table": {
+        "yellow_input": "#FEF9C3",
+        "green_profit": "#D1FAE5",
+        "blue_value": "#E0F2FE"
+      }
+    },
+    "dark": {
+      "background": "#0F172A",
+      "surface": "#1E293B",
+      "primary": "#0C7B93",
+      "primary_hover": "#109AB8",
+      "positive": "#34D399",
+      "alert": "#F87171",
+      "warning": "#FBBF24",
+      "inactive": "#64748B",
+      "text_main": "#F8FAFC",
+      "text_muted": "#94A3B8",
+      "border": "#334155",
+      "table": {
+        "yellow_input": "#422006",
+        "green_profit": "#064E3B",
+        "blue_value": "#0C4A6E"
+      }
+    }
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "Dense but readable. p-4 or p-6 for cards. Container px-4 sm:px-6 lg:px-8.",
+    "sidebar": "Smart collapsible. w-16 collapsed, w-64 expanded. z-40. Transition width 300ms ease. Icon-only until hovered or pinned.",
+    "header": "h-16 fixed top-0 right-0 z-30 flex items-center justify-between px-6. Background crystal glass (bg-white/70 backdrop-blur-md border-b border-slate-200).",
+    "dashboard_grid": "Bento-style Control Room grid. grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 or gap-6."
+  },
+  "component_rules": {
+    "cards": "Flat background, 1px border border-slate-200, shadow-sm. Use rounded-md or rounded-lg. No extreme border-radius.",
+    "tables_general": "Dense rows. text-sm. Hover state on rows. Colored badges for status.",
+    "erp_spreadsheet": {
+      "behavior": "Horizontal scrolling with overflow-x-auto. Sticky header (sticky top-0 bg-white z-10) and sticky first column (sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-20).",
+      "mutual_exclusion": "Typing in VALOR DE VENDA clears MARGEM % and highlights background yellow. Vice-versa.",
+      "cell_styling": "Yellow inputs use bg-yellow-50, green profit uses bg-emerald-50, blue value uses bg-blue-50. Dark mode variants provided in color scale."
+    },
+    "hero_alerts": "Large hero cards. p-6, border-l-4 border-red-500. Massive text-5xl time display with clock icon.",
+    "timeline_stepper": "Vertical layout. 10 steps. Active step uses primary color, completed uses green, future uses gray. Add file icon on each step.",
+    "buttons": "Rounded-md. Primary: bg-[#0C7B93] text-white hover:bg-[#095F73].",
+    "inputs": "Shadcn components, h-9 or h-10. focus-visible:ring-primary focus-visible:ring-2.",
+    "offcanvas_sidebar": "Advanced filter sidebar. fixed inset-y-0 right-0 w-80 bg-white shadow-xl z-50 transform transition-transform."
+  },
+  "motion_and_microinteractions": {
+    "sidebar": "Width transition on hover. Menu labels fade in.",
+    "undo_toast": "7s undo via Sonner with progress indicator.",
+    "chart": "Recharts donut chart stroke animation on mount.",
+    "table_inputs": "Smooth background color transition when mutual exclusion triggers."
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "usage": "Size 18px for general UI, 24px for sidebar, 48px for hero alerts. Stroke width 2."
+  },
+  "data_testid_conventions": {
+    "rules": "All interactive elements MUST have data-testid attributes.",
+    "format": "kebab-case, role-based. e.g., data-testid='sidebar-toggle', data-testid='new-bid-button', data-testid='erp-table-input-margin'"
+  },
+  "instructions_to_main_agent": [
+    "Use standard HTML/Tailwind for the 21-column ERP table to ensure performance. Use 'sticky' classes for headers and the first column.",
+    "Implement mutual exclusion logic in the ERP table using controlled React state or ref-based value clearing on input change.",
+    "Sidebar must use state 'isExpanded' and 'isPinned'. If 'isPinned' is false, 'isExpanded' becomes true only on hover.",
+    "Use Recharts for the donut chart in Tela 4.",
+    "Use Sonner for the 7s undo toast when deleting a bid.",
+    "Files MUST be written in .jsx or .js. Do NOT use .tsx."
+  ]
+}
