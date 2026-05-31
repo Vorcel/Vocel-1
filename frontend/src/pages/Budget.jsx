@@ -64,7 +64,7 @@ export default function Budget() {
 
   const updateRow = (id, patch) => setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
 
-  const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: "venda" });
+  const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || v === "0" ? "margem" : "venda" });
   const onMargem = (id, v) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" });
 
   const addRow = () => setRows((p) => [...p, newRow(defaults)]);
