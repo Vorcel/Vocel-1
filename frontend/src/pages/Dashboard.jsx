@@ -30,7 +30,7 @@ const SummaryCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
 );
 
 export default function Dashboard() {
-  const { summary, bids } = useData();
+  const { summary, bids, lists } = useData();
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayBids = useMemo(
