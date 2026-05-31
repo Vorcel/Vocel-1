@@ -21,6 +21,14 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Tela 4 Execution: auto-created on Adjudicado; 3 KPI cards; master 11-col table (delivery-time modal, computed delivery date, financial inheritance from budget summary, 4 action icons); 10-step timeline with file uploads; donut progress; status<->step sync; document tabs.
 - Verified: 26/26 backend pytest; frontend e2e (1 ERP bug found & fixed).
 
+## Updates (Iteration 2)
+- Dashboard cards renomeados (PARTICIPAÇÕES NO MÊS / ADJUDICADAS / EM ACOMPANHAMENTO) + badges de variação % (verde/vermelho) vs mês anterior.
+- Modal Nova Licitação: asteriscos vermelhos, todos os campos obrigatórios exceto Observação (Pregão/UASG/PDF agora obrigatórios), Salvar bloqueado até validar.
+- Cores globais de Status/Portais/Modalidades: listas agora são {nome,cor} com color picker + edição na Tela 3; dropdowns de status renderizam a cor definida (reativo). Rename propaga retroativamente às licitações.
+- Date Range Picker (período DD/MM/AAAA até DD/MM/AAAA) nos filtros das Telas 1/4/5; Data da Disputa no modal segue data única.
+- Filtros cumulativos (AND) + botão rápido de favoritos na barra de filtros.
+- Colunas redimensionáveis (estilo Excel: table-layout fixed + ellipsis) em todas as tabelas (Telas 1/2/4/5), largura persistida em localStorage.
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.

@@ -15,7 +15,7 @@ export function hexToRgba(hex, alpha = 1) {
 export function colorStyles(hex) {
   const c = hex || "#64748B";
   return {
-    badge: { backgroundColor: hexToRgba(c, 0.14), color: c, borderColor: hexToRgba(c, 0.4) },
+    badge: { backgroundColor: hexToRgba(c, 0.18), color: c, borderColor: hexToRgba(c, 0.55) },
     solid: { backgroundColor: c, color: "#ffffff" },
     dot: { backgroundColor: c },
     text: { color: c },
