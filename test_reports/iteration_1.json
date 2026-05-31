@@ -1,0 +1,56 @@
+{
+  "summary": "First full E2E test of Sistema de Licitações. Backend: 26/26 pytest tests passing across auth, lists, bids CRUD, dashboard summary, budget ERP with execution financial propagation, Adjudicado->execution auto-create (incl. idempotency), execution KPIs + step/status sync, preferences/company, file upload. Frontend: login, sidebar navigation, dashboard summary cards, Nova Licitação modal validation, status dropdown -> Adjudicado, execution auto-population, 10-step timeline, ERP global cards, settings 5 tabs all confirmed working via UI. Two functional issues identified in the ERP mutual-exclusion flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Budget.jsx ERP row inputs",
+        "issue": "After user types VALOR VENDA (which sets row.mode='venda' and makes MARGEM readOnly), clearing the VALOR VENDA field does NOT reset row.mode, so MARGEM remains readonly and the user cannot switch to margem-driven mode. PRD says mutual exclusion should let typing in margem clear venda. The current one-way readOnly lock blocks the inverse direction.",
+        "selector": "[data-testid^=\"erp-margem-\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Dashboard Nova Licitação modal",
+        "issues": [
+          "Date validation error 'Não é permitida data retroativa' shows correctly but the Save button stays disabled with no field-level error toast/indicator until user blurs the field. UX could improve by showing inline validation states once user attempts to save."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix Budget ERP mutual-exclusion: when VALOR VENDA is cleared (empty/0), reset row.mode so the user can edit MARGEM to switch into margem-driven mode (and symmetrically vice-versa). Currently mode='venda' is set on typing venda but never reverted, leaving MARGEM permanently readonly for that row.",
+    "Consider showing inline validation errors in Nova Licitação modal proactively (not only after blur) so users understand why Salvar is disabled."
+  ],
+  "critical_code_review_comments": [
+    "Budget.jsx readOnly={r.mode === 'venda'} on margem input creates one-way lock; should be cleared when valor_venda becomes empty.",
+    "BidFormModal: data_disputa validation uses ISO string compare ok, but errors are gated behind `touched[k]`; consider running validation on submit attempt to surface why save is disabled.",
+    "Dashboard testid is 'card-mes' but the original PRD references 'card-licitacoes-mes' verbally; OK as long as consistent.",
+    "All MongoDB objectId leaks correctly avoided (responses use 'id', not '_id'). Async/await used properly. Bearer auth enforced on /me. CORS appears configured (frontend loads via REACT_APP_BACKEND_URL).",
+    "Bid favorite endpoint expects {favorito: bool} body - good; status change endpoint correctly triggers _ensure_execution and is idempotent (verified by test_idempotent_adjudicado).",
+    "Budget save propagation to execution record verified end-to-end: valor_total->valor_empenho, custo_global->valor_compra, lucro_global->lucro_previsto.",
+    "Settings.jsx tabs rendering: all 5 TabsTriggers rendered together via Radix; works as expected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 pytest)",
+    "frontend": "90% (1 functional bug in ERP mutual-exclusion; everything else works)"
+  },
+  "test_credentials": "admin@licita.com / admin123 (seeded admin, JWT Bearer token in /api/auth/login response)",
+  "seed_data_creation": "Created test bids/budget/execution during tests; all TEST_-prefixed bids cleaned up at end via DELETE /api/bids/{id}. One TEST_EMPRESA LTDA was written to company prefs (single-doc) - non-disruptive but main agent may want to reset.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite lives at /app/backend/tests/backend_test.py (run with: pytest /app/backend/tests/backend_test.py -v). Container date is 2026-05-31 - use future dates (e.g., 2026-06-15) when filling bid date in Nova Licitação modal. All 5 settings tabs exist (testids: tab-perfil, tab-empresa, tab-aparencia, tab-orcamento, tab-listas). Dashboard summary card testid for 'Licitações do Mês' is `card-mes` (NOT card-licitacoes-mes). The Adjudicado status option appears in a Radix DropdownMenu portal; locator works fine with data-testid `status-option-{bidId}-Adjudicado`. After PATCH /api/bids/{id}/status to Adjudicado, an execution record is auto-created and budget summary fields propagate financially.",
+  "rca_of_the_issue": "ERP mutual-exclusion bug RCA: In Budget.jsx, typing into VALOR VENDA calls onVenda which sets row.mode='venda' and clears row.margem; the MARGEM input then renders with readOnly={r.mode==='venda'}. However, clearing the VALOR VENDA field does NOT reset r.mode back to null/auto, so MARGEM stays readonly indefinitely. Fix: in onVenda, when value becomes empty/0, reset r.mode (e.g., r.mode=null); similarly in onMargem when margem is cleared, reset r.mode='venda'-equivalent or null so the inputs can swap modes. Reproduction: ERP → type venda=1500 (margem auto-calcs, readonly) → clear venda field → try to type margem → element not editable."
+}

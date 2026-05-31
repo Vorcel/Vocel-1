@@ -1,0 +1,179 @@
+import { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { SelectWithAdd } from "@/components/bids/SelectWithAdd";
+import { FileUpload } from "@/components/FileUpload";
+import { useData } from "@/context/DataContext";
+import { toast } from "sonner";
+import { formatApiError } from "@/lib/api";
+
+const ITENS_REGEX = /^\d+(,\s*\d+)*$/;
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const empty = {
+  objeto: "", modalidade: "", itens: "", portal: "",
+  data_disputa: "", hora: "", pregao: "", uasg: "",
+  observacao: "", termo_referencia: null, status: "Disputar", favorito: false,
+};
+
+export const BidFormModal = ({ open, onOpenChange, editing }) => {
+  const { createBid, updateBid } = useData();
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState({});
+
+  useEffect(() => {
+    if (open) {
+      setForm(editing ? { ...empty, ...editing } : empty);
+      setTouched({});
+    }
+  }, [open, editing]);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const errors = useMemo(() => {
+    const e = {};
+    if (!form.objeto.trim()) e.objeto = "Obrigatório";
+    if (!form.modalidade) e.modalidade = "Obrigatório";
+    if (!form.itens.trim()) e.itens = "Obrigatório";
+    else if (!ITENS_REGEX.test(form.itens.trim())) e.itens = "Use números separados por vírgula. Ex: 1, 2, 3";
+    if (!form.portal) e.portal = "Obrigatório";
+    if (!form.data_disputa) e.data_disputa = "Obrigatório";
+    else if (!editing && form.data_disputa < todayStr()) e.data_disputa = "Não é permitida data retroativa";
+    if (!form.hora) e.hora = "Obrigatório";
+    return e;
+  }, [form, editing]);
+
+  const valid = Object.keys(errors).length === 0;
+
+  const submit = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      const payload = { ...form, status: editing ? form.status : "Disputar" };
+      if (editing) await updateBid(editing.id, payload);
+      else await createBid(payload);
+      toast.success(editing ? "Licitação atualizada" : "Licitação cadastrada");
+      onOpenChange(false);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const err = (k) => touched[k] && errors[k];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" data-testid="bid-modal">
+        <DialogHeader>
+          <DialogTitle className="font-heading">{editing ? "Editar Licitação" : "Nova Licitação"}</DialogTitle>
+          <DialogDescription>Preencha os campos obrigatórios (*) para cadastrar a disputa.</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 py-2">
+          <div className="space-y-1.5">
+            <Label>Nome do Objeto *</Label>
+            <Input
+              data-testid="bid-objeto"
+              value={form.objeto}
+              onChange={(e) => set("objeto", e.target.value)}
+              onBlur={() => setTouched((t) => ({ ...t, objeto: true }))}
+              placeholder="Ex: Aquisição de equipamentos de informática"
+            />
+            {err("objeto") && <p className="text-xs text-alert">{errors.objeto}</p>}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Modalidade *</Label>
+              <SelectWithAdd listType="modalidades" value={form.modalidade} onChange={(v) => set("modalidade", v)} placeholder="Selecione" testid="bid-modalidade" />
+              {err("modalidade") && <p className="text-xs text-alert">{errors.modalidade}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Portal *</Label>
+              <SelectWithAdd listType="portais" value={form.portal} onChange={(v) => set("portal", v)} placeholder="Selecione" testid="bid-portal" />
+              {err("portal") && <p className="text-xs text-alert">{errors.portal}</p>}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Números dos Itens *</Label>
+            <Input
+              data-testid="bid-itens"
+              value={form.itens}
+              onChange={(e) => set("itens", e.target.value)}
+              onBlur={() => setTouched((t) => ({ ...t, itens: true }))}
+              placeholder="Ex: 1, 2, 5, 8"
+            />
+            {err("itens") && <p className="text-xs text-alert">{errors.itens}</p>}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Data da Disputa *</Label>
+              <Input
+                type="date"
+                data-testid="bid-data"
+                min={editing ? undefined : todayStr()}
+                value={form.data_disputa}
+                onChange={(e) => set("data_disputa", e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, data_disputa: true }))}
+              />
+              {err("data_disputa") && <p className="text-xs text-alert">{errors.data_disputa}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Hora *</Label>
+              <Input
+                type="time"
+                data-testid="bid-hora"
+                value={form.hora}
+                onChange={(e) => set("hora", e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, hora: true }))}
+              />
+              {err("hora") && <p className="text-xs text-alert">{errors.hora}</p>}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Pregão</Label>
+              <Input data-testid="bid-pregao" value={form.pregao} onChange={(e) => set("pregao", e.target.value)} placeholder="Ex: 90012/2026" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>UASG</Label>
+              <Input data-testid="bid-uasg" value={form.uasg} onChange={(e) => set("uasg", e.target.value)} placeholder="Ex: 160088" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Observação</Label>
+            <Textarea data-testid="bid-obs" value={form.observacao} onChange={(e) => set("observacao", e.target.value)} placeholder="Notas internas sobre a licitação" rows={2} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Termo de Referência (PDF)</Label>
+            <FileUpload
+              testid="bid-termo"
+              accept=".pdf"
+              value={form.termo_referencia}
+              onUploaded={(f) => set("termo_referencia", f)}
+              onRemove={() => set("termo_referencia", null)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="bid-cancel">Cancelar</Button>
+          <Button onClick={submit} disabled={!valid || saving} data-testid="bid-save" className="bg-brand hover:bg-brand-hover">
+            {saving ? "Salvando..." : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
