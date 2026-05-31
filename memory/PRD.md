@@ -36,6 +36,11 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - ErrorBoundary adicionado em volta do Outlet (uma falha de tela não derruba o app inteiro).
 - Verificado: 100% frontend (iteration_4), round-trip bid→Adjudicado→Execução→ERP OK. Nota não-bloqueante: warning cosmético do Recharts no mount da Execução.
 
+## Updates (Iteration 4 — Linha do tempo horizontal na Execução)
+- "Gestão Detalhada" (Tela 4): linha do tempo agora HORIZONTAL com ícone por etapa (FileText, ClipboardCheck, ShoppingCart, Package, PackageCheck, Receipt, PackageOpen, Truck, CheckCircle2, Banknote). Estados: concluído = círculo charcoal preenchido (ícone branco), atual = círculo branco com anel charcoal, futuro = cinza muted; conectores charcoal/cinza.
+- Nome do OBJETO em destaque (h2 grande) no topo do painel + subtítulo (modalidade • portal • Empenho) e badges de status + "Pagamento Pendente".
+- Cada etapa mostra badge (Concluído/Em Andamento/Pendente) + chips de arquivo + uploader; donut e Resumo movidos para grade abaixo. Clique na etapa sincroniza status/donut. Verificado 100% (iteration_6).
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
