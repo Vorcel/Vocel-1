@@ -32,6 +32,11 @@ const SummaryCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
 export default function Dashboard() {
   const { summary, bids, lists } = useData();
 
+  const now = new Date();
+  const DAY_COLORS = ["#18181B", "#1E293B", "#2D283E", "#334155", "#1F2937", "#475569", "#121417"];
+  const dayColor = DAY_COLORS[now.getDay()];
+  const longDate = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayBids = useMemo(
     () => bids.filter((b) => b.data_disputa === todayStr).sort((a, b) => (a.hora || "").localeCompare(b.hora || "")),
@@ -49,41 +54,48 @@ export default function Dashboard() {
           <SummaryCard testid="card-acompanhando" icon={Star} label="Em Acompanhamento" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
         </section>
 
-        {/* Seção 2 — Alertas de Hoje */}
+        {/* Seção 2 — Licitações do Dia (Hero Banner dinâmico) */}
         <section>
-          <div className="mb-4 flex items-center gap-2">
-            <span className="flex h-2.5 w-2.5 animate-pulse-clock rounded-full bg-alert" />
-            <h2 className="font-heading text-lg font-semibold text-foreground">Alertas de Hoje</h2>
-            <span className="rounded-full bg-alert/10 px-2 py-0.5 text-xs font-semibold text-alert">{todayBids.length}</span>
+          <div
+            data-testid="hero-banner"
+            style={{ height: 280, maxWidth: 1148, width: "100%", backgroundColor: dayColor, transition: "background-color 0.5s ease" }}
+            className="flex flex-col overflow-hidden rounded-2xl p-6"
+          >
+            <div className="mb-4 flex shrink-0 items-center gap-2">
+              <span className="flex h-2.5 w-2.5 animate-pulse-clock rounded-full bg-white/70" />
+              <h2 className="font-heading text-lg font-semibold text-white">Licitações do Dia</h2>
+              <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold text-white">{todayBids.length}</span>
+              <span className="ml-auto text-sm capitalize text-white/60">{longDate}</span>
+            </div>
+
+            {todayBids.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center text-white/60">
+                Nenhuma sessão de disputa agendada para hoje.
+              </div>
+            ) : (
+              <div className="scrollbar-hide flex flex-1 items-center overflow-x-auto" style={{ gap: 16 }}>
+                {todayBids.map((b) => {
+                  const portalStyle = colorStyles(findColor(lists.portais, b.portal)).badge;
+                  return (
+                    <div key={b.id} data-testid={`today-alert-${b.id}`} className="hero-bid-card flex shrink-0 flex-col justify-between p-5">
+                      <div className="flex items-center gap-2">
+                        <Clock size={22} className="text-brand" />
+                        <span className="font-mono-num text-4xl font-extrabold tracking-tighter text-[#121417]">{b.hora || "--:--"}</span>
+                        {b.uasg && <span className="font-mono-num ml-auto text-[11px] text-[#76777b]">UASG {b.uasg}</span>}
+                      </div>
+                      <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-[#141d23]">{b.objeto}</h3>
+                      <div className="flex items-center gap-2">
+                        <span style={portalStyle} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold">
+                          <MapPin size={11} /> {b.portal}
+                        </span>
+                        {b.pregao && <span className="font-mono-num text-[11px] text-[#76777b]">{b.pregao}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          {todayBids.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground">
-              Nenhuma sessão de disputa agendada para hoje.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {todayBids.map((b, idx) => (
-                <div
-                  key={b.id}
-                  data-testid={`today-alert-${b.id}`}
-                  className="animate-fade-up rounded-xl border border-border border-l-4 border-l-alert bg-card p-5 shadow-sm"
-                  style={{ animationDelay: `${idx * 80}ms` }}
-                >
-                  <div className="flex items-center gap-2 text-alert">
-                    <Clock size={28} className="animate-pulse-clock" />
-                    <span className="font-mono-num text-5xl font-black tracking-tighter">{b.hora || "--:--"}</span>
-                  </div>
-                  <h3 className="mt-3 line-clamp-2 font-heading text-base font-semibold text-foreground">{b.objeto}</h3>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                    {b.pregao && <span className="font-mono-num rounded-md bg-secondary px-2 py-1 font-medium">{b.pregao}</span>}
-                    <span style={colorStyles(findColor(lists.portais, b.portal)).badge} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-semibold">
-                      <MapPin size={12} /> {b.portal}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
 
         {/* Seção 3 + 4 — Filtros & Tabela */}
