@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,54 +6,60 @@
 
 body {
     margin: 0;
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
 @layer base {
     :root {
-        --background: 210 40% 98%;
-        --foreground: 222 47% 11%;
+        --background: 213 100% 98%;
+        --foreground: 204 27% 11%;
         --card: 0 0% 100%;
-        --card-foreground: 222 47% 11%;
+        --card-foreground: 204 27% 11%;
         --popover: 0 0% 100%;
-        --popover-foreground: 222 47% 11%;
-        --primary: 190 85% 31%;
+        --popover-foreground: 204 27% 11%;
+        --primary: 216 13% 9%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 210 40% 96%;
-        --secondary-foreground: 222 47% 11%;
-        --muted: 210 40% 96%;
-        --muted-foreground: 215 16% 47%;
-        --accent: 190 60% 94%;
-        --accent-foreground: 190 85% 25%;
-        --destructive: 0 84% 60%;
+        --secondary: 210 17% 95%;
+        --secondary-foreground: 204 27% 11%;
+        --muted: 210 17% 95%;
+        --muted-foreground: 216 5% 47%;
+        --accent: 210 16% 93%;
+        --accent-foreground: 204 27% 11%;
+        --destructive: 0 75% 42%;
         --destructive-foreground: 0 0% 100%;
-        --border: 214 32% 91%;
-        --input: 214 32% 91%;
-        --ring: 190 85% 31%;
-        --radius: 0.5rem;
+        --border: 210 16% 93%;
+        --input: 210 16% 93%;
+        --ring: 216 13% 9%;
+        --brand: 216 13% 9%;
+        --brand-hover: 0 0% 0%;
+        --brand-light: 210 16% 93%;
+        --radius: 0.6rem;
     }
     .dark {
-        --background: 222 47% 11%;
-        --foreground: 210 40% 98%;
-        --card: 217 33% 17%;
-        --card-foreground: 210 40% 98%;
-        --popover: 217 33% 17%;
-        --popover-foreground: 210 40% 98%;
-        --primary: 190 75% 40%;
-        --primary-foreground: 0 0% 100%;
-        --secondary: 217 33% 22%;
-        --secondary-foreground: 210 40% 98%;
-        --muted: 217 33% 22%;
-        --muted-foreground: 215 20% 65%;
-        --accent: 217 33% 25%;
-        --accent-foreground: 210 40% 98%;
-        --destructive: 0 72% 51%;
+        --background: 216 28% 9%;
+        --foreground: 210 20% 96%;
+        --card: 216 22% 13%;
+        --card-foreground: 210 20% 96%;
+        --popover: 216 22% 13%;
+        --popover-foreground: 210 20% 96%;
+        --primary: 210 20% 96%;
+        --primary-foreground: 216 28% 9%;
+        --secondary: 216 16% 20%;
+        --secondary-foreground: 210 20% 96%;
+        --muted: 216 16% 20%;
+        --muted-foreground: 215 15% 65%;
+        --accent: 216 16% 22%;
+        --accent-foreground: 210 20% 96%;
+        --destructive: 0 70% 45%;
         --destructive-foreground: 0 0% 100%;
-        --border: 217 33% 27%;
-        --input: 217 33% 27%;
-        --ring: 190 75% 45%;
+        --border: 216 16% 22%;
+        --input: 216 16% 22%;
+        --ring: 210 20% 70%;
+        --brand: 190 80% 38%;
+        --brand-hover: 190 75% 45%;
+        --brand-light: 216 16% 22%;
     }
 }
 
@@ -65,7 +71,8 @@ body {
         @apply bg-background text-foreground;
     }
     h1, h2, h3, h4, h5 {
-        font-family: 'Work Sans', sans-serif;
+        font-family: 'Hanken Grotesk', sans-serif;
+        letter-spacing: -0.01em;
     }
 }
 

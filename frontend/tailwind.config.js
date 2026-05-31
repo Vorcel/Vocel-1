@@ -8,8 +8,8 @@ module.exports = {
   theme: {
         extend: {
                 fontFamily: {
-                        sans: ['IBM Plex Sans', 'sans-serif'],
-                        heading: ['Work Sans', 'sans-serif'],
+                        sans: ['Hanken Grotesk', 'sans-serif'],
+                        heading: ['Hanken Grotesk', 'sans-serif'],
                         mono: ['JetBrains Mono', 'monospace']
                 },
                 borderRadius: {
@@ -19,9 +19,9 @@ module.exports = {
                 },
                 colors: {
                         brand: {
-                                DEFAULT: '#0C7B93',
-                                hover: '#095F73',
-                                light: '#E0F2F6'
+                                DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
+                                hover: 'hsl(var(--brand-hover) / <alpha-value>)',
+                                light: 'hsl(var(--brand-light) / <alpha-value>)'
                         },
                         positive: '#10B981',
                         warning: '#F59E0B',

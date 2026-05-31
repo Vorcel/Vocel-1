@@ -5,6 +5,7 @@ import { StatusDropdown } from "@/components/bids/StatusDropdown";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import { useData } from "@/context/DataContext";
 import { fileUrl } from "@/lib/api";
+import { colorStyles, findColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const fmtDate = (d) => {
@@ -19,7 +20,7 @@ const COLS = [
 ];
 
 export const BidsTable = ({ bids, onEdit, onDelete }) => {
-  const { toggleFavorite } = useData();
+  const { toggleFavorite, lists } = useData();
   const navigate = useNavigate();
   const { widths, startResize, total } = useColumnResize("bidstable_widths", [110, 52, 150, 150, 280, 150, 140, 160, 72, 96, 96]);
 
@@ -50,7 +51,7 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
               </tr>
             )}
             {bids.map((b) => (
-              <tr key={b.id} data-testid={`bid-row-${b.id}`} className="border-b border-border transition-colors last:border-0 hover:bg-accent/40">
+              <tr key={b.id} data-testid={`bid-row-${b.id}`} className="group border-b border-border transition-colors last:border-0 hover:bg-[#F8F9FA] dark:hover:bg-accent/40">
                 {/* 1. Data / Hora */}
                 <td className="whitespace-nowrap px-3 py-3">
                   <div className="font-medium text-foreground">{fmtDate(b.data_disputa)}</div>
@@ -94,7 +95,7 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
                 </td>
                 {/* 6. Portal */}
                 <td className="whitespace-nowrap px-3 py-3">
-                  <span className="rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground">{b.portal}</span>
+                  <span style={colorStyles(findColor(lists.portais, b.portal)).badge} className="rounded-full border px-2.5 py-1 text-xs font-semibold">{b.portal}</span>
                 </td>
                 {/* 7. Pregão / UASG */}
                 <td className="whitespace-nowrap px-3 py-3">
@@ -126,7 +127,7 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
                 </td>
                 {/* 11. Ações */}
                 <td className="px-3 py-3">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                     <button data-testid={`bid-edit-${b.id}`} onClick={() => onEdit(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar">
                       <Pencil size={16} />
                     </button>

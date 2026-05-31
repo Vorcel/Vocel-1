@@ -3,6 +3,7 @@ import { CalendarDays, Award, Star, Clock, MapPin } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { BidsSection } from "@/components/bids/BidsSection";
 import { useData } from "@/context/DataContext";
+import { colorStyles, findColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const SummaryCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
@@ -75,7 +76,7 @@ export default function Dashboard() {
                   <h3 className="mt-3 line-clamp-2 font-heading text-base font-semibold text-foreground">{b.objeto}</h3>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     {b.pregao && <span className="font-mono-num rounded-md bg-secondary px-2 py-1 font-medium">{b.pregao}</span>}
-                    <span className="inline-flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 font-medium text-brand">
+                    <span style={colorStyles(findColor(lists.portais, b.portal)).badge} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-semibold">
                       <MapPin size={12} /> {b.portal}
                     </span>
                   </div>

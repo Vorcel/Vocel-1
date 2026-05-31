@@ -28,7 +28,7 @@ export const Sidebar = () => {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-card transition-all duration-300 ease-in-out",
+        "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-[#E9ECEF] transition-all duration-300 ease-in-out dark:bg-card",
         expanded ? "w-64" : "w-16"
       )}
     >
@@ -83,7 +83,7 @@ export const Sidebar = () => {
         <button
           data-testid="sidebar-pin"
           onClick={togglePin}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-accent"
         >
           {pinned ? <PinOff size={20} className="shrink-0" /> : <Pin size={20} className="shrink-0" />}
           <span
