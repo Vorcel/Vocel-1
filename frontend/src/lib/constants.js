@@ -1,17 +1,31 @@
 // Shared constants & helpers for status colors and timeline.
 
-export const STATUS_STYLES = {
-  Disputar: { bg: "bg-brand/10", text: "text-brand", dot: "bg-brand", ring: "ring-brand/30" },
-  Ganho: { bg: "bg-emerald-100", text: "text-emerald-700", dot: "bg-emerald-500", ring: "ring-emerald-300" },
-  "Analisando proposta": { bg: "bg-amber-100", text: "text-amber-700", dot: "bg-amber-500", ring: "ring-amber-300" },
-  Adjudicado: { bg: "bg-violet-100", text: "text-violet-700", dot: "bg-violet-500", ring: "ring-violet-300" },
-  Desclassificado: { bg: "bg-red-100", text: "text-red-700", dot: "bg-red-500", ring: "ring-red-300" },
-  Perdido: { bg: "bg-slate-200", text: "text-slate-600", dot: "bg-slate-400", ring: "ring-slate-300" },
-  Adiado: { bg: "bg-orange-100", text: "text-orange-700", dot: "bg-orange-500", ring: "ring-orange-300" },
-};
+// Convert a hex color to an rgba string with given alpha.
+export function hexToRgba(hex, alpha = 1) {
+  if (!hex) return `rgba(100,116,139,${alpha})`;
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
-export function statusStyle(status) {
-  return STATUS_STYLES[status] || { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400", ring: "ring-slate-300" };
+// Inline styles for badges/dots derived from an arbitrary hex color.
+export function colorStyles(hex) {
+  const c = hex || "#64748B";
+  return {
+    badge: { backgroundColor: hexToRgba(c, 0.14), color: c, borderColor: hexToRgba(c, 0.4) },
+    solid: { backgroundColor: c, color: "#ffffff" },
+    dot: { backgroundColor: c },
+    text: { color: c },
+  };
+}
+
+// Find color for an item name within a list of {nome, cor}.
+export function findColor(list, nome, fallback = "#64748B") {
+  const item = (list || []).find((i) => i.nome === nome);
+  return item?.cor || fallback;
 }
 
 export const TIMELINE_STEPS = [

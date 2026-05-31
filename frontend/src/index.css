@@ -88,3 +88,13 @@ body {
     50% { opacity: 0.55; }
 }
 .animate-pulse-clock { animation: pulse-clock 2s ease-in-out infinite; }
+
+/* Excel-style resizable tables: fixed layout + clipped cells */
+.rt-fixed { table-layout: fixed; }
+.rt-fixed > thead > tr > th,
+.rt-fixed > tbody > tr > td {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.rt-fixed th { position: relative; }

@@ -74,28 +74,85 @@ class TestAuth:
         assert r2.status_code == 400
 
 
-# -------------------- LISTS --------------------
+# -------------------- LISTS (new {nome, cor} contract) --------------------
+def _names(items):
+    return [i["nome"] for i in items]
+
+
 class TestLists:
-    def test_get_lists_defaults(self, session):
+    def test_get_lists_defaults_are_objects(self, session):
         r = session.get(f"{API}/lists", timeout=30)
         assert r.status_code == 200
         d = r.json()
-        assert "Pregão Eletrônico" in d["modalidades"]
-        assert "Comprasnet" in d["portais"]
-        assert "Adjudicado" in d["statuses"]
+        # Items must be dicts with nome+cor
+        for key in ("modalidades", "portais", "statuses"):
+            assert isinstance(d[key], list) and len(d[key]) > 0
+            for it in d[key]:
+                assert isinstance(it, dict)
+                assert "nome" in it and "cor" in it
+                assert it["cor"].startswith("#")
+        assert "Pregão Eletrônico" in _names(d["modalidades"])
+        assert "Comprasnet" in _names(d["portais"])
+        adj = next((s for s in d["statuses"] if s["nome"] == "Adjudicado"), None)
+        assert adj is not None
+        # Default color for Adjudicado per spec
+        assert adj["cor"].upper() == "#8B5CF6"
 
-    def test_add_and_remove_list_item(self, session):
+    def test_add_list_item_with_color(self, session):
         marker = f"TEST_MOD_{uuid.uuid4().hex[:6]}"
-        r = session.post(f"{API}/lists/modalidades", json={"value": marker}, timeout=30)
+        r = session.post(f"{API}/lists/modalidades", json={"nome": marker, "cor": "#123456"}, timeout=30)
         assert r.status_code == 200
-        assert marker in r.json()["modalidades"]
+        item = next((i for i in r.json()["modalidades"] if i["nome"] == marker), None)
+        assert item is not None
+        assert item["cor"].lower() == "#123456"
+        # cleanup
         r2 = session.delete(f"{API}/lists/modalidades/{marker}", timeout=30)
         assert r2.status_code == 200
-        assert marker not in r2.json()["modalidades"]
+        assert marker not in _names(r2.json()["modalidades"])
+
+    def test_update_list_item_propagates_to_bids(self, session, created_bid_ids):
+        # Create a bid using a fresh portal we will rename
+        old_portal = f"TEST_PORTAL_{uuid.uuid4().hex[:6]}"
+        new_portal = f"TEST_PORTAL_R_{uuid.uuid4().hex[:6]}"
+        # add portal
+        r = session.post(f"{API}/lists/portais", json={"nome": old_portal, "cor": "#FF0000"}, timeout=30)
+        assert r.status_code == 200
+        # create a bid using that portal
+        payload = _bid_payload(objeto=f"TEST_RENAME_{uuid.uuid4().hex[:6]}")
+        payload["portal"] = old_portal
+        cr = session.post(f"{API}/bids", json=payload, timeout=30)
+        assert cr.status_code == 200
+        new_bid_id = cr.json()["id"]
+        created_bid_ids.append(new_bid_id)
+        # rename
+        up = session.put(f"{API}/lists/portais",
+                         json={"old_nome": old_portal, "nome": new_portal, "cor": "#00FF00"},
+                         timeout=30)
+        assert up.status_code == 200
+        renamed = next((i for i in up.json()["portais"] if i["nome"] == new_portal), None)
+        assert renamed is not None and renamed["cor"].lower() == "#00ff00"
+        # bid portal must have been retroactively renamed
+        g = session.get(f"{API}/bids/{new_bid_id}", timeout=30)
+        assert g.status_code == 200
+        assert g.json()["portal"] == new_portal
+        # cleanup the list item
+        session.delete(f"{API}/lists/portais/{new_portal}", timeout=30)
 
     def test_invalid_list_type(self, session):
-        r = session.post(f"{API}/lists/badtype", json={"value": "x"}, timeout=30)
+        r = session.post(f"{API}/lists/badtype", json={"nome": "x", "cor": "#000000"}, timeout=30)
         assert r.status_code == 400
+        r2 = session.put(f"{API}/lists/badtype", json={"old_nome": "a", "nome": "b", "cor": "#000000"}, timeout=30)
+        assert r2.status_code == 400
+        r3 = session.delete(f"{API}/lists/badtype/x", timeout=30)
+        assert r3.status_code == 400
+
+    def test_add_default_color_when_missing(self, session):
+        marker = f"TEST_STA_{uuid.uuid4().hex[:6]}"
+        r = session.post(f"{API}/lists/statuses", json={"nome": marker}, timeout=30)
+        assert r.status_code == 200
+        item = next((i for i in r.json()["statuses"] if i["nome"] == marker), None)
+        assert item is not None and item["cor"].startswith("#")
+        session.delete(f"{API}/lists/statuses/{marker}", timeout=30)
 
 
 # -------------------- BIDS CRUD --------------------

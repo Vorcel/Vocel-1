@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Star, FileText, Calculator, Pencil, Trash2, MessageSquare, FileX } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
+import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import { useData } from "@/context/DataContext";
 import { fileUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -20,16 +21,21 @@ const COLS = [
 export const BidsTable = ({ bids, onEdit, onDelete }) => {
   const { toggleFavorite } = useData();
   const navigate = useNavigate();
+  const { widths, startResize, total } = useColumnResize("bidstable_widths", [110, 52, 150, 150, 280, 150, 140, 160, 72, 96, 96]);
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full min-w-[1100px] border-collapse text-sm">
+        <table className="rt-fixed border-collapse text-sm" style={{ width: total }}>
+          <colgroup>
+            {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
+          </colgroup>
           <thead>
             <tr className="border-b border-border bg-muted/50">
-              {COLS.map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {COLS.map((c, i) => (
+                <th key={c} className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {c}
+                  {i < COLS.length - 1 && <ColResizer onMouseDown={startResize(i)} />}
                 </th>
               ))}
             </tr>

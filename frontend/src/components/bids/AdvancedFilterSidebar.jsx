@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import { useData } from "@/context/DataContext";
 
 const ALL = "__all__";
@@ -37,8 +38,8 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Data</Label>
-              <Input type="date" data-testid="adv-data" value={filters.data} onChange={(e) => setFilter("data", e.target.value)} />
+              <Label>Período (Data)</Label>
+              <DateRangePicker value={filters.data} onChange={(r) => setFilter("data", r)} testid="adv-data" className="w-full" />
             </div>
             <div className="space-y-1.5">
               <Label>Nº dos Itens</Label>
@@ -52,7 +53,7 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
               <SelectTrigger data-testid="adv-portal"><SelectValue placeholder="Todos" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>Todos</SelectItem>
-                {(lists.portais || []).map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                {(lists.portais || []).map((p) => <SelectItem key={p.nome} value={p.nome}>{p.nome}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -74,7 +75,7 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
               <SelectTrigger data-testid="adv-status"><SelectValue placeholder="Todos" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>Todos</SelectItem>
-                {(lists.statuses || []).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {(lists.statuses || []).map((s) => <SelectItem key={s.nome} value={s.nome}>{s.nome}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

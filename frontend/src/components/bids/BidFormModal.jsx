@@ -13,6 +13,8 @@ import { formatApiError } from "@/lib/api";
 const ITENS_REGEX = /^\d+(,\s*\d+)*$/;
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+const Req = () => <span className="text-alert"> *</span>;
+
 const empty = {
   objeto: "", modalidade: "", itens: "", portal: "",
   data_disputa: "", hora: "", pregao: "", uasg: "",
@@ -24,11 +26,13 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(editing ? { ...empty, ...editing } : empty);
       setTouched({});
+      setSubmitAttempted(false);
     }
   }, [open, editing]);
 
@@ -44,13 +48,16 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
     if (!form.data_disputa) e.data_disputa = "Obrigatório";
     else if (!editing && form.data_disputa < todayStr()) e.data_disputa = "Não é permitida data retroativa";
     if (!form.hora) e.hora = "Obrigatório";
+    if (!form.pregao.trim()) e.pregao = "Obrigatório";
+    if (!form.uasg.trim()) e.uasg = "Obrigatório";
+    if (!form.termo_referencia) e.termo = "Anexe o Termo de Referência (PDF)";
     return e;
   }, [form, editing]);
 
   const valid = Object.keys(errors).length === 0;
 
   const submit = async () => {
-    if (!valid) return;
+    if (!valid) { setSubmitAttempted(true); return; }
     setSaving(true);
     try {
       const payload = { ...form, status: editing ? form.status : "Disputar" };
@@ -65,7 +72,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
     }
   };
 
-  const err = (k) => touched[k] && errors[k];
+  const err = (k) => (touched[k] || submitAttempted) && errors[k];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -77,7 +84,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
 
         <div className="grid gap-4 py-2">
           <div className="space-y-1.5">
-            <Label>Nome do Objeto *</Label>
+            <Label>Nome do Objeto<Req /></Label>
             <Input
               data-testid="bid-objeto"
               value={form.objeto}
@@ -90,7 +97,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Modalidade *</Label>
+              <Label>Modalidade<Req /></Label>
               <SelectWithAdd listType="modalidades" value={form.modalidade} onChange={(v) => set("modalidade", v)} placeholder="Selecione" testid="bid-modalidade" />
               {err("modalidade") && <p className="text-xs text-alert">{errors.modalidade}</p>}
             </div>
@@ -102,7 +109,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Números dos Itens *</Label>
+            <Label>Números dos Itens<Req /></Label>
             <Input
               data-testid="bid-itens"
               value={form.itens}
@@ -115,7 +122,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Data da Disputa *</Label>
+              <Label>Data da Disputa<Req /></Label>
               <Input
                 type="date"
                 data-testid="bid-data"
@@ -127,7 +134,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
               {err("data_disputa") && <p className="text-xs text-alert">{errors.data_disputa}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Hora *</Label>
+              <Label>Hora<Req /></Label>
               <Input
                 type="time"
                 data-testid="bid-hora"
@@ -141,12 +148,14 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Pregão</Label>
-              <Input data-testid="bid-pregao" value={form.pregao} onChange={(e) => set("pregao", e.target.value)} placeholder="Ex: 90012/2026" />
+              <Label>Pregão<Req /></Label>
+              <Input data-testid="bid-pregao" value={form.pregao} onChange={(e) => set("pregao", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, pregao: true }))} placeholder="Ex: 90012/2026" />
+              {err("pregao") && <p className="text-xs text-alert">{errors.pregao}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>UASG</Label>
-              <Input data-testid="bid-uasg" value={form.uasg} onChange={(e) => set("uasg", e.target.value)} placeholder="Ex: 160088" />
+              <Label>UASG<Req /></Label>
+              <Input data-testid="bid-uasg" value={form.uasg} onChange={(e) => set("uasg", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, uasg: true }))} placeholder="Ex: 160088" />
+              {err("uasg") && <p className="text-xs text-alert">{errors.uasg}</p>}
             </div>
           </div>
 
@@ -156,7 +165,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Termo de Referência (PDF)</Label>
+            <Label>Termo de Referência (PDF)<Req /></Label>
             <FileUpload
               testid="bid-termo"
               accept=".pdf"
@@ -164,6 +173,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
               onUploaded={(f) => set("termo_referencia", f)}
               onRemove={() => set("termo_referencia", null)}
             />
+            {err("termo") && <p className="text-xs text-alert">{errors.termo}</p>}
           </div>
         </div>
 

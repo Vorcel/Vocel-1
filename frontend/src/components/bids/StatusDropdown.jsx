@@ -3,43 +3,37 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useData } from "@/context/DataContext";
-import { statusStyle } from "@/lib/constants";
-import { cn } from "@/lib/utils";
+import { colorStyles, findColor } from "@/lib/constants";
 
 export const StatusDropdown = ({ bid }) => {
   const { lists, changeStatus } = useData();
-  const s = statusStyle(bid.status);
+  const s = colorStyles(findColor(lists.statuses, bid.status));
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           data-testid={`status-trigger-${bid.id}`}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-transform hover:scale-105",
-            s.bg, s.text, s.ring
-          )}
+          style={s.badge}
+          className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-transform hover:scale-105"
         >
-          <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+          <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />
           {bid.status}
           <ChevronDown size={12} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
-        {(lists.statuses || []).map((st) => {
-          const ss = statusStyle(st);
-          return (
-            <DropdownMenuItem
-              key={st}
-              data-testid={`status-option-${bid.id}-${st}`}
-              onClick={() => st !== bid.status && changeStatus(bid.id, st)}
-              className="gap-2"
-            >
-              <span className={cn("h-2 w-2 rounded-full", ss.dot)} />
-              {st}
-            </DropdownMenuItem>
-          );
-        })}
+        {(lists.statuses || []).map((st) => (
+          <DropdownMenuItem
+            key={st.nome}
+            data-testid={`status-option-${bid.id}-${st.nome}`}
+            onClick={() => st.nome !== bid.status && changeStatus(bid.id, st.nome)}
+            className="gap-2"
+          >
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: st.cor }} />
+            {st.nome}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

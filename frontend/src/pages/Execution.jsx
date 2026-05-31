@@ -16,10 +16,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileUpload } from "@/components/FileUpload";
+import { DateRangePicker } from "@/components/DateRangePicker";
+import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
-import { TIMELINE_STEPS, statusStyle } from "@/lib/constants";
+import { TIMELINE_STEPS, colorStyles } from "@/lib/constants";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +33,9 @@ const addDays = (dateStr, days) => {
   base.setDate(base.getDate() + Number(days || 0));
   return base.toISOString().slice(0, 10);
 };
+
+const execColor = (status) => (status === "Concluído" ? "#10B981" : status === "Aguardando Empenho" ? "#F59E0B" : "#0C7B93");
+const MASTER_COLS = ["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Ações"];
 
 function KpiCard({ icon: Icon, label, value, accent, testid }) {
   return (
@@ -54,6 +59,7 @@ export default function Execution() {
   const [editModal, setEditModal] = useState(null);
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
+  const { widths: mw, startResize: mResize, total: mTotal } = useColumnResize("exec_master_widths", [100, 140, 130, 220, 92, 120, 120, 120, 150, 150, 150]);
 
   const filtered = useMemo(() => {
     return executions.filter((e) => {
@@ -129,11 +135,14 @@ export default function Execution() {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="rt-fixed text-sm" style={{ width: mTotal }}>
+              <colgroup>{mw.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  {["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Ações"].map((h) => (
-                    <th key={h} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                  {MASTER_COLS.map((h, i) => (
+                    <th key={h} className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {h}{i < MASTER_COLS.length - 1 && <ColResizer onMouseDown={mResize(i)} />}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -145,7 +154,7 @@ export default function Execution() {
                   </td></tr>
                 )}
                 {filtered.map((e) => {
-                  const s = statusStyle(e.status_atual);
+                  const s = colorStyles(execColor(e.status_atual));
                   const emp = empenhoFile(e);
                   return (
                     <tr key={e.bid_id} data-testid={`exec-row-${e.bid_id}`} onClick={() => setSelectedId(e.bid_id)}
@@ -164,8 +173,8 @@ export default function Execution() {
                       <td className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(e.valor_compra)}</td>
                       <td className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600">{brl(e.lucro_previsto)}</td>
                       <td className="px-3 py-3">
-                        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1", s.bg, s.text, s.ring)}>
-                          <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />{e.status_atual}
+                        <span style={s.badge} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold">
+                          <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />{e.status_atual}
                         </span>
                       </td>
                       <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
@@ -306,9 +315,9 @@ export default function Execution() {
           <SheetHeader><SheetTitle className="font-heading">Filtros</SheetTitle></SheetHeader>
           <div className="mt-6 space-y-5">
             <div className="space-y-1.5"><Label>Buscar objeto</Label><Input data-testid="exec-f-q" value={filters.q} onChange={(e) => setFilter("q", e.target.value)} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><Label>De</Label><Input type="date" data-testid="exec-f-from" value={filters.from} onChange={(e) => setFilter("from", e.target.value)} /></div>
-              <div className="space-y-1.5"><Label>Até</Label><Input type="date" data-testid="exec-f-to" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} /></div>
+            <div className="space-y-1.5">
+              <Label>Período (Data de Cadastro)</Label>
+              <DateRangePicker value={{ from: filters.from, to: filters.to }} onChange={(r) => setFilters((f) => ({ ...f, from: r.from, to: r.to }))} testid="exec-f-date" className="w-full" />
             </div>
             <FilterSelect label="Modalidade" value={filters.modalidade} onChange={(v) => setFilter("modalidade", v)} options={lists.modalidades} testid="exec-f-mod" />
             <FilterSelect label="Portal" value={filters.portal} onChange={(v) => setFilter("portal", v)} options={lists.portais} testid="exec-f-portal" />
@@ -337,7 +346,10 @@ function FilterSelect({ label, value, onChange, options, testid }) {
         <SelectTrigger data-testid={testid}><SelectValue placeholder="Todos" /></SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>Todos</SelectItem>
-          {(options || []).map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          {(options || []).map((o) => {
+            const v = typeof o === "string" ? o : o.nome;
+            return <SelectItem key={v} value={v}>{v}</SelectItem>;
+          })}
         </SelectContent>
       </Select>
     </div>

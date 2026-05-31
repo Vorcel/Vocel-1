@@ -11,17 +11,45 @@ from auth import get_current_user
 
 api = APIRouter(prefix="/api", tags=["core"])
 
+DEFAULT_COLOR = "#64748B"
 DEFAULT_MODALIDADES = [
-    "Pregão Eletrônico", "Pregão Presencial", "Concorrência",
-    "Tomada de Preços", "Dispensa", "Inexigibilidade",
+    {"nome": "Pregão Eletrônico", "cor": "#0C7B93"},
+    {"nome": "Pregão Presencial", "cor": "#0EA5E9"},
+    {"nome": "Concorrência", "cor": "#8B5CF6"},
+    {"nome": "Tomada de Preços", "cor": "#F59E0B"},
+    {"nome": "Dispensa", "cor": "#10B981"},
+    {"nome": "Inexigibilidade", "cor": "#64748B"},
 ]
 DEFAULT_PORTAIS = [
-    "Comprasnet", "BLL Compras", "Licitações-e", "BNC", "Portal de Compras Públicas", "ComprasBR",
+    {"nome": "Comprasnet", "cor": "#0C7B93"},
+    {"nome": "BLL Compras", "cor": "#8B5CF6"},
+    {"nome": "Licitações-e", "cor": "#10B981"},
+    {"nome": "BNC", "cor": "#F59E0B"},
+    {"nome": "Portal de Compras Públicas", "cor": "#EF4444"},
+    {"nome": "ComprasBR", "cor": "#0EA5E9"},
 ]
 DEFAULT_STATUSES = [
-    "Disputar", "Ganho", "Analisando proposta", "Adjudicado",
-    "Desclassificado", "Perdido", "Adiado",
+    {"nome": "Disputar", "cor": "#0C7B93"},
+    {"nome": "Ganho", "cor": "#10B981"},
+    {"nome": "Analisando proposta", "cor": "#F59E0B"},
+    {"nome": "Adjudicado", "cor": "#8B5CF6"},
+    {"nome": "Desclassificado", "cor": "#EF4444"},
+    {"nome": "Perdido", "cor": "#94A3B8"},
+    {"nome": "Adiado", "cor": "#F97316"},
 ]
+_DEFAULT_STATUS_COLORS = {s["nome"]: s["cor"] for s in DEFAULT_STATUSES}
+
+
+def _normalize_list(items, kind=None):
+    """Migrate legacy string lists to [{nome, cor}] objects."""
+    out = []
+    for it in items or []:
+        if isinstance(it, str):
+            cor = _DEFAULT_STATUS_COLORS.get(it, DEFAULT_COLOR) if kind == "statuses" else DEFAULT_COLOR
+            out.append({"nome": it, "cor": cor})
+        elif isinstance(it, dict):
+            out.append({"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)})
+    return out
 TIMELINE_STEPS = [
     "Aguardando Empenho", "Empenho Recebido", "Pedido de Compra",
     "Aguardando Mercadoria", "Mercadoria Recebida", "Faturamento / NF",
@@ -40,7 +68,14 @@ def ser(doc: dict) -> dict:
 
 # =================== PARAMS / LISTS ===================
 class ListItemInput(BaseModel):
-    value: str
+    nome: str
+    cor: str = DEFAULT_COLOR
+
+
+class ListItemUpdate(BaseModel):
+    old_nome: str
+    nome: str
+    cor: str = DEFAULT_COLOR
 
 
 async def _get_params() -> dict:
@@ -60,21 +95,45 @@ async def _get_params() -> dict:
 async def get_lists(current=Depends(get_current_user)):
     p = await _get_params()
     return {
-        "modalidades": p.get("modalidades", DEFAULT_MODALIDADES),
-        "portais": p.get("portais", DEFAULT_PORTAIS),
-        "statuses": p.get("statuses", DEFAULT_STATUSES),
+        "modalidades": _normalize_list(p.get("modalidades", DEFAULT_MODALIDADES), "modalidades"),
+        "portais": _normalize_list(p.get("portais", DEFAULT_PORTAIS), "portais"),
+        "statuses": _normalize_list(p.get("statuses", DEFAULT_STATUSES), "statuses"),
     }
 
 
 _VALID_LISTS = {"modalidades", "portais", "statuses"}
+_BID_FIELD = {"modalidades": "modalidade", "portais": "portal", "statuses": "status"}
 
 
 @api.post("/lists/{list_type}")
 async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
         raise HTTPException(status_code=400, detail="Tipo de lista inválido")
-    await _get_params()
-    await db.params.update_one({"_key": "global"}, {"$addToSet": {list_type: body.value.strip()}})
+    p = await _get_params()
+    items = _normalize_list(p.get(list_type, []), list_type)
+    nome = body.nome.strip()
+    if nome and not any(i["nome"].lower() == nome.lower() for i in items):
+        items.append({"nome": nome, "cor": body.cor})
+    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
+    return await get_lists(current)
+
+
+@api.put("/lists/{list_type}")
+async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends(get_current_user)):
+    if list_type not in _VALID_LISTS:
+        raise HTTPException(status_code=400, detail="Tipo de lista inválido")
+    p = await _get_params()
+    items = _normalize_list(p.get(list_type, []), list_type)
+    new_nome = body.nome.strip()
+    for i in items:
+        if i["nome"] == body.old_nome:
+            i["nome"] = new_nome
+            i["cor"] = body.cor
+    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
+    # Retroactive rename propagation to bids
+    if new_nome and new_nome != body.old_nome:
+        field = _BID_FIELD[list_type]
+        await db.bids.update_many({field: body.old_nome}, {"$set": {field: new_nome}})
     return await get_lists(current)
 
 
@@ -82,7 +141,9 @@ async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get
 async def remove_list_item(list_type: str, value: str, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
         raise HTTPException(status_code=400, detail="Tipo de lista inválido")
-    await db.params.update_one({"_key": "global"}, {"$pull": {list_type: value}})
+    p = await _get_params()
+    items = [i for i in _normalize_list(p.get(list_type, []), list_type) if i["nome"] != value]
+    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
     return await get_lists(current)
 
 

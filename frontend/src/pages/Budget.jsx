@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Save, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeTotals, brl, pct, num } from "@/lib/calc";
 import { toast } from "sonner";
@@ -61,6 +62,10 @@ export default function Budget() {
   }, [bidId]);
 
   const totals = useMemo(() => computeTotals(rows), [rows]);
+  const { widths: ew, startResize: eResize, total: eTotal } = useColumnResize(
+    "erp_widths",
+    [70, 70, 180, 110, 130, 120, 110, 70, 110, 100, 80, 100, 110, 110, 110, 110, 120, 110, 110, 120, 120, 52]
+  );
 
   const updateRow = (id, patch) => setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
 
@@ -120,14 +125,15 @@ export default function Budget() {
 
         {/* Spreadsheet */}
         <div className="h-[calc(100%-7rem)] overflow-auto rounded-xl border border-border bg-card">
-          <table className="min-w-[2400px] border-collapse text-sm">
+          <table className="rt-fixed border-collapse text-sm" style={{ width: eTotal }}>
+            <colgroup>{ew.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
             <thead className="sticky top-0 z-20">
               <tr className="bg-muted">
                 {HEADERS.map((h, i) => (
                   <th key={h} className={cn(
-                    "whitespace-nowrap border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
+                    "border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
                     i === 0 && "sticky left-0 z-30 bg-muted"
-                  )}>{h}</th>
+                  )}>{h}<ColResizer onMouseDown={eResize(i)} /></th>
                 ))}
                 <th className="sticky right-0 z-30 border-b border-border bg-muted px-2 py-3"></th>
               </tr>

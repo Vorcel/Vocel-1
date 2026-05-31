@@ -10,13 +10,14 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }
   const { lists, addListItem } = useData();
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
+  const [cor, setCor] = useState("#0C7B93");
   const options = lists[listType] || [];
 
   const confirm = async () => {
     const v = text.trim();
     if (!v) return;
     try {
-      await addListItem(listType, v);
+      await addListItem(listType, v, cor);
       onChange(v);
       setText("");
       setAdding(false);
@@ -37,6 +38,7 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), confirm())}
           placeholder="Digite o novo item"
         />
+        <input type="color" value={cor} onChange={(e) => setCor(e.target.value)} data-testid={`${testid}-new-color`} className="h-9 w-9 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" title="Cor" />
         <button type="button" onClick={confirm} data-testid={`${testid}-new-confirm`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover">
           <Check size={16} />
         </button>
@@ -55,7 +57,12 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }
         </SelectTrigger>
         <SelectContent>
           {options.map((o) => (
-            <SelectItem key={o} value={o}>{o}</SelectItem>
+            <SelectItem key={o.nome} value={o.nome}>
+              <span className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: o.cor }} />
+                {o.nome}
+              </span>
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>

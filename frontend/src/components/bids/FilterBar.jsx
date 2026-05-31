@@ -1,6 +1,8 @@
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal, Star } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker } from "@/components/DateRangePicker";
+import { cn } from "@/lib/utils";
 
 export const FilterBar = ({ filters, setFilter, onOpenAdvanced, activeAdvanced }) => {
   return (
@@ -29,13 +31,24 @@ export const FilterBar = ({ filters, setFilter, onOpenAdvanced, activeAdvanced }
         placeholder="UASG"
         className="sm:w-32"
       />
-      <Input
-        type="date"
-        data-testid="filter-data"
+      <DateRangePicker
         value={filters.data}
-        onChange={(e) => setFilter("data", e.target.value)}
-        className="sm:w-40"
+        onChange={(r) => setFilter("data", r)}
+        testid="filter-data"
+        className="sm:w-60"
       />
+      <button
+        type="button"
+        data-testid="filter-fav-toggle"
+        onClick={() => setFilter("favoritos", !filters.favoritos)}
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors",
+          filters.favoritos ? "border-amber-400 bg-amber-50 text-amber-500" : "border-input text-muted-foreground hover:bg-accent"
+        )}
+        title="Somente favoritos"
+      >
+        <Star size={16} className={cn(filters.favoritos && "fill-amber-400")} />
+      </button>
       <Button
         variant="outline"
         onClick={onOpenAdvanced}

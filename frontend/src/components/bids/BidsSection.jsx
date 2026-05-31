@@ -9,7 +9,7 @@ import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
 
 const EMPTY_FILTERS = {
-  objeto: "", pregao: "", uasg: "", data: "",
+  objeto: "", pregao: "", uasg: "", data: { from: "", to: "" },
   portal: "", itens: "", modalidade: "", status: "", favoritos: false,
 };
 
@@ -35,7 +35,12 @@ export const BidsSection = () => {
       if (filters.objeto && !b.objeto?.toLowerCase().includes(filters.objeto.toLowerCase())) return false;
       if (filters.pregao && !(b.pregao || "").toLowerCase().includes(filters.pregao.toLowerCase())) return false;
       if (filters.uasg && !(b.uasg || "").toLowerCase().includes(filters.uasg.toLowerCase())) return false;
-      if (filters.data && b.data_disputa !== filters.data) return false;
+      if (filters.data && (filters.data.from || filters.data.to)) {
+        const d = b.data_disputa || "";
+        if (!d) return false;
+        if (filters.data.from && d < filters.data.from) return false;
+        if (filters.data.to && d > filters.data.to) return false;
+      }
       if (filters.portal && b.portal !== filters.portal) return false;
       if (filters.modalidade && b.modalidade !== filters.modalidade) return false;
       if (filters.status && b.status !== filters.status) return false;

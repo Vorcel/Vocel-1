@@ -5,8 +5,19 @@ import { BidsSection } from "@/components/bids/BidsSection";
 import { useData } from "@/context/DataContext";
 import { cn } from "@/lib/utils";
 
-const SummaryCard = ({ icon: Icon, label, value, accent, testid }) => (
-  <div data-testid={testid} className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+const SummaryCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
+  <div data-testid={testid} className="relative flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+    {delta != null && (
+      <span
+        data-testid={`${testid}-delta`}
+        className={cn(
+          "absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold",
+          delta >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+        )}
+      >
+        {delta >= 0 ? "+" : ""}{delta}%
+      </span>
+    )}
     <div className={cn("flex h-12 w-12 items-center justify-center rounded-lg", accent)}>
       <Icon size={24} />
     </div>
@@ -32,9 +43,9 @@ export default function Dashboard() {
       <main className="space-y-8 p-6">
         {/* Seção 1 — Resumo */}
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <SummaryCard testid="card-mes" icon={CalendarDays} label="Licitações do Mês" value={summary.licitacoes_mes} accent="bg-brand/10 text-brand" />
-          <SummaryCard testid="card-adjudicadas" icon={Award} label="Adjudicadas" value={summary.adjudicadas} accent="bg-emerald-100 text-emerald-600" />
-          <SummaryCard testid="card-acompanhando" icon={Star} label="Acompanhando" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
+          <SummaryCard testid="card-mes" icon={CalendarDays} label="Participações no Mês" value={summary.licitacoes_mes} delta={summary.licitacoes_mes_delta} accent="bg-brand/10 text-brand" />
+          <SummaryCard testid="card-adjudicadas" icon={Award} label="Adjudicadas" value={summary.adjudicadas} delta={summary.adjudicadas_delta} accent="bg-emerald-100 text-emerald-600" />
+          <SummaryCard testid="card-acompanhando" icon={Star} label="Em Acompanhamento" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
         </section>
 
         {/* Seção 2 — Alertas de Hoje */}

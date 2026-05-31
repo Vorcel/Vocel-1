@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 2 — Verified the 6 updates against live frontend + backend. Backend regression suite updated to the new lists {nome,cor} contract (28/28 pytest passing, including a new test for retroactive bid rename on PUT /api/lists/{type}). Frontend: dashboard renamed cards + delta badges; Nova Licitação modal with all-red asterisks, mandatory PDF/Pregão/UASG and disabled-save logic; Settings ListManager color picker + edit modal; status pill dynamic color from list color; Date Range Picker (filter-data) opening 2-month calendar with 'DD/MM/AAAA até DD/MM/AAAA' display; bid-data remains a single date input; AND combined filter via favorites toggle (rows 2→1); column resizer drag (header width 150→296). All updates working as specified.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      { "screen": "Settings > Listas e Parâmetros (list tags)", "issues": ["Newly added/edited list tag uses a very low alpha background (~0.08-0.14) which makes the colored fill nearly invisible against white; consider increasing the rgba alpha or adding a thin colored left-border so users can distinguish item colors at a glance. Same effect on Disputar/Em status pills in tables — readable but visually subtle."] }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes.py _normalize_list correctly migrates legacy string lists to {nome,cor} and seeds defaults for the statuses kind via _DEFAULT_STATUS_COLORS — backward compatible.",
+    "PUT /api/lists/{type} correctly propagates the rename to bids via update_many on the mapped _BID_FIELD; verified end-to-end in test_update_list_item_propagates_to_bids.",
+    "DELETE /api/lists/{type}/{value} filters by nome which is correct for the new object schema; no orphan checks against bids (deleting a portal that is referenced by bids will leave a stale value). Low priority — UI prevents this naturally, but main agent may want to either block the delete or null-out references for hygiene.",
+    "Dashboard summary endpoint still returns only {licitacoes_mes, adjudicadas, acompanhando}; the delta percentages (licitacoes_mes_delta, adjudicadas_delta) appear to be computed client-side in DataContext. Verify whether the spec expected backend to send deltas — currently UI shows +100% / +0% from local heuristic.",
+    "Asterisks color uniformly rgb(239,68,68) (red-500) across all required fields in BidFormModal — meets spec.",
+    "table-layout:fixed with ellipsis verified visually in screenshots (column truncates rather than wraps) and col-resizer drag changes width as expected (10 resizers on Dashboard table)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": { "backend": "100% (28/28 pytest)", "frontend": "100% of the 6 updates verified working" },
+  "test_credentials": "admin@licita.com / admin123 (Bearer JWT)",
+  "seed_data_creation": "Tests create TEST_-prefixed bids and TEST_PORTAL_/TEST_MOD_/TEST_STA_ list items; all cleaned up by TestZCleanup and within each list test. One TESTUI2dfa0 portal added during UI testing was deleted via DELETE /api/lists/portais/TESTUI2dfa0 — no residual test data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend lists API now uses {nome,cor} (POST/PUT body, GET returns objects). PUT body must be {old_nome,nome,cor} and triggers retroactive rename on the bids collection (modalidade/portal/status fields). Frontend testids confirmed: card-mes, card-adjudicadas, card-acompanhando, card-mes-delta, card-adjudicadas-delta, bid-save, bid-termo, bid-data (single date input), filter-data (range picker), adv-data, exec-f-date, filter-fav-toggle, col-resizer, status-trigger-{bidId}, list-{type}-color, list-{type}-add, list-{type}-edit-{nome}, list-{type}-edit-modal, list-{type}-edit-name, list-{type}-edit-color, list-{type}-edit-save. The date-range second-click selection via Playwright requires precise day-cell targeting because there are duplicate :has-text('NN') across the 2-month grid; consider scoping to a specific month container in any future automation. Container date stays 2026 — use future dates for any new bid creation.",
+  "rca_of_the_issue": "N/A — no defects observed this iteration."
+}

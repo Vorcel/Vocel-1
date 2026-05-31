@@ -2,6 +2,8 @@ import { useState } from "react";
 import { User, Building2, Palette, Calculator, ListChecks, Save, Trash2, Plus, Moon, Sun, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { colorStyles } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -167,24 +169,58 @@ function BudgetDefaultsTab() {
 }
 
 function ListManager({ title, type }) {
-  const { lists, addListItem, removeListItem } = useData();
+  const { lists, addListItem, removeListItem, updateListItem } = useData();
   const [text, setText] = useState("");
-  const add = async () => { if (!text.trim()) return; await addListItem(type, text.trim()); setText(""); };
+  const [cor, setCor] = useState("#0C7B93");
+  const [editing, setEditing] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editCor, setEditCor] = useState("#0C7B93");
+
+  const add = async () => {
+    if (!text.trim()) return;
+    await addListItem(type, text.trim(), cor);
+    setText("");
+    toast.success("Item adicionado");
+  };
+  const startEdit = (item) => { setEditing(item.nome); setEditName(item.nome); setEditCor(item.cor); };
+  const saveEdit = async () => {
+    if (!editName.trim()) return;
+    await updateListItem(type, editing, editName.trim(), editCor);
+    setEditing(null);
+    toast.success("Item atualizado");
+  };
+
   return (
     <div className="rounded-xl border border-border bg-card p-6">
       <h3 className="mb-4 font-heading text-base font-semibold">{title}</h3>
       <div className="mb-4 flex gap-2">
         <Input data-testid={`list-${type}-input`} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={`Novo item em ${title}`} />
+        <input type="color" value={cor} onChange={(e) => setCor(e.target.value)} data-testid={`list-${type}-color`} className="h-10 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" title="Cor" />
         <Button data-testid={`list-${type}-add`} onClick={add} className="bg-brand hover:bg-brand-hover"><Plus size={16} /></Button>
       </div>
       <div className="flex flex-wrap gap-2">
         {(lists[type] || []).map((item) => (
-          <span key={item} className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-sm">
-            {item}
-            <button data-testid={`list-${type}-remove-${item}`} onClick={() => removeListItem(type, item)} className="text-muted-foreground hover:text-alert"><Trash2 size={13} /></button>
+          <span key={item.nome} data-testid={`list-${type}-tag-${item.nome}`} style={colorStyles(item.cor).badge} className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.cor }} />
+            <button onClick={() => startEdit(item)} data-testid={`list-${type}-edit-${item.nome}`} className="hover:underline" title="Editar">{item.nome}</button>
+            <button data-testid={`list-${type}-remove-${item.nome}`} onClick={() => removeListItem(type, item.nome)} className="opacity-60 transition-opacity hover:opacity-100"><Trash2 size={13} /></button>
           </span>
         ))}
       </div>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent data-testid={`list-${type}-edit-modal`}>
+          <DialogHeader><DialogTitle className="font-heading">Editar item</DialogTitle></DialogHeader>
+          <div className="flex items-center gap-2 py-2">
+            <Input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveEdit()} data-testid={`list-${type}-edit-name`} />
+            <input type="color" value={editCor} onChange={(e) => setEditCor(e.target.value)} data-testid={`list-${type}-edit-color`} className="h-10 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
+            <Button data-testid={`list-${type}-edit-save`} onClick={saveEdit} className="bg-brand hover:bg-brand-hover">Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

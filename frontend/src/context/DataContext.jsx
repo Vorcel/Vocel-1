@@ -74,12 +74,17 @@ export function DataProvider({ children }) {
   };
 
   // ---- Lists ----
-  const addListItem = async (type, value) => {
-    const { data } = await api.post(`/lists/${type}`, { value });
+  const addListItem = async (type, nome, cor) => {
+    const { data } = await api.post(`/lists/${type}`, { nome, cor });
     setLists(data);
   };
-  const removeListItem = async (type, value) => {
-    const { data } = await api.delete(`/lists/${type}/${encodeURIComponent(value)}`);
+  const updateListItem = async (type, oldNome, nome, cor) => {
+    const { data } = await api.put(`/lists/${type}`, { old_nome: oldNome, nome, cor });
+    setLists(data);
+    await refreshBids();
+  };
+  const removeListItem = async (type, nome) => {
+    const { data } = await api.delete(`/lists/${type}/${encodeURIComponent(nome)}`);
     setLists(data);
   };
 
@@ -97,13 +102,32 @@ export function DataProvider({ children }) {
 
   // ---- Summary (computed client-side for reactivity) ----
   const now = new Date();
+  const inMonth = (dateStr, year, month) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr + "T00:00:00");
+    return d.getFullYear() === year && d.getMonth() === month;
+  };
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+  const prevY = prev.getFullYear();
+  const prevM = prev.getMonth();
+
+  const pctChange = (cur, old) => {
+    if (old === 0) return cur > 0 ? 100 : 0;
+    return Math.round(((cur - old) / old) * 100);
+  };
+
+  const mesAtual = bids.filter((b) => inMonth(b.data_disputa, curY, curM)).length;
+  const mesAnterior = bids.filter((b) => inMonth(b.data_disputa, prevY, prevM)).length;
+  const adjMesAtual = bids.filter((b) => b.status === "Adjudicado" && inMonth(b.data_disputa, curY, curM)).length;
+  const adjMesAnterior = bids.filter((b) => b.status === "Adjudicado" && inMonth(b.data_disputa, prevY, prevM)).length;
+
   const summary = {
-    licitacoes_mes: bids.filter((b) => {
-      if (!b.data_disputa) return false;
-      const d = new Date(b.data_disputa + "T00:00:00");
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    }).length,
+    licitacoes_mes: mesAtual,
+    licitacoes_mes_delta: pctChange(mesAtual, mesAnterior),
     adjudicadas: bids.filter((b) => b.status === "Adjudicado").length,
+    adjudicadas_delta: pctChange(adjMesAtual, adjMesAnterior),
     acompanhando: bids.filter((b) => b.favorito).length,
   };
 
@@ -113,7 +137,7 @@ export function DataProvider({ children }) {
         bids, executions, lists, prefs, company, loading, summary,
         refreshBids, refreshExecutions, refreshLists,
         createBid, updateBid, changeStatus, toggleFavorite, deleteBid,
-        addListItem, removeListItem, savePrefs, saveCompany,
+        addListItem, removeListItem, updateListItem, savePrefs, saveCompany,
       }}
     >
       {children}
