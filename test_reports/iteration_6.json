@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration_6 (frontend only): Verified the new 'Gestão Detalhada' detail panel on /execucao with HORIZONTAL timeline + prominent object title. All 5 review-request scenarios PASS end-to-end. No console errors, no ErrorBoundary triggers.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_flows": [
+    "LOGIN admin@licita.com/admin123 → / loads. Sidebar nav-execution → /execucao mounts without ErrorBoundary. 2 adjudicated rows render in 'Licitações Ganhas' master table (Aquisição de notebooks 31/05/2026, tablet 01/06/2026).",
+    "Click exec-row-{bidId} (Aquisição de notebooks) → exec-detail section appears. exec-detail-title is an H2 with text 'Aquisição de notebooks' and classes 'font-heading text-2xl font-bold tracking-tight'. Subtitle <p> shows 'Pregão Eletrônico • Comprasnet • Empenho: R$ 2.000,00'. Status pill 'Faturamento / NF' renders, plus red 'Pagamento Pendente' badge (alert-colored with AlertTriangle icon).",
+    "HORIZONTAL TIMELINE VERIFIED: 10 timeline-step-{0..9} buttons all at Y=558 (max-min<5px). X coords strictly increasing: [162, 304, 446, 588, 730, 872, 1014, 1156, 1298, 1440]. Each step shows an icon (FileText, ClipboardCheck, ShoppingCart, Package, PackageCheck, Receipt, PackageOpen, Truck, CheckCircle2, Banknote), name label below, and status badge (Concluído / Em Andamento / Pendente). Connector lines via bg-foreground (done) and bg-border (future) render correctly. Container has overflow-x-auto.",
+    "STEP CLICK INTERACTION: Initial current_step=0 → badges = [Em Andamento, Pendente×8]. Click timeline-step-5 → PUT /api/executions/{bid_id} {current_step:5} fires; after refresh, badges = [Concluído×5, Em Andamento, Pendente×3]. Step 5 button class changes from 'bg-muted text-muted-foreground/50' to 'bg-card text-foreground ring-2 ring-foreground ring-offset-2 ring-offset-card' (active charcoal ring). Donut Progresso updates reactively to 60% (6/10).",
+    "ATTACH FILE FLOW: timeline-add-2 click reveals timeline-upload-2 FileUpload component (compact mode, accepts .pdf,image/*,.docx,.xlsx). Existing file chips render with Paperclip icon and × delete button. Progresso donut (H3 'Progresso') + Resumo do Contrato card (H3 'Resumo do Contrato') render in lg:col-span-3 grid below the timeline, both fully functional."
+  ],
+  "design_verification": {
+    "title_tag_and_size": "H2 with class 'font-heading text-2xl font-bold tracking-tight text-foreground' — matches spec (prominent large title)",
+    "subtitle_format": "'modalidade • portal • Empenho: R$ X' — exact format",
+    "status_pill_and_payment_badge": "Both rendered top-right of header; payment badge has border-alert/40 bg-alert/10 text-alert with AlertTriangle icon",
+    "timeline_layout": "HORIZONTAL — 10 circles in single Y-row inside overflow-x-auto container; per-step width 142px",
+    "step_visuals": "done=charcoal filled (bg-foreground text-white), active=white circle with charcoal ring (bg-card ring-2 ring-foreground), future=grey muted (bg-muted text-muted-foreground/50) — all verified via class inspection",
+    "connector_lines": "h-0.5 with bg-foreground when idx<=cur (left half) or idx<cur (right half), bg-border otherwise — correct",
+    "donut_and_resumo": "Progresso donut shows large 60% / 'concluído' label and current status text; Resumo do Contrato has Textarea + Switch + Save button"
+  },
+  "console_warnings": [
+    "Recharts warning: 'width(-1) and height(-1) of chart should be greater than 0' — pre-existing transient warning on initial donut mount before container measures. Not a new regression. Donut renders correctly after mount."
+  ],
+  "test_report_links": ["/app/test_reports/iteration_6.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Execution.jsx: STEP_ICONS array correctly maps 10 lucide icons 1:1 to TIMELINE_STEPS. Fallback to Circle if index missing — safe.",
+    "stepStatus(idx, current) logic is correct: idx<current => done, idx===current => active, else future. Matches the visual ring/fill spec.",
+    "updateExec posts only {current_step} on step click; backend syncs status_atual reactively (verified via donut % and status pill update).",
+    "Minor: Recharts ResponsiveContainer inside h-48 occasionally emits a width=-1 console warning on first paint. Could be silenced by setting minWidth=0 minHeight=0 on PieChart, but cosmetic only.",
+    "Positive: ErrorBoundary in AppLayout wraps Outlet — no crashes when no exec_detail-title element when no row selected (auto-selects filtered[0]).",
+    "Positive: data-testids used everywhere: exec-detail, exec-detail-title, timeline-step-{idx}, timeline-add-{idx}, timeline-upload-{idx}, exec-row-{bidId}."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "not tested this iteration (frontend-only)", "frontend": "100% — all 5 review-request scenarios verified" },
+  "test_credentials": "admin@licita.com / admin123",
+  "seed_data_creation": "None — existing adjudicated bid 'Aquisição de notebooks' was already present from prior iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Execution detail panel horizontal stepper is fully functional. Step click PUTs /api/executions/{bid_id} {current_step} which the backend persists and reflects via refreshExecutions. The Recharts width(-1) warning is benign and pre-existing — only worth fixing for log cleanliness. Backend remains untouched since iteration_2 (28/28 pass).",
+  "rca_of_the_issue": "N/A — no bugs found."
+}

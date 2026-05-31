@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Truck, TrendingUp, Activity, Wallet, Filter, FileText, Calculator, FileCheck,
   Pencil, Clock, CheckCircle2, Circle, Paperclip, Save, FileX,
+  ShoppingCart, Package, PackageCheck, Receipt, PackageOpen, Banknote, ClipboardCheck, AlertTriangle,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { Header } from "@/components/layout/Header";
@@ -36,6 +37,7 @@ const addDays = (dateStr, days) => {
 
 const execColor = (status) => (status === "Concluído" ? "#10B981" : status === "Aguardando Empenho" ? "#F59E0B" : "#0C7B93");
 const MASTER_COLS = ["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Ações"];
+const STEP_ICONS = [FileText, ClipboardCheck, ShoppingCart, Package, PackageCheck, Receipt, PackageOpen, Truck, CheckCircle2, Banknote];
 
 function KpiCard({ icon: Icon, label, value, accent, testid }) {
   return (
@@ -200,59 +202,87 @@ export default function Execution() {
         {/* Detail panel */}
         {selected && (
           <section className="grid gap-6 lg:grid-cols-3" data-testid="exec-detail">
-            {/* Timeline */}
-            <div className="rounded-xl border border-border bg-card p-6 lg:col-span-2">
-              <h3 className="mb-1 font-heading text-base font-semibold">Gestão Detalhada</h3>
-              <p className="mb-5 max-w-lg truncate text-sm text-muted-foreground">{selected.objeto}</p>
-              <div className="space-y-1">
-                {TIMELINE_STEPS.map((name, idx) => {
-                  const st = stepStatus(idx, selected.current_step || 0);
-                  const step = (selected.timeline || [])[idx] || { files: [] };
-                  return (
-                    <div key={idx} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <button
-                          data-testid={`timeline-step-${idx}`}
-                          onClick={() => updateExec(selected.bid_id, { current_step: idx })}
-                          className="transition-transform hover:scale-110"
-                        >
-                          {st === "done" ? <CheckCircle2 size={22} className="text-emerald-500" />
-                            : st === "active" ? <Circle size={22} className="fill-brand/20 text-brand" />
-                            : <Circle size={22} className="text-muted-foreground/40" />}
-                        </button>
-                        {idx < TIMELINE_STEPS.length - 1 && <div className={cn("my-1 w-0.5 flex-1", idx < (selected.current_step || 0) ? "bg-emerald-500" : "bg-border")} />}
-                      </div>
-                      <div className="flex-1 pb-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={cn("text-sm font-medium", st === "active" ? "text-brand" : st === "done" ? "text-foreground" : "text-muted-foreground")}>{name}</span>
+            {/* Header + Linha do tempo HORIZONTAL (largura total) */}
+            <div className="rounded-xl border border-border bg-card p-6 lg:col-span-3">
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 data-testid="exec-detail-title" className="font-heading text-2xl font-bold tracking-tight text-foreground">{selected.objeto}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {selected.modalidade} • {selected.portal}{selected.valor_empenho ? ` • Empenho: ${brl(selected.valor_empenho)}` : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span style={colorStyles(execColor(selected.status_atual)).badge} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: execColor(selected.status_atual) }} />
+                    {selected.status_atual}
+                  </span>
+                  {selected.pagamento_pendente && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-alert/40 bg-alert/10 px-3 py-1 text-xs font-semibold text-alert">
+                      <AlertTriangle size={13} /> Pagamento Pendente
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="-mx-6 mb-6 border-t border-border" />
+
+              <div className="overflow-x-auto pb-2">
+                <div className="flex min-w-max">
+                  {TIMELINE_STEPS.map((name, idx) => {
+                    const st = stepStatus(idx, selected.current_step || 0);
+                    const step = (selected.timeline || [])[idx] || { files: [] };
+                    const Icon = STEP_ICONS[idx] || Circle;
+                    const cur = selected.current_step || 0;
+                    return (
+                      <div key={idx} className="flex flex-col items-center px-1" style={{ width: 142, minWidth: 142 }}>
+                        <div className="relative flex h-12 w-full items-center justify-center">
+                          {idx > 0 && <span className={cn("absolute left-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", idx <= cur ? "bg-foreground" : "bg-border")} />}
+                          {idx < TIMELINE_STEPS.length - 1 && <span className={cn("absolute right-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", idx < cur ? "bg-foreground" : "bg-border")} />}
+                          <button
+                            data-testid={`timeline-step-${idx}`}
+                            onClick={() => updateExec(selected.bid_id, { current_step: idx })}
+                            title={name}
+                            className={cn(
+                              "relative z-10 flex h-11 w-11 items-center justify-center rounded-full transition-transform hover:scale-110",
+                              st === "done" ? "bg-foreground text-white"
+                                : st === "active" ? "bg-card text-foreground ring-2 ring-foreground ring-offset-2 ring-offset-card"
+                                  : "bg-muted text-muted-foreground/50"
+                            )}
+                          >
+                            <Icon size={18} />
+                          </button>
+                        </div>
+                        <span className={cn("mt-2 line-clamp-2 text-center text-xs font-semibold leading-tight", st === "future" ? "text-muted-foreground" : "text-foreground")}>{name}</span>
+                        <span className={cn("mt-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold", st === "done" ? "bg-emerald-100 text-emerald-700" : st === "active" ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground")}>
+                          {st === "done" ? "Concluído" : st === "active" ? "Em Andamento" : "Pendente"}
+                        </span>
+                        <div className="mt-2 flex w-full flex-col items-center gap-1">
                           {(step.files || []).map((f) => (
-                            <span key={f.id} className="flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-xs">
-                              <Paperclip size={11} className="text-brand" />
-                              <a href={fileUrl(f.id)} target="_blank" rel="noreferrer" className="max-w-[120px] truncate hover:underline">{f.filename}</a>
-                              <button onClick={() => removeTimelineFile(selected.bid_id, idx, f.id)} className="text-muted-foreground hover:text-alert">×</button>
+                            <span key={f.id} className="flex max-w-[128px] items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[10px]">
+                              <Paperclip size={10} className="shrink-0 text-brand" />
+                              <a href={fileUrl(f.id)} target="_blank" rel="noreferrer" className="truncate hover:underline">{f.filename}</a>
+                              <button onClick={() => removeTimelineFile(selected.bid_id, idx, f.id)} className="shrink-0 text-muted-foreground hover:text-alert">×</button>
                             </span>
                           ))}
-                        </div>
-                        <div className="mt-1.5 max-w-xs">
                           <InlineUpload bidId={selected.bid_id} step={idx} onUploaded={addTimelineFile} />
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Donut + summary */}
-            <div className="space-y-6">
-              <div className="rounded-xl border border-border bg-card p-6">
+            {/* Donut + resumo */}
+            <div className="grid gap-6 lg:col-span-3 lg:grid-cols-3">
+              <div className="rounded-xl border border-border bg-card p-6 lg:col-span-1">
                 <h3 className="mb-2 font-heading text-base font-semibold">Progresso</h3>
                 <div className="relative h-48">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={donutData} innerRadius={55} outerRadius={75} paddingAngle={2} dataKey="value" startAngle={90} endAngle={-270}>
-                        <Cell fill="#0C7B93" />
-                        <Cell fill="hsl(var(--muted))" />
+                        <Cell fill="#141d23" />
+                        <Cell fill="#E9ECEF" />
                       </Pie>
                     </PieChart>
                   </ResponsiveContainer>
@@ -261,10 +291,10 @@ export default function Execution() {
                     <span className="text-xs text-muted-foreground">concluído</span>
                   </div>
                 </div>
-                <p className="text-center text-sm font-medium text-brand">{selected.status_atual}</p>
+                <p className="text-center text-sm font-medium text-foreground">{selected.status_atual}</p>
               </div>
 
-              <div className="rounded-xl border border-border bg-card p-6">
+              <div className="rounded-xl border border-border bg-card p-6 lg:col-span-2">
                 <h3 className="mb-3 font-heading text-base font-semibold">Resumo do Contrato</h3>
                 <ContractSummary execution={selected} onSave={(patch) => updateExec(selected.bid_id, patch)} />
               </div>
