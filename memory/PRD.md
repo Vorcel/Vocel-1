@@ -29,6 +29,13 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Filtros cumulativos (AND) + botão rápido de favoritos na barra de filtros.
 - Colunas redimensionáveis (estilo Excel: table-layout fixed + ellipsis) em todas as tabelas (Telas 1/2/4/5), largura persistida em localStorage.
 
+## Updates (Iteration 3 — Design System "White-on-Ice")
+- Tipografia global Hanken Grotesk; tokens de cor refeitos (fundo gelo #f6faff, superfícies brancas, primário/brand Deep Charcoal #121417, texto #141d23, erro #ba1a1a) via CSS vars theme-aware (brand = hsl(var(--brand)/alpha)).
+- Cores vibrantes reservadas para Tags de Portal (pílulas coloridas dinâmicas) e badges de Status.
+- Sidebar fundo #E9ECEF; tabelas borderless com divisores sutis, hover tintado e botões de ação "ghost" (aparecem no hover da linha); inputs com borda sutil e foco charcoal; raios soft-modern.
+- ErrorBoundary adicionado em volta do Outlet (uma falha de tela não derruba o app inteiro).
+- Verificado: 100% frontend (iteration_4), round-trip bid→Adjudicado→Execução→ERP OK. Nota não-bloqueante: warning cosmético do Recharts no mount da Execução.
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
