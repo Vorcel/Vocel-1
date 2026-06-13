@@ -1,0 +1,29 @@
+{
+  "summary": "Comprehensive frontend testing of refactored Tela 2 ERP spreadsheet at /orcamento/:bidId. All Excel-style behaviors verified: inline edit (view <-> input via -view testid), debounced auto-save with budget-save-state transitioning Salvando -> Salvo, no global Save button, R$/% formatting on commit, MARGEM REAL read-only computed column (25,0% for 1500/2000/0%), MARGEM DESEJADA shows 33,3% markup when in venda mode and is locked, yellow highlight on Valor Venda cell in venda mode, global cards reflecting selected rows (Custo R$ 1.500,00, Proposta R$ 2.000,00, Lucro R$ 500,00, Margem 25,0%), add/remove rows + auto-save, right-click context menu hide column with Reexibir (N) header button and ctx-show-all, SELECIONAR cannot be hidden (no ctx-hide-col rendered), Ctrl+click multi-select highlights headers with ring-brand, bulk-resize via col-resizer applies equal width to all selected columns (produto 180->276, fornecedor 130->276), and server-side persistence (valor_compra = R$ 1.500,00 survives reload).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Budget.jsx debounced save effect depends on [rows, loading, bidId] but the initial load also sets rows; dirtyRef.current guards against initial save which is correct. Good.",
+    "EditableCell uses HTML input type=number for currency/percent which strips R$/% formatting during edit (intentional, raw numeric entry). Consider showing pt-BR mask if UX needs it.",
+    "calc.js comment header says 'tax-inclusive por dentro' but the implementation is 'por fora' (markup on cost+tax). Update the comment for consistency.",
+    "hidden columns persist to localStorage (key erp_hidden) per-browser, not per-bid. Acceptable for v1; document this if intended.",
+    "Site link in SiteCell uses inline color '#0000EE' which may not satisfy dark-mode contrast tokens in design system."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request)", "frontend": "100%"},
+  "test_credentials": "admin@licita.com / admin123",
+  "seed_data_creation": "Used existing bid 6a1c5c9fe2f2b24398f3873e. Edited first row to valor_compra=1500, valor_venda=2000, icms=0 to validate math. Added/removed rows during test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tela 2 ERP at /orcamento/:bidId is fully functional. Editable cells expose two testids: '-view' (read-only div) and base (input when editing). After click, view -> input; Enter or blur commits and reverts to formatted view. Auto-save fires on dirty flag with 1s debounce, header indicator budget-save-state shows Salvando/Salvo/idle states. Math: MARGEM REAL=25,0% and markup=33,3% confirmed for 1500/2000/0. Bulk-resize: Ctrl+click headers, then drag col-resizer of any selected -> all resize equally. SELECIONAR has noHide:true. Server persistence works via PUT /api/bids/{bidId}/budget.",
+  "rca of the issue": "n/a - no issues found"
+}

@@ -16,15 +16,20 @@ export function useColumnResize(storageKey, defaults) {
   const ref = useRef(widths);
   ref.current = widths;
 
-  const startResize = useCallback((index) => (e) => {
+  const startResize = useCallback((index, syncIndices = null) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const startW = ref.current[index];
+    // Quando a coluna arrastada faz parte de uma seleção múltipla, aplica a
+    // mesma largura (em pixels) a todas as colunas selecionadas.
+    const targets =
+      Array.isArray(syncIndices) && syncIndices.includes(index) ? syncIndices : [index];
     const onMove = (ev) => {
       const delta = ev.clientX - startX;
+      const w = Math.max(56, startW + delta);
       const next = [...ref.current];
-      next[index] = Math.max(56, startW + delta);
+      targets.forEach((i) => { next[i] = w; });
       setWidths(next);
     };
     const onUp = () => {

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Save, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet, Pencil, Check } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
@@ -19,11 +19,33 @@ const newRow = (defaults) => ({
   mode: "margem",
 });
 
-const HEADERS = [
-  "SELECIONAR", "ITEM", "PRODUTO", "MARCA", "FORNECEDOR", "SITE", "VALOR COMPRA", "QTD",
-  "VALOR VENDA", "MARGEM %", "ICMS %", "PIS/COFINS %", "OUTROS S/ IMP.", "OUTROS C/ IMP.",
-  "FRETE RECEBER", "FRETE ENVIAR", "CUSTO BASE UN.", "LUCRO UN.", "VALOR UN.", "VALOR TOTAL", "LUCRO TOTAL",
+// Column model — drives header, body, resizing, hide/show.
+const COLUMNS = [
+  { key: "selecionar", label: "SELECIONAR", w: 70, type: "select", sticky: true, noHide: true },
+  { key: "item", label: "ITEM", w: 70, type: "text" },
+  { key: "produto", label: "PRODUTO", w: 180, type: "text" },
+  { key: "marca", label: "MARCA", w: 110, type: "text" },
+  { key: "fornecedor", label: "FORNECEDOR", w: 130, type: "text" },
+  { key: "site", label: "SITE", w: 120, type: "site" },
+  { key: "valor_compra", label: "VALOR COMPRA", w: 120, type: "currency" },
+  { key: "qtd", label: "QTD", w: 70, type: "number" },
+  { key: "valor_venda", label: "VALOR VENDA", w: 120, type: "venda" },
+  { key: "margem", label: "MARGEM DESEJADA", w: 140, type: "margem" },
+  { key: "margem_real", label: "MARGEM REAL", w: 120, type: "calc_pct" },
+  { key: "icms", label: "ICMS", w: 90, type: "percent" },
+  { key: "pis_cofins", label: "PIS/COFINS", w: 110, type: "percent" },
+  { key: "outros_sem_imp", label: "OUTROS S/ IMP.", w: 120, type: "currency" },
+  { key: "outros_com_imp", label: "OUTROS C/ IMP.", w: 120, type: "currency" },
+  { key: "frete_receber", label: "FRETE RECEBER", w: 120, type: "currency" },
+  { key: "frete_enviar", label: "FRETE ENVIAR", w: 120, type: "currency" },
+  { key: "custo_base_unit", label: "CUSTO BASE UN.", w: 120, type: "calc_currency" },
+  { key: "imposto_unit", label: "IMPOSTO UN.", w: 110, type: "calc_currency" },
+  { key: "lucro_unit", label: "LUCRO UN.", w: 110, type: "calc_currency", tint: "green" },
+  { key: "valor_unidade", label: "VALOR UN.", w: 110, type: "calc_currency", tint: "blue" },
+  { key: "valor_total", label: "VALOR TOTAL", w: 120, type: "calc_currency", tint: "blue" },
+  { key: "lucro_total", label: "LUCRO TOTAL", w: 120, type: "calc_currency", tint: "green" },
 ];
+const DEFAULT_WIDTHS = COLUMNS.map((c) => c.w);
 
 function GlobalCard({ icon: Icon, label, value, accent, testid }) {
   return (
@@ -37,7 +59,59 @@ function GlobalCard({ icon: Icon, label, value, accent, testid }) {
   );
 }
 
-const inputCls = "w-full bg-transparent px-2 py-2 text-sm outline-none focus:bg-accent/50";
+// Excel-style editable cell: read-only formatted view that turns into an input
+// on click. Commits on Enter/Blur, cancels on Escape.
+function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (editing && ref.current) { ref.current.focus(); ref.current.select(); }
+  }, [editing]);
+
+  const start = () => { if (readOnly) return; setDraft(value ?? ""); setEditing(true); };
+  const commit = () => { setEditing(false); onCommit(draft); };
+
+  const right = align === "right";
+
+  if (editing) {
+    return (
+      <input
+        ref={ref}
+        data-testid={testid}
+        type={type === "text" ? "text" : "number"}
+        step="0.01"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+        }}
+        placeholder={placeholder}
+        className={cn("no-spin w-full bg-transparent px-2 py-2 text-sm outline-none ring-2 ring-inset ring-brand/50",
+          right && "text-right font-mono-num")}
+      />
+    );
+  }
+
+  let display = value;
+  const empty = value === "" || value == null;
+  if (type === "currency") display = empty ? "" : brl(value);
+  else if (type === "percent") display = empty ? "" : pct(value);
+
+  return (
+    <div
+      data-testid={testid ? `${testid}-view` : undefined}
+      onClick={start}
+      className={cn("min-h-[37px] truncate px-2 py-2 text-sm hover:bg-accent/40",
+        right && "text-right font-mono-num", readOnly ? "cursor-default text-muted-foreground" : "cursor-text")}
+    >
+      {display !== "" && display != null ? display : <span className="text-muted-foreground/40">{placeholder}</span>}
+    </div>
+  );
+}
 
 // Dynamic, editable URL cell: clickable link (view) <-> input (edit via pencil).
 function SiteCell({ value, onSave }) {
@@ -55,16 +129,13 @@ function SiteCell({ value, onSave }) {
     return (
       <div className="flex items-center gap-1 px-1">
         <input
-          type="url"
-          autoFocus={editing}
-          value={draft}
+          type="url" autoFocus={editing} value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); save(); }
             if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
           }}
-          placeholder="https://..."
-          data-testid="site-input"
+          placeholder="https://..." data-testid="site-input"
           className="w-full bg-transparent py-2 text-sm outline-none focus:bg-accent/50"
         />
         <button type="button" onClick={save} title="Salvar link" data-testid="site-save"
@@ -77,15 +148,9 @@ function SiteCell({ value, onSave }) {
 
   return (
     <div className="group/site flex items-center gap-1 px-2">
-      <a
-        href={value}
-        target="_blank"
-        rel="noopener noreferrer"
-        data-testid="site-link"
-        title={value}
+      <a href={value} target="_blank" rel="noopener noreferrer" data-testid="site-link" title={value}
         style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}
-        className="truncate text-sm font-medium text-[#0000EE] hover:underline dark:text-blue-400"
-      >
+        className="truncate text-sm font-medium text-[#0000EE] hover:underline dark:text-blue-400">
         {value}
       </a>
       <button type="button" onClick={() => { setDraft(value || ""); setEditing(true); }} title="Editar link" data-testid="site-edit"
@@ -96,6 +161,14 @@ function SiteCell({ value, onSave }) {
   );
 }
 
+function tdBg(col, r) {
+  if (col.type === "venda") return r.mode === "venda" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30";
+  if (col.type === "margem") return r.mode === "margem" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30";
+  if (col.tint === "green") return "bg-emerald-50 dark:bg-emerald-950/40";
+  if (col.tint === "blue") return "bg-blue-50 dark:bg-blue-950/40";
+  return "";
+}
+
 export default function Budget() {
   const { bidId } = useParams();
   const navigate = useNavigate();
@@ -103,7 +176,17 @@ export default function Budget() {
   const [rows, setRows] = useState([]);
   const [defaults, setDefaults] = useState({ icms: 18, pis_cofins: 9.25 });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
+
+  // Hide/show columns + multi-select for bulk resize
+  const [hidden, setHidden] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("erp_hidden") || "[]")); } catch { return new Set(); }
+  });
+  const [selectedCols, setSelectedCols] = useState(() => new Set());
+  const [ctx, setCtx] = useState(null); // { x, y, idx }
+
+  const dirtyRef = useRef(false);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -119,35 +202,93 @@ export default function Budget() {
   }, [bidId]);
 
   const totals = useMemo(() => computeTotals(rows), [rows]);
-  const { widths: ew, startResize: eResize, total: eTotal } = useColumnResize(
-    "erp_widths",
-    [70, 70, 180, 110, 130, 120, 110, 70, 110, 100, 80, 100, 110, 110, 110, 110, 120, 110, 110, 120, 120, 52]
-  );
+  const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v2", DEFAULT_WIDTHS);
 
-  const updateRow = (id, patch) => setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
+  // Auto-save (debounced full-budget) — fires only after user edits.
+  useEffect(() => {
+    if (loading || !dirtyRef.current) return;
+    setSaveState("saving");
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      try {
+        const payload = {
+          rows: rows.map((r) => ({ ...r, ...computeRow(r) })),
+          summary: computeTotals(rows),
+        };
+        await api.put(`/bids/${bidId}/budget`, payload);
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1600);
+      } catch (e) {
+        setSaveState("idle");
+        toast.error(formatApiError(e.response?.data?.detail));
+      }
+    }, 1000);
+    return () => clearTimeout(timerRef.current);
+  }, [rows, loading, bidId]);
 
-  const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || v === "0" ? "margem" : "venda" });
+  const markDirty = () => { dirtyRef.current = true; };
+  const updateRow = (id, patch) => { markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r))); };
+  const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" });
   const onMargem = (id, v) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" });
+  const addRow = () => { markDirty(); setRows((p) => [...p, newRow(defaults)]); };
+  const removeRow = (id) => { markDirty(); setRows((p) => p.filter((r) => r._id !== id)); };
 
-  const addRow = () => setRows((p) => [...p, newRow(defaults)]);
-  const removeRow = (id) => setRows((p) => p.filter((r) => r._id !== id));
+  // Hide/show persistence
+  const persistHidden = (s) => { try { localStorage.setItem("erp_hidden", JSON.stringify([...s])); } catch { /* ignore */ } };
+  const hideCol = (idx) => { setHidden((p) => { const n = new Set(p); n.add(COLUMNS[idx].key); persistHidden(n); return n; }); setCtx(null); };
+  const showCol = (key) => { setHidden((p) => { const n = new Set(p); n.delete(key); persistHidden(n); return n; }); };
+  const showAll = () => { setHidden(() => { persistHidden(new Set()); return new Set(); }); setCtx(null); };
 
-  const save = async () => {
-    setSaving(true);
-    try {
-      const payload = {
-        rows: rows.map((r) => {
-          const c = computeRow(r);
-          return { ...r, ...c };
-        }),
-        summary: totals,
-      };
-      await api.put(`/bids/${bidId}/budget`, payload);
-      toast.success("Orçamento salvo e sincronizado");
-    } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail));
-    } finally { setSaving(false); }
+  const onHeaderClick = (idx, e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      setSelectedCols((p) => { const n = new Set(p); n.has(idx) ? n.delete(idx) : n.add(idx); return n; });
+    } else {
+      setSelectedCols(new Set());
+    }
   };
+  const onHeaderCtx = (idx, e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, idx }); };
+
+  useEffect(() => {
+    if (!ctx) return;
+    const close = () => setCtx(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [ctx]);
+
+  const visible = COLUMNS.map((c, i) => ({ c, i })).filter(({ c }) => !hidden.has(c.key));
+  const totalW = visible.reduce((a, { i }) => a + ew[i], 0) + 52;
+  const hiddenList = COLUMNS.filter((c) => hidden.has(c.key));
+  const selArr = [...selectedCols];
+
+  function renderCell(col, r, c) {
+    const tid = `erp-${col.key}-${r._id}`;
+    switch (col.type) {
+      case "select":
+        return <Checkbox data-testid={`erp-select-${r._id}`} checked={r.selecionado} onCheckedChange={(v) => updateRow(r._id, { selecionado: !!v })} />;
+      case "site":
+        return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
+      case "text":
+        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+      case "number":
+        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+      case "currency":
+        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+      case "percent":
+        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+      case "venda":
+        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} />;
+      case "margem":
+        return <EditableCell value={r.mode === "venda" ? c.markup.toFixed(1) : r.margem} type="percent" align="right" placeholder="%" readOnly={r.mode === "venda"} onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} />;
+      case "calc_pct":
+        return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-amber-600 dark:text-amber-400">{pct(c[col.key])}</div>;
+      case "calc_currency": {
+        const cls = col.tint === "green" ? "text-emerald-700 dark:text-emerald-300 font-semibold"
+          : col.tint === "blue" ? "text-blue-700 dark:text-blue-300 font-semibold" : "text-muted-foreground";
+        return <div className={cn("px-2 py-2 text-right font-mono-num text-sm whitespace-nowrap", cls)}>{brl(c[col.key])}</div>;
+      }
+      default: return null;
+    }
+  }
 
   if (loading) {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-brand" /></div>;
@@ -163,11 +304,18 @@ export default function Budget() {
             <p className="max-w-md truncate text-xs text-muted-foreground">{bid?.objeto}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          <div data-testid="budget-save-state" className="flex min-w-[92px] items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            {saveState === "saving" && (<><Loader2 size={13} className="animate-spin" /> Salvando…</>)}
+            {saveState === "saved" && (<><CheckCircle2 size={13} className="text-emerald-600" /> Salvo</>)}
+            {saveState === "idle" && (<><Cloud size={13} /> Salvo na nuvem</>)}
+          </div>
+          {hiddenList.length > 0 && (
+            <Button variant="outline" size="sm" data-testid="budget-show-all" onClick={showAll}>
+              <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
+            </Button>
+          )}
           <Button variant="outline" data-testid="budget-add-row" onClick={addRow}><Plus size={16} className="mr-1.5" /> Linha</Button>
-          <Button data-testid="budget-save" onClick={save} disabled={saving} className="bg-brand hover:bg-brand-hover">
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save size={16} className="mr-1.5" />} Salvar
-          </Button>
         </div>
       </header>
 
@@ -182,22 +330,34 @@ export default function Budget() {
 
         {/* Spreadsheet */}
         <div className="h-[calc(100%-7rem)] overflow-auto rounded-xl border border-border bg-card">
-          <table className="rt-fixed border-collapse text-sm" style={{ width: eTotal }}>
-            <colgroup>{ew.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+          <table className="rt-fixed border-collapse text-sm" style={{ width: totalW }}>
+            <colgroup>
+              {visible.map(({ i }) => <col key={i} style={{ width: ew[i] }} />)}
+              <col style={{ width: 52 }} />
+            </colgroup>
             <thead className="sticky top-0 z-20">
               <tr className="bg-muted">
-                {HEADERS.map((h, i) => (
-                  <th key={h} className={cn(
-                    "border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
-                    i === 0 && "sticky left-0 z-30 bg-muted"
-                  )}>{h}<ColResizer onMouseDown={eResize(i)} /></th>
+                {visible.map(({ c: col, i }) => (
+                  <th key={col.key}
+                    data-testid={`erp-th-${col.key}`}
+                    onClick={(e) => onHeaderClick(i, e)}
+                    onContextMenu={(e) => onHeaderCtx(i, e)}
+                    title="Clique com Ctrl/Shift p/ selecionar · botão direito p/ ocultar"
+                    className={cn(
+                      "select-none border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
+                      col.sticky && "sticky left-0 z-30 bg-muted",
+                      selectedCols.has(i) && "bg-brand/15 ring-1 ring-inset ring-brand/40"
+                    )}>
+                    {col.label}
+                    <ColResizer onMouseDown={eResize(i, selArr.length > 1 ? selArr : null)} />
+                  </th>
                 ))}
                 <th className="sticky right-0 z-30 border-b border-border bg-muted px-2 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={HEADERS.length + 1} className="px-4 py-16 text-center text-muted-foreground">
+                <tr><td colSpan={visible.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                   Nenhum item. Clique em <strong>Linha</strong> para adicionar.
                 </td></tr>
               )}
@@ -205,51 +365,14 @@ export default function Budget() {
                 const c = computeRow(r);
                 return (
                   <tr key={r._id} data-testid={`erp-row-${r._id}`} className={cn("border-b border-border", r.selecionado ? "bg-card" : "bg-muted/30")}>
-                    {/* 1 SELECIONAR */}
-                    <td className="sticky left-0 z-10 border-r border-border bg-inherit px-3 py-2">
-                      <Checkbox data-testid={`erp-select-${r._id}`} checked={r.selecionado} onCheckedChange={(v) => updateRow(r._id, { selecionado: !!v })} />
-                    </td>
-                    {/* 2-6 text */}
-                    <td className="border-r border-border"><input data-testid={`erp-item-${r._id}`} className={inputCls} value={r.item} onChange={(e) => updateRow(r._id, { item: e.target.value })} /></td>
-                    <td className="border-r border-border"><input className={cn(inputCls, "min-w-[160px]")} value={r.produto} onChange={(e) => updateRow(r._id, { produto: e.target.value })} placeholder="Produto" /></td>
-                    <td className="border-r border-border"><input className={inputCls} value={r.marca} onChange={(e) => updateRow(r._id, { marca: e.target.value })} /></td>
-                    <td className="border-r border-border"><input className={inputCls} value={r.fornecedor} onChange={(e) => updateRow(r._id, { fornecedor: e.target.value })} /></td>
-                    <td className="border-r border-border"><SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} /></td>
-                    {/* 7 valor compra */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.valor_compra} onChange={(e) => updateRow(r._id, { valor_compra: e.target.value })} /></td>
-                    {/* 8 qtd */}
-                    <td className="border-r border-border"><input type="number" className={cn(inputCls, "w-16")} value={r.qtd} onChange={(e) => updateRow(r._id, { qtd: e.target.value })} /></td>
-                    {/* 9 valor venda (yellow) */}
-                    <td className={cn("border-r border-border transition-colors", r.mode === "venda" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30")}>
-                      <input type="number" step="0.01" data-testid={`erp-venda-${r._id}`} className={inputCls} value={r.valor_venda ?? ""} onChange={(e) => onVenda(r._id, e.target.value)} placeholder="R$" />
-                    </td>
-                    {/* 10 margem (yellow) */}
-                    <td className={cn("border-r border-border transition-colors", r.mode === "margem" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30")}>
-                      <input type="number" step="0.01" data-testid={`erp-margem-${r._id}`} className={inputCls} value={r.mode === "venda" ? c.margem_calc.toFixed(1) : (r.margem ?? "")} onChange={(e) => onMargem(r._id, e.target.value)} placeholder="%" readOnly={r.mode === "venda"} />
-                    </td>
-                    {/* 11 icms */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={cn(inputCls, "w-16")} value={r.icms} onChange={(e) => updateRow(r._id, { icms: e.target.value })} /></td>
-                    {/* 12 pis */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={cn(inputCls, "w-20")} value={r.pis_cofins} onChange={(e) => updateRow(r._id, { pis_cofins: e.target.value })} /></td>
-                    {/* 13 outros sem */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.outros_sem_imp} onChange={(e) => updateRow(r._id, { outros_sem_imp: e.target.value })} /></td>
-                    {/* 14 outros com */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.outros_com_imp} onChange={(e) => updateRow(r._id, { outros_com_imp: e.target.value })} /></td>
-                    {/* 15 frete receber */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.frete_receber} onChange={(e) => updateRow(r._id, { frete_receber: e.target.value })} /></td>
-                    {/* 16 frete enviar */}
-                    <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.frete_enviar} onChange={(e) => updateRow(r._id, { frete_enviar: e.target.value })} /></td>
-                    {/* 17 custo base unit */}
-                    <td className="font-mono-num whitespace-nowrap border-r border-border px-2 py-2 text-muted-foreground">{brl(c.custo_base_unit)}</td>
-                    {/* 18 lucro unit (green) */}
-                    <td className="font-mono-num whitespace-nowrap border-r border-border bg-emerald-50 px-2 py-2 font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">{brl(c.lucro_unit)}</td>
-                    {/* 19 valor unidade (blue) */}
-                    <td className="font-mono-num whitespace-nowrap border-r border-border bg-blue-50 px-2 py-2 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{brl(c.valor_unidade)}</td>
-                    {/* 20 valor total (blue) */}
-                    <td className="font-mono-num whitespace-nowrap border-r border-border bg-blue-50 px-2 py-2 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{brl(c.valor_total)}</td>
-                    {/* 21 lucro total (green) */}
-                    <td className="font-mono-num whitespace-nowrap bg-emerald-50 px-2 py-2 font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">{brl(c.lucro_total)}</td>
-                    {/* remove */}
+                    {visible.map(({ c: col, i }) => (
+                      <td key={col.key}
+                        className={cn("border-r border-border",
+                          col.sticky ? "sticky left-0 z-10 bg-inherit px-3 py-2" : "p-0",
+                          tdBg(col, r))}>
+                        {renderCell(col, r, c)}
+                      </td>
+                    ))}
                     <td className="sticky right-0 z-10 bg-card px-2 py-2">
                       <button data-testid={`erp-remove-${r._id}`} onClick={() => removeRow(r._id)} className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-alert/10 hover:text-alert"><Trash2 size={14} /></button>
                     </td>
@@ -260,6 +383,38 @@ export default function Budget() {
           </table>
         </div>
       </div>
+
+      {/* Header context menu — hide / show columns */}
+      {ctx && (
+        <div
+          data-testid="col-context-menu"
+          style={{ top: ctx.y, left: ctx.x }}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-xl">
+          {!COLUMNS[ctx.idx].noHide && (
+            <button data-testid="ctx-hide-col" onClick={() => hideCol(ctx.idx)}
+              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent">
+              <EyeOff size={15} /> Ocultar “{COLUMNS[ctx.idx].label}”
+            </button>
+          )}
+          {hiddenList.length > 0 && (
+            <>
+              <div className="my-1 border-t border-border" />
+              <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Reexibir coluna</p>
+              {hiddenList.map((col) => (
+                <button key={col.key} data-testid={`ctx-show-${col.key}`} onClick={() => showCol(col.key)}
+                  className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent">
+                  <Eye size={15} /> {col.label}
+                </button>
+              ))}
+              <button data-testid="ctx-show-all" onClick={showAll}
+                className="mt-1 flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium text-brand hover:bg-accent">
+                <Eye size={15} /> Reexibir todas
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

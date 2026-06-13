@@ -38,6 +38,9 @@ export function computeRow(row) {
 
   const lucro_unit = valor_unidade - custo_base_unit - imposto_unit;
   const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
+  // Markup implícito sobre (Custo + Imposto) — usado para exibir na "Margem Desejada"
+  // quando o usuário dirige a linha pelo Valor de Venda.
+  const markup = custoMaisImposto > 0 ? (valor_unidade / custoMaisImposto - 1) * 100 : 0;
   const valor_total = valor_unidade * qtd;
   const lucro_total = lucro_unit * qtd;
 
@@ -49,6 +52,7 @@ export function computeRow(row) {
     valor_total,
     lucro_total,
     margem_real,
+    markup,
     margem_calc: margem_real,
     custo_total: custo_base_unit * qtd,
   };
