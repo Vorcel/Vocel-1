@@ -9,35 +9,47 @@ export function num(v) {
 
 export function computeRow(row) {
   const qtd = num(row.qtd) || 1;
-  const t = (num(row.icms) + num(row.pis_cofins)) / 100; // total tax rate
-  const extras =
-    (num(row.outros_sem_imp) + num(row.outros_com_imp) + num(row.frete_enviar) - num(row.frete_receber)) / qtd;
-  const custo_base_unit = num(row.valor_compra) + extras;
+  const icms_rate = num(row.icms) / 100;
+
+  const outrosComUnit = num(row.outros_com_imp) / qtd;
+  const outrosSemUnit = num(row.outros_sem_imp) / qtd;
+  const freteUnit = (num(row.frete_enviar) - num(row.frete_receber)) / qtd;
+
+  // Custo base por unidade (todos os custos)
+  const custo_base_unit = num(row.valor_compra) + outrosComUnit + outrosSemUnit + freteUnit;
+
+  // Imposto "POR FORA": ICMS aplicado sobre (Valor de Compra + Outros Gastos COM Imposto)
+  const imposto_base = num(row.valor_compra) + outrosComUnit;
+  const imposto_unit = imposto_base * icms_rate;
+
+  const custoMaisImposto = custo_base_unit + imposto_unit;
 
   let valor_unidade = 0;
-  let margem = 0;
-
   if (row.mode === "venda" && row.valor_venda != null && row.valor_venda !== "") {
+    // Gatilho pelo Valor de Venda Desejado
     valor_unidade = num(row.valor_venda);
-    margem = valor_unidade > 0 ? ((valor_unidade * (1 - t) - custo_base_unit) / valor_unidade) * 100 : 0;
   } else if (row.margem != null && row.margem !== "") {
+    // Gatilho pela Margem Desejada: Preço = (Custo + Imposto) x (1 + Margem%)
     const m = num(row.margem) / 100;
-    const denom = 1 - t - m;
-    valor_unidade = denom > 0 ? custo_base_unit / denom : 0;
-    margem = num(row.margem);
+    valor_unidade = custoMaisImposto * (1 + m);
+  } else {
+    valor_unidade = custoMaisImposto;
   }
 
-  const lucro_unit = valor_unidade * (1 - t) - custo_base_unit;
+  const lucro_unit = valor_unidade - custo_base_unit - imposto_unit;
+  const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
   const valor_total = valor_unidade * qtd;
   const lucro_total = lucro_unit * qtd;
 
   return {
     custo_base_unit,
+    imposto_unit,
     lucro_unit,
     valor_unidade,
     valor_total,
     lucro_total,
-    margem_calc: margem,
+    margem_real,
+    margem_calc: margem_real,
     custo_total: custo_base_unit * qtd,
   };
 }

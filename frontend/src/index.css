@@ -122,3 +122,8 @@ body {
 }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Remove spinners de inputs numéricos (Tela 2 - estilo planilha) */
+input.no-spin[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+input.no-spin[type="number"]::-webkit-outer-spin-button,
+input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
