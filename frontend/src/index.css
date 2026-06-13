@@ -105,6 +105,15 @@ body {
     text-overflow: ellipsis;
 }
 .rt-fixed th { position: relative; }
+/* Cabeçalhos compostos: permitem quebra em 2 linhas sem ellipsis (Tela 2) */
+.rt-fixed > thead > tr > th {
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: clip;
+    line-height: 1.2;
+    word-break: break-word;
+    vertical-align: middle;
+}
 
 /* Hero Banner "Licitações do Dia" — floating fixed-size cards */
 .hero-bid-card {

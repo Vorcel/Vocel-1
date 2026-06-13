@@ -27,26 +27,26 @@ const COLUMNS = [
   { key: "marca", label: "MARCA", w: 110, type: "text" },
   { key: "fornecedor", label: "FORNECEDOR", w: 130, type: "text" },
   { key: "site", label: "SITE", w: 120, type: "site" },
-  { key: "valor_compra", label: "VALOR COMPRA", w: 120, type: "currency" },
+  { key: "valor_compra", label: "VALOR COMPRA", head: ["VALOR", "COMPRA"], w: 110, type: "currency" },
   { key: "qtd", label: "QTD", w: 70, type: "number" },
-  { key: "valor_venda", label: "VALOR VENDA", w: 120, type: "venda" },
-  { key: "margem", label: "MARGEM DESEJADA", w: 140, type: "margem" },
-  { key: "margem_real", label: "MARGEM REAL", w: 120, type: "calc_pct" },
-  { key: "icms", label: "ICMS", w: 90, type: "percent" },
-  { key: "pis_cofins", label: "PIS/COFINS", w: 110, type: "percent" },
-  { key: "outros_sem_imp", label: "OUTROS S/ IMP.", w: 120, type: "currency" },
-  { key: "outros_com_imp", label: "OUTROS C/ IMP.", w: 120, type: "currency" },
-  { key: "frete_receber", label: "FRETE RECEBER", w: 120, type: "currency" },
-  { key: "frete_enviar", label: "FRETE ENVIAR", w: 120, type: "currency" },
-  { key: "custo_base_unit", label: "CUSTO BASE UN.", w: 130, type: "calc_currency" },
-  { key: "lucro_unit", label: "LUCRO UNIT.", w: 120, type: "calc_currency", tint: "green", neg: true },
-  { key: "valor_unidade", label: "VALOR DA UNIDADE", w: 130, type: "calc_currency", tint: "blue" },
-  { key: "lucro_total", label: "LUCRO TOTAL", w: 120, type: "calc_currency", tint: "green", neg: true },
-  { key: "valor_total", label: "VALOR TOTAL", w: 120, type: "calc_currency", tint: "blue" },
+  { key: "valor_venda", label: "VALOR VENDA", head: ["VALOR", "VENDA"], w: 110, type: "venda" },
+  { key: "margem", label: "MARGEM DESEJADA", head: ["MARGEM", "DESEJADA"], w: 110, type: "margem" },
+  { key: "margem_real", label: "MARGEM REAL", head: ["MARGEM", "REAL"], w: 100, type: "calc_pct" },
+  { key: "icms", label: "ICMS", w: 80, type: "percent" },
+  { key: "pis_cofins", label: "PIS/COFINS", head: ["PIS/", "COFINS"], w: 90, type: "percent" },
+  { key: "outros_sem_imp", label: "OUTROS S/ IMP.", head: ["OUTROS", "S/ IMP."], w: 100, type: "currency" },
+  { key: "outros_com_imp", label: "OUTROS C/ IMP.", head: ["OUTROS", "C/ IMP."], w: 100, type: "currency" },
+  { key: "frete_receber", label: "FRETE RECEBER", head: ["FRETE", "RECEBER"], w: 100, type: "currency" },
+  { key: "frete_enviar", label: "FRETE ENVIAR", head: ["FRETE", "ENVIAR"], w: 100, type: "currency" },
+  { key: "custo_base_unit", label: "CUSTO BASE UN.", head: ["CUSTO BASE", "UN."], w: 120, type: "calc_currency" },
+  { key: "lucro_unit", label: "LUCRO UNIT.", head: ["LUCRO", "UNIT."], w: 110, type: "calc_currency", tint: "green", neg: true },
+  { key: "valor_unidade", label: "VALOR DA UNIDADE", head: ["VALOR DA", "UNIDADE"], w: 120, type: "calc_currency", tint: "blue" },
+  { key: "lucro_total", label: "LUCRO TOTAL", head: ["LUCRO", "TOTAL"], w: 110, type: "calc_currency", tint: "green", neg: true },
+  { key: "valor_total", label: "VALOR TOTAL", head: ["VALOR", "TOTAL"], w: 110, type: "calc_currency", tint: "blue" },
 ];
 const DEFAULT_WIDTHS = COLUMNS.map((c) => c.w);
 const EDITABLE_TYPES = new Set(["text", "number", "currency", "percent", "venda", "margem"]);
-const isCellEditable = (col, r) => EDITABLE_TYPES.has(col.type) && !(col.type === "margem" && r.mode === "venda");
+const isCellEditable = (col) => EDITABLE_TYPES.has(col.type);
 
 function GlobalCard({ icon: Icon, label, value, accent, testid }) {
   return (
@@ -269,11 +269,11 @@ export default function Budget() {
     if (rowIdx < 0) return;
     const startIdx = cols.findIndex((c) => c.key === colKey);
     for (let k = startIdx + 1; k < cols.length; k++) {
-      if (isCellEditable(cols[k], rows[rowIdx])) { setFocusCell({ rowId, colKey: cols[k].key }); return; }
+      if (isCellEditable(cols[k])) { setFocusCell({ rowId, colKey: cols[k].key }); return; }
     }
     for (let ri = rowIdx + 1; ri < rows.length; ri++) {
       for (let k = 0; k < cols.length; k++) {
-        if (isCellEditable(cols[k], rows[ri])) { setFocusCell({ rowId: rows[ri]._id, colKey: cols[k].key }); return; }
+        if (isCellEditable(cols[k])) { setFocusCell({ rowId: rows[ri]._id, colKey: cols[k].key }); return; }
       }
     }
     setFocusCell(null);
@@ -322,6 +322,19 @@ export default function Budget() {
     return () => document.removeEventListener("click", close);
   }, [ctx]);
 
+  // Click-outside: desmarca a seleção de colunas ao clicar fora de um cabeçalho
+  // (inclui clicar numa célula da tabela para iniciar edição).
+  useEffect(() => {
+    if (selectedCols.size === 0) return;
+    const handler = (e) => {
+      if (e.target.closest && e.target.closest("th")) return; // mantém ao interagir com headers
+      if (draggingRef.current) return; // não interromper um arraste em andamento
+      setSelectedCols(new Set());
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [selectedCols]);
+
   const visible = COLUMNS.map((c, i) => ({ c, i })).filter(({ c }) => !hidden.has(c.key));
   const totalW = visible.reduce((a, { i }) => a + ew[i], 0) + 52;
   const hiddenList = COLUMNS.filter((c) => hidden.has(c.key));
@@ -364,7 +377,7 @@ export default function Budget() {
       case "venda":
         return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
       case "margem":
-        return <EditableCell value={r.mode === "venda" ? c.markup.toFixed(1) : r.margem} type="percent" align="right" placeholder="%" readOnly={r.mode === "venda"} onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
       case "calc_pct":
         return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-amber-600 dark:text-amber-400">{pct(c[col.key])}</div>;
       case "calc_currency": {
@@ -443,7 +456,7 @@ export default function Budget() {
                       )}>
                       {before.length > 0 && <HiddenIndicator cols={before} onReveal={() => revealCols(before)} side="left" />}
                       {isLast && trailingHidden.length > 0 && <HiddenIndicator cols={trailingHidden} onReveal={() => revealCols(trailingHidden)} side="right" />}
-                      {col.label}
+                      {col.head ? col.head.map((ln, k) => <span key={k} className="block leading-tight">{ln}</span>) : col.label}
                       <ColResizer onMouseDown={eResize(i, selArr.length > 1 ? selArr : null)} />
                     </th>
                   );

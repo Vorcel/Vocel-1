@@ -15,7 +15,8 @@ export function computeRow(row) {
 
   const outrosComUnit = num(row.outros_com_imp) / qtd;
   const outrosSemUnit = num(row.outros_sem_imp) / qtd;
-  const freteUnit = (num(row.frete_enviar) - num(row.frete_receber)) / qtd;
+  // Frete: tanto "Frete Enviar" quanto "Frete Receber" SOMAM ao custo (mesma mecânica).
+  const freteUnit = (num(row.frete_enviar) + num(row.frete_receber)) / qtd;
 
   // Custo Inicial (sem imposto): Produto + Frete + Outros Gastos
   const custo_inicial = num(row.valor_compra) + outrosComUnit + outrosSemUnit + freteUnit;
