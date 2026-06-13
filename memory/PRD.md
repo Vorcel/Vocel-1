@@ -41,6 +41,16 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Nome do OBJETO em destaque (h2 grande) no topo do painel + subtítulo (modalidade • portal • Empenho) e badges de status + "Pagamento Pendente".
 - Cada etapa mostra badge (Concluído/Em Andamento/Pendente) + chips de arquivo + uploader; donut e Resumo movidos para grade abaixo. Clique na etapa sincroniza status/donut. Verificado 100% (iteration_6).
 
+## Updates (Iteration 7 — Tela 2 ERP estilo Excel)
+- Edição inline: células viram `<input>` ao clicar (testid `-view` → input). Commit no Enter/Blur, cancela no Esc; spinners ocultos.
+- Auto-save: removido o botão "Salvar" global; salvamento debounced (~1s) do orçamento inteiro via PUT `/bids/{id}/budget`. Indicador `budget-save-state` (Salvando/Salvo/Salvo na nuvem).
+- Motor `calc.js`: ICMS "por fora" (base = Valor Compra + Outros C/ Imposto); `Preço = (Custo+Imposto)×(1+Margem%)`; novos campos `markup` e `margem_real`.
+- Novas colunas: MARGEM DESEJADA (markup editável, amarela), MARGEM REAL (somente leitura, laranja), IMPOSTO UN. Exclusão mútua Valor Venda ↔ Margem Desejada mantida.
+- Formatação no modo leitura: moeda R$ 0,00 e percentual 0,0%.
+- Ocultar/Reexibir colunas via menu de contexto (botão direito no `<th>`, testid `col-context-menu`); SELECIONAR não pode ser oculta; estado em localStorage `erp_hidden`.
+- Redimensionamento em lote: Ctrl/Shift+clique seleciona colunas; arrastar uma aplica a mesma largura px às selecionadas (`useColumnResize.startResize(i, syncIndices)`).
+- Verificado: frontend 100% (iteration_7), persistência server-side OK.
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.

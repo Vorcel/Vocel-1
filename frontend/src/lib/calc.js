@@ -1,6 +1,7 @@
 // Pricing engine for the ERP budget table (Tela 2).
-// Tax-inclusive ("por dentro") markup model that is fully reversible
-// between MARGEM % (margin mode) and VALOR DE VENDA (sale mode).
+// Tax-exclusive ("por fora") markup model: ICMS is applied on top of
+// (Valor de Compra + Outros Gastos COM Imposto). Fully reversible between
+// MARGEM DESEJADA (markup mode) and VALOR DE VENDA (sale mode).
 
 export function num(v) {
   const n = parseFloat(v);
