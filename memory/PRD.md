@@ -68,6 +68,12 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Regressão: testes unitários `src/lib/__tests__/calc.test.js` (5/5) travando as regras do motor (frete soma, PIS por dentro, ICMS por fora, margem markup, lucro negativo).
 - Verificado: frontend 100% (iteration_9) + unit tests verdes.
 
+## Updates (Iteration 10 — Fonte numérica, cadastro fechado, margem por dentro)
+- Tipografia: fonte condensada 'CondNum' (Roboto Condensed) aplicada EXCLUSIVAMENTE aos dígitos 0-9 via `@font-face unicode-range U+0030-0039`; letras seguem Hanken Grotesk. `tabular-nums` global. CondNum incluído em body, h1-5, `.font-mono-num` e nas famílias do Tailwind (sans/heading/mono) → cobertura global.
+- Segurança: cadastro público DESATIVADO. `POST /api/auth/register` → 403 (sem gravar usuário); Login.jsx só com login (sem "Cadastre-se"/Nome); rotas `/register` e `/cadastro` → `/login`; `*` autenticado → `/`. Login/tokens/seed/admin preservados.
+- Cálculo (Tela 2): Margem "por dentro" (markup divisor) → `VALOR UNIDADE = Custo Total / (1 - Margem%/100)`; `MARGEM REAL = (Preço - Custo Total)/Preço`. ICMS mantido "por fora" no Custo Total (opção C). Cascata recalcula Lucro Unit/Total e Valor Total.
+- Verificado: backend 29/29 pytest (`/app/backend/tests/backend_test.py`), frontend 100% (iteration_10), 5/5 unit tests `calc.test.js` (R$100 + 10% = R$111,11).
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.

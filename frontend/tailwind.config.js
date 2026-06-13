@@ -8,9 +8,9 @@ module.exports = {
   theme: {
         extend: {
                 fontFamily: {
-                        sans: ['Hanken Grotesk', 'sans-serif'],
-                        heading: ['Hanken Grotesk', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace']
+                        sans: ['CondNum', 'Hanken Grotesk', 'sans-serif'],
+                        heading: ['CondNum', 'Hanken Grotesk', 'sans-serif'],
+                        mono: ['CondNum', 'JetBrains Mono', 'monospace']
                 },
                 borderRadius: {
                         lg: 'var(--radius)',
