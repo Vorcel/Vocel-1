@@ -19,7 +19,7 @@ const newRow = (defaults) => ({
   mode: "margem",
 });
 
-// Column model — drives header, body, resizing, hide/show.
+// Column model — drives header, body, resizing, hide/show, keyboard nav.
 const COLUMNS = [
   { key: "selecionar", label: "SELECIONAR", w: 70, type: "select", sticky: true, noHide: true },
   { key: "item", label: "ITEM", w: 70, type: "text" },
@@ -38,14 +38,15 @@ const COLUMNS = [
   { key: "outros_com_imp", label: "OUTROS C/ IMP.", w: 120, type: "currency" },
   { key: "frete_receber", label: "FRETE RECEBER", w: 120, type: "currency" },
   { key: "frete_enviar", label: "FRETE ENVIAR", w: 120, type: "currency" },
-  { key: "custo_base_unit", label: "CUSTO BASE UN.", w: 120, type: "calc_currency" },
-  { key: "imposto_unit", label: "IMPOSTO UN.", w: 110, type: "calc_currency" },
-  { key: "lucro_unit", label: "LUCRO UN.", w: 110, type: "calc_currency", tint: "green" },
-  { key: "valor_unidade", label: "VALOR UN.", w: 110, type: "calc_currency", tint: "blue" },
+  { key: "custo_base_unit", label: "CUSTO BASE UN.", w: 130, type: "calc_currency" },
+  { key: "lucro_unit", label: "LUCRO UNIT.", w: 120, type: "calc_currency", tint: "green", neg: true },
+  { key: "valor_unidade", label: "VALOR DA UNIDADE", w: 130, type: "calc_currency", tint: "blue" },
+  { key: "lucro_total", label: "LUCRO TOTAL", w: 120, type: "calc_currency", tint: "green", neg: true },
   { key: "valor_total", label: "VALOR TOTAL", w: 120, type: "calc_currency", tint: "blue" },
-  { key: "lucro_total", label: "LUCRO TOTAL", w: 120, type: "calc_currency", tint: "green" },
 ];
 const DEFAULT_WIDTHS = COLUMNS.map((c) => c.w);
+const EDITABLE_TYPES = new Set(["text", "number", "currency", "percent", "venda", "margem"]);
+const isCellEditable = (col, r) => EDITABLE_TYPES.has(col.type) && !(col.type === "margem" && r.mode === "venda");
 
 function GlobalCard({ icon: Icon, label, value, accent, testid }) {
   return (
@@ -60,18 +61,23 @@ function GlobalCard({ icon: Icon, label, value, accent, testid }) {
 }
 
 // Excel-style editable cell: read-only formatted view that turns into an input
-// on click. Commits on Enter/Blur, cancels on Escape.
-function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid }) {
+// on click. Commits on Enter/Tab (and advances) or Blur. Cancels on Escape.
+function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid, shouldFocus, onAdvance }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const ref = useRef(null);
+
+  useEffect(() => {
+    if (shouldFocus && !readOnly) { setDraft(value ?? ""); setEditing(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldFocus]);
 
   useEffect(() => {
     if (editing && ref.current) { ref.current.focus(); ref.current.select(); }
   }, [editing]);
 
   const start = () => { if (readOnly) return; setDraft(value ?? ""); setEditing(true); };
-  const commit = () => { setEditing(false); onCommit(draft); };
+  const commit = (advance) => { setEditing(false); onCommit(draft); if (advance && onAdvance) onAdvance(); };
 
   const right = align === "right";
 
@@ -84,10 +90,10 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
         step="0.01"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => commit(false)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); commit(); }
-          if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); commit(true); }
+          else if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
         }}
         placeholder={placeholder}
         className={cn("no-spin w-full bg-transparent px-2 py-2 text-sm outline-none ring-2 ring-inset ring-brand/50",
@@ -161,9 +167,30 @@ function SiteCell({ value, onSave }) {
   );
 }
 
-function tdBg(col, r) {
+// Indicator shown on a header edge when adjacent columns are hidden.
+function HiddenIndicator({ cols, onReveal, side = "left" }) {
+  return (
+    <span
+      data-testid="hidden-col-indicator"
+      title={`Colunas ocultas: ${cols.map((c) => c.label).join(", ")} — duplo clique para reexibir`}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => { e.stopPropagation(); onReveal(); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onReveal(); }}
+      className={cn("absolute top-0 z-30 flex h-full w-2.5 cursor-pointer items-center justify-center bg-blue-500/80 hover:bg-blue-600",
+        side === "left" ? "left-0" : "right-0")}
+    >
+      <span className="flex gap-[2px]">
+        <span className="block h-3 w-[1.5px] bg-white" />
+        <span className="block h-3 w-[1.5px] bg-white" />
+      </span>
+    </span>
+  );
+}
+
+function tdBg(col, r, c) {
   if (col.type === "venda") return r.mode === "venda" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30";
   if (col.type === "margem") return r.mode === "margem" ? "bg-yellow-200/70 dark:bg-yellow-900/40" : "bg-yellow-50 dark:bg-yellow-950/30";
+  if (col.neg && c[col.key] < 0) return "bg-[#FCE8E6] dark:bg-red-950/40";
   if (col.tint === "green") return "bg-emerald-50 dark:bg-emerald-950/40";
   if (col.tint === "blue") return "bg-blue-50 dark:bg-blue-950/40";
   return "";
@@ -178,15 +205,17 @@ export default function Budget() {
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
 
-  // Hide/show columns + multi-select for bulk resize
   const [hidden, setHidden] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("erp_hidden") || "[]")); } catch { return new Set(); }
   });
   const [selectedCols, setSelectedCols] = useState(() => new Set());
-  const [ctx, setCtx] = useState(null); // { x, y, idx }
+  const [ctx, setCtx] = useState(null); // { x, y, idx, targets }
+  const [focusCell, setFocusCell] = useState(null); // { rowId, colKey }
 
   const dirtyRef = useRef(false);
   const timerRef = useRef(null);
+  const dragStartVis = useRef(null);
+  const draggingRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -202,7 +231,7 @@ export default function Budget() {
   }, [bidId]);
 
   const totals = useMemo(() => computeTotals(rows), [rows]);
-  const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v2", DEFAULT_WIDTHS);
+  const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v3", DEFAULT_WIDTHS);
 
   // Auto-save (debounced full-budget) — fires only after user edits.
   useEffect(() => {
@@ -233,20 +262,58 @@ export default function Budget() {
   const addRow = () => { markDirty(); setRows((p) => [...p, newRow(defaults)]); };
   const removeRow = (id) => { markDirty(); setRows((p) => p.filter((r) => r._id !== id)); };
 
+  // Keyboard nav: advance focus to next editable cell (right; wraps to next row).
+  const advanceFocus = (rowId, colKey) => {
+    const cols = COLUMNS.filter((c) => !hidden.has(c.key));
+    const rowIdx = rows.findIndex((r) => r._id === rowId);
+    if (rowIdx < 0) return;
+    const startIdx = cols.findIndex((c) => c.key === colKey);
+    for (let k = startIdx + 1; k < cols.length; k++) {
+      if (isCellEditable(cols[k], rows[rowIdx])) { setFocusCell({ rowId, colKey: cols[k].key }); return; }
+    }
+    for (let ri = rowIdx + 1; ri < rows.length; ri++) {
+      for (let k = 0; k < cols.length; k++) {
+        if (isCellEditable(cols[k], rows[ri])) { setFocusCell({ rowId: rows[ri]._id, colKey: cols[k].key }); return; }
+      }
+    }
+    setFocusCell(null);
+  };
+
   // Hide/show persistence
   const persistHidden = (s) => { try { localStorage.setItem("erp_hidden", JSON.stringify([...s])); } catch { /* ignore */ } };
-  const hideCol = (idx) => { setHidden((p) => { const n = new Set(p); n.add(COLUMNS[idx].key); persistHidden(n); return n; }); setCtx(null); };
-  const showCol = (key) => { setHidden((p) => { const n = new Set(p); n.delete(key); persistHidden(n); return n; }); };
+  const hideCols = (targets) => {
+    setHidden((p) => { const n = new Set(p); targets.forEach((ti) => { if (!COLUMNS[ti].noHide) n.add(COLUMNS[ti].key); }); persistHidden(n); return n; });
+    setSelectedCols(new Set());
+    setCtx(null);
+  };
+  const revealCols = (cols) => setHidden((p) => { const n = new Set(p); cols.forEach((c) => n.delete(c.key)); persistHidden(n); return n; });
   const showAll = () => { setHidden(() => { persistHidden(new Set()); return new Set(); }); setCtx(null); };
 
-  const onHeaderClick = (idx, e) => {
+  // Column selection: drag-select + Ctrl/Shift click
+  const onThMouseDown = (vpos, i, e) => {
+    if (e.button !== 0) return;
     if (e.ctrlKey || e.metaKey || e.shiftKey) {
-      setSelectedCols((p) => { const n = new Set(p); n.has(idx) ? n.delete(idx) : n.add(idx); return n; });
-    } else {
-      setSelectedCols(new Set());
+      setSelectedCols((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+      return;
     }
+    dragStartVis.current = vpos;
+    draggingRef.current = true;
+    setSelectedCols(new Set([i]));
+    const onUp = () => { draggingRef.current = false; dragStartVis.current = null; document.removeEventListener("mouseup", onUp); };
+    document.addEventListener("mouseup", onUp);
   };
-  const onHeaderCtx = (idx, e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, idx }); };
+  const onThEnter = (vpos, vis) => {
+    if (!draggingRef.current || dragStartVis.current == null) return;
+    const a = Math.min(dragStartVis.current, vpos), b = Math.max(dragStartVis.current, vpos);
+    const n = new Set();
+    for (let k = a; k <= b; k++) n.add(vis[k].i);
+    setSelectedCols(n);
+  };
+  const onHeaderCtx = (idx, e) => {
+    e.preventDefault();
+    const targets = selectedCols.has(idx) && selectedCols.size > 1 ? [...selectedCols] : [idx];
+    setCtx({ x: e.clientX, y: e.clientY, idx, targets });
+  };
 
   useEffect(() => {
     if (!ctx) return;
@@ -260,31 +327,53 @@ export default function Budget() {
   const hiddenList = COLUMNS.filter((c) => hidden.has(c.key));
   const selArr = [...selectedCols];
 
+  // Hidden columns located immediately to the left of a visible column position.
+  const hiddenBefore = (vpos) => {
+    const curI = visible[vpos].i;
+    const prevI = vpos === 0 ? -1 : visible[vpos - 1].i;
+    const arr = [];
+    for (let k = prevI + 1; k < curI; k++) if (hidden.has(COLUMNS[k].key)) arr.push(COLUMNS[k]);
+    return arr;
+  };
+  // Trailing hidden columns after the last visible one.
+  const trailingHidden = (() => {
+    if (visible.length === 0) return [];
+    const lastI = visible[visible.length - 1].i;
+    const arr = [];
+    for (let k = lastI + 1; k < COLUMNS.length; k++) if (hidden.has(COLUMNS[k].key)) arr.push(COLUMNS[k]);
+    return arr;
+  })();
+
   function renderCell(col, r, c) {
     const tid = `erp-${col.key}-${r._id}`;
+    const focus = focusCell?.rowId === r._id && focusCell?.colKey === col.key;
+    const adv = () => advanceFocus(r._id, col.key);
     switch (col.type) {
       case "select":
         return <Checkbox data-testid={`erp-select-${r._id}`} checked={r.selecionado} onCheckedChange={(v) => updateRow(r._id, { selecionado: !!v })} />;
       case "site":
         return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
       case "text":
-        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
       case "number":
-        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
       case "currency":
-        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
       case "percent":
-        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} />;
+        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
       case "venda":
-        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} />;
+        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
       case "margem":
-        return <EditableCell value={r.mode === "venda" ? c.markup.toFixed(1) : r.margem} type="percent" align="right" placeholder="%" readOnly={r.mode === "venda"} onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} />;
+        return <EditableCell value={r.mode === "venda" ? c.markup.toFixed(1) : r.margem} type="percent" align="right" placeholder="%" readOnly={r.mode === "venda"} onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
       case "calc_pct":
         return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-amber-600 dark:text-amber-400">{pct(c[col.key])}</div>;
       case "calc_currency": {
-        const cls = col.tint === "green" ? "text-emerald-700 dark:text-emerald-300 font-semibold"
+        const val = c[col.key];
+        const neg = col.neg && val < 0;
+        const cls = neg ? "text-[#D93025] dark:text-red-400 font-semibold"
+          : col.tint === "green" ? "text-emerald-700 dark:text-emerald-300 font-semibold"
           : col.tint === "blue" ? "text-blue-700 dark:text-blue-300 font-semibold" : "text-muted-foreground";
-        return <div className={cn("px-2 py-2 text-right font-mono-num text-sm whitespace-nowrap", cls)}>{brl(c[col.key])}</div>;
+        return <div className={cn("px-2 py-2 text-right font-mono-num text-sm whitespace-nowrap", cls)}>{brl(val)}</div>;
       }
       default: return null;
     }
@@ -337,21 +426,28 @@ export default function Budget() {
             </colgroup>
             <thead className="sticky top-0 z-20">
               <tr className="bg-muted">
-                {visible.map(({ c: col, i }) => (
-                  <th key={col.key}
-                    data-testid={`erp-th-${col.key}`}
-                    onClick={(e) => onHeaderClick(i, e)}
-                    onContextMenu={(e) => onHeaderCtx(i, e)}
-                    title="Clique com Ctrl/Shift p/ selecionar · botão direito p/ ocultar"
-                    className={cn(
-                      "select-none border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
-                      col.sticky && "sticky left-0 z-30 bg-muted",
-                      selectedCols.has(i) && "bg-brand/15 ring-1 ring-inset ring-brand/40"
-                    )}>
-                    {col.label}
-                    <ColResizer onMouseDown={eResize(i, selArr.length > 1 ? selArr : null)} />
-                  </th>
-                ))}
+                {visible.map(({ c: col, i }, vpos) => {
+                  const before = hiddenBefore(vpos);
+                  const isLast = vpos === visible.length - 1;
+                  return (
+                    <th key={col.key}
+                      data-testid={`erp-th-${col.key}`}
+                      onMouseDown={(e) => onThMouseDown(vpos, i, e)}
+                      onMouseEnter={() => onThEnter(vpos, visible)}
+                      onContextMenu={(e) => onHeaderCtx(i, e)}
+                      title="Arraste p/ selecionar colunas · Ctrl+clique p/ multi-seleção · botão direito p/ ocultar"
+                      className={cn(
+                        "select-none border-b border-r border-border px-2 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground",
+                        col.sticky && "sticky left-0 z-30 bg-muted",
+                        selectedCols.has(i) && "!bg-[#E8F0FE] ring-1 ring-inset ring-blue-400 dark:!bg-blue-950/50"
+                      )}>
+                      {before.length > 0 && <HiddenIndicator cols={before} onReveal={() => revealCols(before)} side="left" />}
+                      {isLast && trailingHidden.length > 0 && <HiddenIndicator cols={trailingHidden} onReveal={() => revealCols(trailingHidden)} side="right" />}
+                      {col.label}
+                      <ColResizer onMouseDown={eResize(i, selArr.length > 1 ? selArr : null)} />
+                    </th>
+                  );
+                })}
                 <th className="sticky right-0 z-30 border-b border-border bg-muted px-2 py-3"></th>
               </tr>
             </thead>
@@ -369,7 +465,8 @@ export default function Budget() {
                       <td key={col.key}
                         className={cn("border-r border-border",
                           col.sticky ? "sticky left-0 z-10 bg-inherit px-3 py-2" : "p-0",
-                          tdBg(col, r))}>
+                          tdBg(col, r, c),
+                          selectedCols.has(i) && "!bg-[#E8F0FE] dark:!bg-blue-950/40")}>
                         {renderCell(col, r, c)}
                       </td>
                     ))}
@@ -390,11 +487,12 @@ export default function Budget() {
           data-testid="col-context-menu"
           style={{ top: ctx.y, left: ctx.x }}
           onClick={(e) => e.stopPropagation()}
-          className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-xl">
-          {!COLUMNS[ctx.idx].noHide && (
-            <button data-testid="ctx-hide-col" onClick={() => hideCol(ctx.idx)}
+          className="fixed z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-xl">
+          {ctx.targets.some((ti) => !COLUMNS[ti].noHide) && (
+            <button data-testid="ctx-hide-col" onClick={() => hideCols(ctx.targets)}
               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent">
-              <EyeOff size={15} /> Ocultar “{COLUMNS[ctx.idx].label}”
+              <EyeOff size={15} />
+              {ctx.targets.length > 1 ? `Ocultar Colunas (${ctx.targets.filter((ti) => !COLUMNS[ti].noHide).length})` : `Ocultar “${COLUMNS[ctx.idx].label}”`}
             </button>
           )}
           {hiddenList.length > 0 && (
@@ -402,7 +500,7 @@ export default function Budget() {
               <div className="my-1 border-t border-border" />
               <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Reexibir coluna</p>
               {hiddenList.map((col) => (
-                <button key={col.key} data-testid={`ctx-show-${col.key}`} onClick={() => showCol(col.key)}
+                <button key={col.key} data-testid={`ctx-show-${col.key}`} onClick={() => { revealCols([col]); setCtx(null); }}
                   className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent">
                   <Eye size={15} /> {col.label}
                 </button>

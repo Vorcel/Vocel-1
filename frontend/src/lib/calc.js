@@ -1,7 +1,7 @@
 // Pricing engine for the ERP budget table (Tela 2).
-// Tax-exclusive ("por fora") markup model: ICMS is applied on top of
-// (Valor de Compra + Outros Gastos COM Imposto). Fully reversible between
-// MARGEM DESEJADA (markup mode) and VALOR DE VENDA (sale mode).
+// Cost model: PIS/COFINS is embedded "por dentro" (gross-up) into the unit
+// base cost; ICMS is added "por fora" on (Valor Compra + Outros C/ Imposto).
+// Reversible between MARGEM DESEJADA (markup over total cost) and VALOR DE VENDA.
 
 export function num(v) {
   const n = parseFloat(v);
@@ -11,43 +11,50 @@ export function num(v) {
 export function computeRow(row) {
   const qtd = num(row.qtd) || 1;
   const icms_rate = num(row.icms) / 100;
+  const pis_rate = num(row.pis_cofins) / 100;
 
   const outrosComUnit = num(row.outros_com_imp) / qtd;
   const outrosSemUnit = num(row.outros_sem_imp) / qtd;
   const freteUnit = (num(row.frete_enviar) - num(row.frete_receber)) / qtd;
 
-  // Custo base por unidade (todos os custos)
-  const custo_base_unit = num(row.valor_compra) + outrosComUnit + outrosSemUnit + freteUnit;
+  // Custo Inicial (sem imposto): Produto + Frete + Outros Gastos
+  const custo_inicial = num(row.valor_compra) + outrosComUnit + outrosSemUnit + freteUnit;
 
-  // Imposto "POR FORA": ICMS aplicado sobre (Valor de Compra + Outros Gastos COM Imposto)
-  const imposto_base = num(row.valor_compra) + outrosComUnit;
-  const imposto_unit = imposto_base * icms_rate;
+  // Custo Base Un.: PIS/COFINS "POR DENTRO" (gross-up) embutido na própria base.
+  // Custo Base = Custo Inicial / (1 - PIS%/100)
+  const pis_div = 1 - pis_rate;
+  const custo_base_unit = pis_div > 0 ? custo_inicial / pis_div : custo_inicial;
 
-  const custoMaisImposto = custo_base_unit + imposto_unit;
+  // ICMS "POR FORA": aplicado sobre (Valor de Compra + Outros Gastos COM Imposto).
+  // Não é exibido isoladamente; entra no Custo Total que serve de base para a margem.
+  const imposto_icms = (num(row.valor_compra) + outrosComUnit) * icms_rate;
+
+  // Custo Total = Custo Base Un. (com PIS por dentro) + ICMS por fora
+  const custoMaisImposto = custo_base_unit + imposto_icms;
 
   let valor_unidade = 0;
   if (row.mode === "venda" && row.valor_venda != null && row.valor_venda !== "") {
     // Gatilho pelo Valor de Venda Desejado
     valor_unidade = num(row.valor_venda);
   } else if (row.margem != null && row.margem !== "") {
-    // Gatilho pela Margem Desejada: Preço = (Custo + Imposto) x (1 + Margem%)
+    // Gatilho pela Margem Desejada: Preço = Custo Total x (1 + Margem%)
     const m = num(row.margem) / 100;
     valor_unidade = custoMaisImposto * (1 + m);
   } else {
     valor_unidade = custoMaisImposto;
   }
 
-  const lucro_unit = valor_unidade - custo_base_unit - imposto_unit;
-  const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
-  // Markup implícito sobre (Custo + Imposto) — usado para exibir na "Margem Desejada"
-  // quando o usuário dirige a linha pelo Valor de Venda.
-  const markup = custoMaisImposto > 0 ? (valor_unidade / custoMaisImposto - 1) * 100 : 0;
+  const lucro_unit = valor_unidade - custoMaisImposto;
+  // Margem Real "por dentro": markup sobre o Custo Total — mesma base/fórmula
+  // da Margem Desejada (lucro / Custo Total).
+  const margem_real = custoMaisImposto > 0 ? (lucro_unit / custoMaisImposto) * 100 : 0;
+  const markup = margem_real;
   const valor_total = valor_unidade * qtd;
   const lucro_total = lucro_unit * qtd;
 
   return {
     custo_base_unit,
-    imposto_unit,
+    imposto_icms,
     lucro_unit,
     valor_unidade,
     valor_total,
