@@ -51,6 +51,15 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Redimensionamento em lote: Ctrl/Shift+clique seleciona colunas; arrastar uma aplica a mesma largura px às selecionadas (`useColumnResize.startResize(i, syncIndices)`).
 - Verificado: frontend 100% (iteration_7), persistência server-side OK.
 
+## Updates (Iteration 8 — Tela 2 ERP: 4 refinamentos fiscais/UX)
+- Custo: PIS/COFINS "por dentro" (gross-up) embutido no Custo Base Un. = Custo Inicial ÷ (1 − PIS%/100); ICMS mantido "por fora" sobre (Valor Compra + Outros C/ Imposto). Coluna "IMPOSTO UN." removida.
+- Margem Real "por dentro": markup sobre o Custo Total (mesma base/fórmula da Margem Desejada); ambas alinham. `calc.js` atualizado.
+- Reordenação das colunas finais: CUSTO BASE UN. → LUCRO UNIT. → VALOR DA UNIDADE → LUCRO TOTAL → VALOR TOTAL.
+- Formatação condicional de prejuízo: LUCRO UNIT./LUCRO TOTAL negativos ficam vermelhos (texto #D93025, fundo #FCE8E6).
+- Seleção de colunas por arraste (+ Ctrl/Shift), destaque #E8F0FE em header e células; "Ocultar Colunas (N)" no menu de contexto; indicador `hidden-col-indicator` com duplo-clique p/ reexibir.
+- Navegação por teclado: Enter/Tab salva e avança o foco p/ a próxima célula editável à direita (pula calculadas/SELECIONAR/SITE; quebra p/ próxima linha).
+- Verificado: frontend 100% (iteration_8).
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
