@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Save, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet, Pencil, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
@@ -38,6 +38,63 @@ function GlobalCard({ icon: Icon, label, value, accent, testid }) {
 }
 
 const inputCls = "w-full bg-transparent px-2 py-2 text-sm outline-none focus:bg-accent/50";
+
+// Dynamic, editable URL cell: clickable link (view) <-> input (edit via pencil).
+function SiteCell({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || "");
+
+  const save = () => {
+    let v = draft.trim();
+    if (v && !/^https?:\/\//i.test(v)) v = "https://" + v;
+    onSave(v);
+    setEditing(false);
+  };
+
+  if (!value || editing) {
+    return (
+      <div className="flex items-center gap-1 px-1">
+        <input
+          type="url"
+          autoFocus={editing}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); save(); }
+            if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
+          }}
+          placeholder="https://..."
+          data-testid="site-input"
+          className="w-full bg-transparent py-2 text-sm outline-none focus:bg-accent/50"
+        />
+        <button type="button" onClick={save} title="Salvar link" data-testid="site-save"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40">
+          <Check size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group/site flex items-center gap-1 px-2">
+      <a
+        href={value}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid="site-link"
+        title={value}
+        style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}
+        className="truncate text-sm font-medium text-[#0000EE] hover:underline dark:text-blue-400"
+      >
+        {value}
+      </a>
+      <button type="button" onClick={() => { setDraft(value || ""); setEditing(true); }} title="Editar link" data-testid="site-edit"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover/site:opacity-100">
+        <Pencil size={13} />
+      </button>
+    </div>
+  );
+}
 
 export default function Budget() {
   const { bidId } = useParams();
@@ -157,7 +214,7 @@ export default function Budget() {
                     <td className="border-r border-border"><input className={cn(inputCls, "min-w-[160px]")} value={r.produto} onChange={(e) => updateRow(r._id, { produto: e.target.value })} placeholder="Produto" /></td>
                     <td className="border-r border-border"><input className={inputCls} value={r.marca} onChange={(e) => updateRow(r._id, { marca: e.target.value })} /></td>
                     <td className="border-r border-border"><input className={inputCls} value={r.fornecedor} onChange={(e) => updateRow(r._id, { fornecedor: e.target.value })} /></td>
-                    <td className="border-r border-border"><input className={inputCls} value={r.site} onChange={(e) => updateRow(r._id, { site: e.target.value })} /></td>
+                    <td className="border-r border-border"><SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} /></td>
                     {/* 7 valor compra */}
                     <td className="border-r border-border"><input type="number" step="0.01" className={inputCls} value={r.valor_compra} onChange={(e) => updateRow(r._id, { valor_compra: e.target.value })} /></td>
                     {/* 8 qtd */}
