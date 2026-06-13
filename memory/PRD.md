@@ -60,6 +60,14 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Navegação por teclado: Enter/Tab salva e avança o foco p/ a próxima célula editável à direita (pula calculadas/SELECIONAR/SITE; quebra p/ próxima linha).
 - Verificado: frontend 100% (iteration_8).
 
+## Updates (Iteration 9 — Tela 2 ERP: frete, exclusão mútua, cabeçalhos, seleção)
+- Frete Receber agora SOMA ao custo (mesma mecânica do Frete Enviar) — `calc.js`.
+- Margem Desejada sempre desbloqueada (sem readonly/disabled); exclusão mútua bidirecional com Valor Venda (digitar em uma limpa a outra; último comando vence). Margem Real continua read-only mostrando o markup.
+- Cabeçalhos compostos em 2 linhas (campo `head` por coluna; ex.: PIS/ + COFINS, MARGEM + DESEJADA), com `white-space: normal; line-height: 1.2` — sem afetar o resize.
+- Click-outside: clicar fora de um `<th>` (fundo, card ou célula) limpa a seleção de colunas e o destaque.
+- Regressão: testes unitários `src/lib/__tests__/calc.test.js` (5/5) travando as regras do motor (frete soma, PIS por dentro, ICMS por fora, margem markup, lucro negativo).
+- Verificado: frontend 100% (iteration_9) + unit tests verdes.
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
