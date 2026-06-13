@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 10 — validated 3 new updates (AUTH #2 close public signup, CALC #3 margem 'por dentro', FONT #1 CondNum for digits only). Backend: 29/29 pytest passed (including new test_register_disabled asserting POST /api/auth/register -> 403 + user NOT created; new test_change_password_still_works confirming admin flow intact; login/me/seed/list/bids/budget/execution/preferences/company/upload all green). Frontend: Login page has NO 'Cadastre-se' link, NO name input, shows 'Acesso restrito. Em caso de dúvidas, contate o administrador.'; admin@licita.com/admin123 logs in -> dashboard at '/'; /register and /cadastro both 302 -> /login; authenticated /foobar -> /. CALC #3 verified at /orcamento/6a1c5c9fe2f2b24398f3873e: with valor_compra=100 and margem=10, global totals cards show Valor Total da Proposta=R$ 111,11, Lucro Líquido=R$ 11,11, Margem Média=10,0% and erp-margem-{rid}-view=10,0% — exact match for 100/(1-0.10). ICMS por fora confirmed: valor_compra=1000, icms=10, margem=0 -> Custo Global R$ 1.000,00 + ICMS gives Valor Total R$ 1.100,00 (custo+ICMS, no margem). FONT #1: body.fontFamily = 'CondNum, \"Hanken Grotesk\", -apple-system, BlinkMacSystemFont, sans-serif' with font-variant-numeric:tabular-nums; dashboard time strings ('09:30','08:00') and bid numbers ('90012/2026') correctly resolve fontFamily including CondNum.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard cards", "issues": ["Some <p> elements containing isolated digits (small counters/labels) show getComputedStyle.fontFamily = 'Hanken Grotesk, sans-serif' WITHOUT 'CondNum' in the stack — those digits will NOT receive the condensed substitution. unicode-range only triggers when CondNum is present in the element's font stack. Main numeric surfaces (currency cards, ERP cells, time/date) DO include CondNum and render correctly. Recommend: ensure any component-level font-family override (Tailwind utility or inline) prepends 'CondNum' to keep digit substitution consistent app-wide. Currently affects a few small label <p> tags only — not the main financial UI."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional polish: audit components that override font-family (e.g., utility classes in Tailwind config like 'font-sans') to ensure 'CondNum' is included first in the font stack so unicode-range digit substitution applies universally. Could also add a global utility class for any element that explicitly sets font-family."
+  ],
+  "critical_code_review_comments": [
+    "auth.py register endpoint correctly hard-fails with 403 and short-circuits before any DB write — no risk of orphan users. Good.",
+    "App.js catch-all '*' -> Navigate '/' will infinite-redirect users to /login if not authenticated because ProtectedRoute will bounce them, but the bounce target is /login which DOES exist — so the loop terminates. Correct behavior; consider adding a friendly 404 page in the future.",
+    "calc.js margem 'por dentro' uses divisor (1-m); when user enters m>=100 (e.g., 150), m<1 check returns valor_unidade=0 silently. Consider clamping margem to [0,99.99] in the input layer to prevent UX confusion (zero unit price suddenly).",
+    "Login.jsx: no 'esqueci minha senha' flow exists now that public flows are gone — since password reset isn't yet exposed, users locked out depend on admin direct DB intervention. Recommend adding /api/auth/forgot-password (email-based) or an admin-create-user UI in Settings as a follow-up.",
+    "index.css: CondNum is hosted on Google Fonts as direct .woff2 URLs (not via @import) — if Google CDN is blocked, digits fall back to Hanken Grotesk silently. Acceptable but document this dependency."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "100% on 3 new updates + regressions"},
+  "test_credentials": "admin@licita.com / admin123",
+  "seed_data_creation": "No persistent seed data; used existing bid 6a1c5c9fe2f2b24398f3873e and toggled valor_compra/icms/margem/valor_venda on first row. After ICMS por fora test, the row was left with valor_compra=1000 + icms=10 + margem=10 (intermediate state during test). Auto-save persisted these values via PUT /api/bids/{id}/budget. If desired baseline (valor_compra=100, all others 0) is preferred, main agent can reset.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 10 confirmed all 3 new changes work. Backend test file at /app/backend/tests/backend_test.py now has 29 tests (was 29; replaced 1, added 1). Selector traps for ERP: not every column exposes a 'erp-{key}-{rid}-view' span — totals cards (data-testid='total-proposta','total-lucro','total-margem','total-custo') are the most reliable verifiers of computed values. The margem cell exposes 'erp-margem-{rid}-view' but custo_base_unit/valor_unidade/lucro_unit/valor_total view-spans may not exist or use different prefixes — verify by querying DOM first. Auth redirects working: /register and /cadastro go to /login; unknown authenticated routes go to /. Public register is fully blocked (HTTP 403 + no DB write). CondNum unicode-range strategy works for all elements whose font stack starts with 'CondNum' (body inherits; h1-h5 explicit; .font-mono-num explicit). A few isolated <p> elements override font-family without CondNum — minor design polish item flagged.",
+  "rca of the issue": "n/a — no regressions. All 3 new features implemented correctly. Margem 'por dentro' formula valor_unidade = custo/(1-m) verified empirically (R$ 111,11 = 100/0.9). ICMS 'por fora' still adds to custo before margem application (R$ 1.100 = 1000 + 100 with m=0). Register endpoint correctly returns 403 with detail 'Cadastro desativado. Contate o administrador.'. Route redirects /register|/cadastro -> /login and unknown auth -> / work via React Router <Navigate replace>."
+}

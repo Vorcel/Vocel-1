@@ -98,23 +98,9 @@ class UpdateProfileInput(BaseModel):
 # ----------------- endpoints -----------------
 @auth_router.post("/register")
 async def register(body: RegisterInput):
-    email = body.email.lower().strip()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="E-mail já cadastrado")
-    doc = {
-        "name": body.name,
-        "email": email,
-        "password_hash": hash_password(body.password),
-        "role": "user",
-        "phone": "",
-        "cargo": "",
-        "avatar_url": "",
-        "created_at": now_iso(),
-    }
-    res = await db.users.insert_one(doc)
-    doc["_id"] = res.inserted_id
-    token = create_access_token(str(res.inserted_id), email)
-    return {"token": token, "user": _public_user(doc)}
+    # Cadastro público DESATIVADO — sistema privado de acesso restrito.
+    # Novos usuários só podem ser criados internamente (seed/admin).
+    raise HTTPException(status_code=403, detail="Cadastro desativado. Contate o administrador.")
 
 
 @auth_router.post("/login")

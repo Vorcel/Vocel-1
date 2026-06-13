@@ -9,12 +9,10 @@ import { formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("admin@licita.com");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,8 +21,7 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      if (mode === "login") await login(email, password);
-      else await register(name, email, password);
+      await login(email, password);
       toast.success("Bem-vindo!");
       navigate("/");
     } catch (err) {
@@ -68,20 +65,10 @@ export default function Login() {
             <span className="font-heading text-xl font-bold">LicitaSys</span>
           </div>
 
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            {mode === "login" ? "Entrar na sua conta" : "Criar conta"}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "login" ? "Acesse o painel de licitações" : "Comece a gerenciar suas licitações"}
-          </p>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Entrar na sua conta</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Acesse o painel de licitações</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
-            {mode === "register" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Nome completo</Label>
-                <Input id="name" data-testid="login-name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="Seu nome" />
-              </div>
-            )}
             <div className="space-y-1.5">
               <Label htmlFor="email">E-mail</Label>
               <Input id="email" type="email" data-testid="login-email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="voce@empresa.com" />
@@ -95,19 +82,12 @@ export default function Login() {
 
             <Button type="submit" data-testid="login-submit" disabled={loading} className="w-full bg-brand hover:bg-brand-hover">
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {mode === "login" ? "Entrar" : "Criar conta"}
+              Entrar
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            {mode === "login" ? "Não tem conta?" : "Já tem conta?"}{" "}
-            <button
-              data-testid="login-toggle-mode"
-              onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
-              className="font-medium text-brand hover:underline"
-            >
-              {mode === "login" ? "Cadastre-se" : "Entrar"}
-            </button>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            Acesso restrito. Em caso de dúvidas, contate o administrador.
           </p>
         </div>
       </div>

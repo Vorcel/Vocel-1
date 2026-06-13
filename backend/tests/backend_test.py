@@ -64,14 +64,30 @@ class TestAuth:
         assert r.status_code == 200
         assert r.json()["email"] == ADMIN_EMAIL
 
-    def test_register_and_duplicate(self):
+    def test_register_disabled(self):
+        """Cadastro público desativado — deve retornar 403."""
         email = f"test_{uuid.uuid4().hex[:8]}@example.com"
         r = requests.post(f"{API}/auth/register", json={"name": "TEST User", "email": email, "password": "pass1234"}, timeout=30)
-        assert r.status_code == 200
-        assert "token" in r.json()
-        # duplicate
-        r2 = requests.post(f"{API}/auth/register", json={"name": "TEST User", "email": email, "password": "pass1234"}, timeout=30)
-        assert r2.status_code == 400
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
+        detail = r.json().get("detail", "")
+        assert "desativ" in detail.lower() or "disabled" in detail.lower(), f"Unexpected detail: {detail}"
+        # Confirm user was NOT created (login must fail)
+        login = requests.post(f"{API}/auth/login", json={"email": email, "password": "pass1234"}, timeout=30)
+        assert login.status_code == 401
+
+    def test_change_password_still_works(self, session):
+        """Regression: change-password should still work for admin (then revert)."""
+        r1 = session.post(f"{API}/auth/change-password", json={"current_password": ADMIN_PASSWORD, "new_password": "temp_pwd_123"}, timeout=30)
+        assert r1.status_code == 200
+        # revert
+        # Need new token because nothing was invalidated, but bcrypt hash changed under same session
+        r2 = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": "temp_pwd_123"}, timeout=30)
+        assert r2.status_code == 200
+        new_token = r2.json()["token"]
+        r3 = requests.post(f"{API}/auth/change-password",
+                           json={"current_password": "temp_pwd_123", "new_password": ADMIN_PASSWORD},
+                           headers={"Authorization": f"Bearer {new_token}"}, timeout=30)
+        assert r3.status_code == 200
 
 
 # -------------------- LISTS (new {nome, cor} contract) --------------------

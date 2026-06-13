@@ -1,12 +1,48 @@
 @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
+/* Tipografia condensada EXCLUSIVA para dígitos 0-9 (intercepta via unicode-range).
+   Letras continuam na fonte padrão (Hanken Grotesk); apenas números usam Roboto Condensed. */
+@font-face {
+    font-family: 'CondNum';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(https://fonts.gstatic.com/s/robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyWyosBO5Xw.woff2) format('woff2');
+    unicode-range: U+0030-0039;
+}
+@font-face {
+    font-family: 'CondNum';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url(https://fonts.gstatic.com/s/robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyWAosBO5Xw.woff2) format('woff2');
+    unicode-range: U+0030-0039;
+}
+@font-face {
+    font-family: 'CondNum';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(https://fonts.gstatic.com/s/robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyVspcBO5Xw.woff2) format('woff2');
+    unicode-range: U+0030-0039;
+}
+@font-face {
+    font-family: 'CondNum';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url(https://fonts.gstatic.com/s/robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyVVpcBO5Xw.woff2) format('woff2');
+    unicode-range: U+0030-0039;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
     margin: 0;
-    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'CondNum', 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -71,7 +107,7 @@ body {
         @apply bg-background text-foreground;
     }
     h1, h2, h3, h4, h5 {
-        font-family: 'Hanken Grotesk', sans-serif;
+        font-family: 'CondNum', 'Hanken Grotesk', sans-serif;
         letter-spacing: -0.01em;
     }
 }
@@ -82,7 +118,7 @@ body {
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
-.font-mono-num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.font-mono-num { font-family: 'CondNum', 'Hanken Grotesk', sans-serif; font-variant-numeric: tabular-nums; }
 
 @keyframes fade-up {
     from { opacity: 0; transform: translateY(12px); }

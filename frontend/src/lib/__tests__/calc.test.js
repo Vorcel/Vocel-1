@@ -24,13 +24,15 @@ test("ICMS por fora entra no Custo Total (preço/lucro)", () => {
   expect(c.custo_base_unit).toBeCloseTo(1000, 2); // PIS=0 não altera
   // custoMaisImposto = 1000 + 100 (ICMS) = 1100 ; lucro = 1200 - 1100 = 100
   expect(c.lucro_unit).toBeCloseTo(100, 2);
-  expect(c.margem_real).toBeCloseTo((100 / 1100) * 100, 2);
+  // Margem Real "por dentro" (sobre o preço): 100 / 1200
+  expect(c.margem_real).toBeCloseTo((100 / 1200) * 100, 2);
 });
 
-test("Margem Real = Margem Desejada (markup sobre Custo Total)", () => {
-  const c = computeRow({ ...base, valor_compra: "100", margem: "30" });
-  expect(c.valor_unidade).toBeCloseTo(130, 2);
-  expect(c.margem_real).toBeCloseTo(30, 2);
+test("Margem por dentro (markup divisor): Custo 100 + 10% = 111,11", () => {
+  const c = computeRow({ ...base, valor_compra: "100", margem: "10" });
+  expect(c.valor_unidade).toBeCloseTo(111.11, 2);
+  expect(c.lucro_unit).toBeCloseTo(11.11, 2);
+  expect(c.margem_real).toBeCloseTo(10, 2); // margem real = margem desejada
 });
 
 test("Lucro negativo quando preço de venda < custo total", () => {

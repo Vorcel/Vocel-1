@@ -1,7 +1,8 @@
 // Pricing engine for the ERP budget table (Tela 2).
-// Cost model: PIS/COFINS is embedded "por dentro" (gross-up) into the unit
-// base cost; ICMS is added "por fora" on (Valor Compra + Outros C/ Imposto).
-// Reversible between MARGEM DESEJADA (markup over total cost) and VALOR DE VENDA.
+// Cost model: PIS/COFINS embutido "por dentro" (gross-up) no Custo Base Un.;
+// ICMS somado "por fora" sobre (Valor Compra + Outros C/ Imposto), formando o
+// Custo Total. Margem "por dentro": Preço = Custo Total / (1 - Margem%/100);
+// Margem Real = (Preço - Custo Total) / Preço.
 
 export function num(v) {
   const n = parseFloat(v);
@@ -38,18 +39,17 @@ export function computeRow(row) {
     // Gatilho pelo Valor de Venda Desejado
     valor_unidade = num(row.valor_venda);
   } else if (row.margem != null && row.margem !== "") {
-    // Gatilho pela Margem Desejada: Preço = Custo Total x (1 + Margem%)
+    // Margem "POR DENTRO" (markup divisor / gross-up):
+    // Preço = Custo Total / (1 - Margem%/100)
     const m = num(row.margem) / 100;
-    valor_unidade = custoMaisImposto * (1 + m);
+    valor_unidade = m < 1 ? custoMaisImposto / (1 - m) : 0;
   } else {
     valor_unidade = custoMaisImposto;
   }
 
   const lucro_unit = valor_unidade - custoMaisImposto;
-  // Margem Real "por dentro": markup sobre o Custo Total — mesma base/fórmula
-  // da Margem Desejada (lucro / Custo Total).
-  const margem_real = custoMaisImposto > 0 ? (lucro_unit / custoMaisImposto) * 100 : 0;
-  const markup = margem_real;
+  // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo Total) / Preço
+  const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
   const valor_total = valor_unidade * qtd;
   const lucro_total = lucro_unit * qtd;
 
@@ -61,7 +61,6 @@ export function computeRow(row) {
     valor_total,
     lucro_total,
     margem_real,
-    markup,
     margem_calc: margem_real,
     custo_total: custo_base_unit * qtd,
   };
