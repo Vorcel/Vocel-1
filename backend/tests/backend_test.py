@@ -222,6 +222,42 @@ class TestBidsCRUD:
         assert r.status_code == 200
         assert r.json()["favorito"] is True
 
+    def test_update_observacoes_persists(self, session, created_bid_ids):
+        """REQ #1 — PATCH /api/bids/{id}/observacoes persists list of tag dicts."""
+        bid_id = created_bid_ids[0]
+        obs = [
+            {"id": "t1", "text": "urgente", "color": "#FCA5A5"},
+            {"id": "t2", "text": "atrasado", "color": "#FCD34D"},
+        ]
+        r = session.patch(f"{API}/bids/{bid_id}/observacoes", json={"observacoes": obs}, timeout=30)
+        assert r.status_code == 200
+        d = r.json()
+        assert isinstance(d.get("observacoes"), list) and len(d["observacoes"]) == 2
+        # Verify persistence via GET
+        g = session.get(f"{API}/bids/{bid_id}", timeout=30)
+        assert g.status_code == 200
+        gd = g.json()
+        assert len(gd["observacoes"]) == 2
+        names = [t["text"] for t in gd["observacoes"]]
+        assert "urgente" in names and "atrasado" in names
+        # Clear
+        r2 = session.patch(f"{API}/bids/{bid_id}/observacoes", json={"observacoes": []}, timeout=30)
+        assert r2.status_code == 200
+        assert r2.json()["observacoes"] == []
+
+    def test_create_bid_with_observacoes(self, session, created_bid_ids):
+        """REQ #1 — POST /api/bids accepts observacoes[] in payload."""
+        payload = _bid_payload(objeto="TEST_OBS_CREATE")
+        payload["observacoes"] = [{"id": "x1", "text": "tag1", "color": "#A7F3D0"}]
+        r = session.post(f"{API}/bids", json=payload, timeout=30)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["objeto"] == "TEST_OBS_CREATE"
+        assert isinstance(d.get("observacoes"), list)
+        assert len(d["observacoes"]) == 1
+        assert d["observacoes"][0]["text"] == "tag1"
+        created_bid_ids.append(d["id"])
+
     def test_dashboard_summary_reflects(self, session, created_bid_ids):
         r = session.get(f"{API}/dashboard/summary", timeout=30)
         assert r.status_code == 200

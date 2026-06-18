@@ -14,7 +14,7 @@ export const StatusDropdown = ({ bid }) => {
       <DropdownMenuTrigger asChild>
         <button
           data-testid={`status-trigger-${bid.id}`}
-          style={s.badge}
+          style={s.badgeDark}
           className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-transform hover:scale-105"
         >
           <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />

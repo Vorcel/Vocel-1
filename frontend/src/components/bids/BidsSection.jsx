@@ -10,7 +10,7 @@ import { toast } from "sonner";
 
 const EMPTY_FILTERS = {
   objeto: "", pregao: "", uasg: "", data: { from: "", to: "" },
-  portal: "", itens: "", modalidade: "", status: "", favoritos: false,
+  portal: "", itens: "", modalidade: "", status: [], favoritos: false,
 };
 
 export const BidsSection = () => {
@@ -24,10 +24,15 @@ export const BidsSection = () => {
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const clearFilters = () => setFilters(EMPTY_FILTERS);
 
-  const activeAdvanced = useMemo(
-    () => ["portal", "itens", "modalidade", "status"].filter((k) => filters[k]).length + (filters.favoritos ? 1 : 0),
-    [filters]
-  );
+  const activeAdvanced = useMemo(() => {
+    let n = 0;
+    if (filters.portal) n++;
+    if (filters.itens) n++;
+    if (filters.modalidade) n++;
+    n += Array.isArray(filters.status) ? filters.status.length : filters.status ? 1 : 0;
+    if (filters.favoritos) n++;
+    return n;
+  }, [filters]);
 
   const filtered = useMemo(() => {
     return bids.filter((b) => {
@@ -43,7 +48,7 @@ export const BidsSection = () => {
       }
       if (filters.portal && b.portal !== filters.portal) return false;
       if (filters.modalidade && b.modalidade !== filters.modalidade) return false;
-      if (filters.status && b.status !== filters.status) return false;
+      if (Array.isArray(filters.status) ? filters.status.length && !filters.status.includes(b.status) : filters.status && b.status !== filters.status) return false;
       if (filters.favoritos && !b.favorito) return false;
       if (filters.itens && !(b.itens_list || []).includes(filters.itens.trim())) return false;
       return true;

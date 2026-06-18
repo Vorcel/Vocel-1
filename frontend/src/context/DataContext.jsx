@@ -67,6 +67,10 @@ export function DataProvider({ children }) {
     setBids((prev) => prev.map((b) => (b.id === id ? { ...b, favorito } : b)));
     await api.patch(`/bids/${id}/favorite`, { favorito });
   };
+  const updateObservacoes = async (id, observacoes) => {
+    setBids((prev) => prev.map((b) => (b.id === id ? { ...b, observacoes } : b)));
+    await api.patch(`/bids/${id}/observacoes`, { observacoes });
+  };
   const deleteBid = async (id) => {
     await api.delete(`/bids/${id}`);
     await refreshBids();
@@ -136,7 +140,7 @@ export function DataProvider({ children }) {
       value={{
         bids, executions, lists, prefs, company, loading, summary,
         refreshBids, refreshExecutions, refreshLists,
-        createBid, updateBid, changeStatus, toggleFavorite, deleteBid,
+        createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
         addListItem, removeListItem, updateListItem, savePrefs, saveCompany,
       }}
     >

@@ -16,10 +16,18 @@ export function colorStyles(hex) {
   const c = hex || "#64748B";
   return {
     badge: { backgroundColor: hexToRgba(c, 0.18), color: c, borderColor: hexToRgba(c, 0.55) },
+    // Mesma cor temática no fundo/borda, mas TEXTO sempre escuro (legibilidade/WCAG).
+    badgeDark: { backgroundColor: hexToRgba(c, 0.18), color: "#1A1A1A", borderColor: hexToRgba(c, 0.55) },
     solid: { backgroundColor: c, color: "#ffffff" },
     dot: { backgroundColor: c },
     text: { color: c },
   };
+}
+
+// Paleta pastel para tags/itens — cores alternadas e não-repetitivas por índice.
+export const TAG_PALETTE = ["#2563EB", "#64748B", "#059669", "#D97706", "#7C3AED", "#0891B2", "#DB2777", "#475569"];
+export function tagColorAt(i) {
+  return TAG_PALETTE[((i % TAG_PALETTE.length) + TAG_PALETTE.length) % TAG_PALETTE.length];
 }
 
 // Find color for an item name within a list of {nome, cor}.

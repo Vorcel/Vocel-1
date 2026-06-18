@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { SelectWithAdd } from "@/components/bids/SelectWithAdd";
+import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { FileUpload } from "@/components/FileUpload";
 import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ const Req = () => <span className="text-alert"> *</span>;
 const empty = {
   objeto: "", modalidade: "", itens: "", portal: "",
   data_disputa: "", hora: "", pregao: "", uasg: "",
-  observacao: "", termo_referencia: null, status: "Disputar", favorito: false,
+  observacao: "", observacoes: [], termo_referencia: null, status: "Disputar", favorito: false,
 };
 
 export const BidFormModal = ({ open, onOpenChange, editing }) => {
@@ -30,7 +30,12 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
 
   useEffect(() => {
     if (open) {
-      setForm(editing ? { ...empty, ...editing } : empty);
+      const base = editing ? { ...empty, ...editing } : { ...empty };
+      // Migra observação antiga (string) para o novo formato de tags.
+      if (editing && (!base.observacoes || base.observacoes.length === 0) && editing.observacao) {
+        base.observacoes = [{ id: `obs_legacy_${editing.id}`, text: editing.observacao, color: "#64748B" }];
+      }
+      setForm(base);
       setTouched({});
       setSubmitAttempted(false);
     }
@@ -60,7 +65,13 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
     if (!valid) { setSubmitAttempted(true); return; }
     setSaving(true);
     try {
-      const payload = { ...form, status: editing ? form.status : "Disputar" };
+      const obsList = form.observacoes || [];
+      const payload = {
+        ...form,
+        observacoes: obsList,
+        observacao: obsList.map((o) => o.text).join("; "),
+        status: editing ? form.status : "Disputar",
+      };
       if (editing) await updateBid(editing.id, payload);
       else await createBid(payload);
       toast.success(editing ? "Licitação atualizada" : "Licitação cadastrada");
@@ -160,8 +171,11 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Observação</Label>
-            <Textarea data-testid="bid-obs" value={form.observacao} onChange={(e) => set("observacao", e.target.value)} placeholder="Notas internas sobre a licitação" rows={2} />
+            <Label>Observações</Label>
+            <div className="rounded-lg border border-border bg-muted/30 p-3" data-testid="bid-obs">
+              <ObservacaoTags value={form.observacoes} onChange={(arr) => set("observacoes", arr)} testid="bid-modal-obs" />
+            </div>
+            <p className="text-xs text-muted-foreground">Adicione anotações como tags coloridas (clique no “+”).</p>
           </div>
 
           <div className="space-y-1.5">
