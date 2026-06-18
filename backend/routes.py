@@ -241,10 +241,11 @@ class ObservacoesInput(BaseModel):
 
 @api.patch("/bids/{bid_id}/observacoes")
 async def update_observacoes(bid_id: str, body: ObservacoesInput, current=Depends(get_current_user)):
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"observacoes": body.observacoes}})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"observacoes": body.observacoes}})
+    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     return ser(bid)
 
 

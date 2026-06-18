@@ -74,6 +74,16 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - Cálculo (Tela 2): Margem "por dentro" (markup divisor) → `VALOR UNIDADE = Custo Total / (1 - Margem%/100)`; `MARGEM REAL = (Preço - Custo Total)/Preço`. ICMS mantido "por fora" no Custo Total (opção C). Cascata recalcula Lucro Unit/Total e Valor Total.
 - Verificado: backend 29/29 pytest (`/app/backend/tests/backend_test.py`), frontend 100% (iteration_10), 5/5 unit tests `calc.test.js` (R$100 + 10% = R$111,11).
 
+## Updates (Iteration 11 — Tabela de Licitações: 6 requisitos + Single Source of Truth)
+- Single Source of Truth confirmado: Dashboard ('/') e 'Todas as Licitações' ('/licitacoes') usam os mesmos componentes (BidsSection/BidsTable/AdvancedFilterSidebar/BidFormModal) — toda mudança reflete nas duas.
+- #1 Coluna "Observação" (tags/chips coloridos): adicionar (+), editar inline (clique no texto), excluir com modal de confirmação. Substituiu o ícone de balão. Persiste via `PATCH /api/bids/{id}/observacoes` (campo `observacoes:[{id,text,color}]`); integrada no modal de cadastro/edição. Migra `observacao` (string) legada.
+- #2 Drawer de Filtros Avançados: slide-in da direita + backdrop, header+subtítulo, De/Até, Portal "Todos os Portais", Modalidade (toggle buttons), Status (chips multi-seleção com bolinha colorida, OR), footer fixo Limpar/Aplicar. Status do filtro agora é array.
+- #3 Itens: badges com fundos pastel alternados não-repetitivos (`tagColorAt`), número escuro.
+- #4 Badges Portal/Status: texto preto (#1A1A1A) com fundo/borda temáticos (`colorStyles().badgeDark`); bolinha mantém cor.
+- #5 Ordem das colunas: Modalidade > Portal > Itens (+ Observação ao lado de Objeto).
+- #6 Ordenação por coluna: setas duplas, asc/desc, type-aware (texto pt-BR numeric, datas cronológicas) — `bid-th-<key>`.
+- Verificado: backend 31/31 pytest, frontend 100% em ambas as rotas (iteration_11).
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
