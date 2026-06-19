@@ -1,4 +1,4 @@
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -26,10 +26,10 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md" data-testid="advanced-filter-sidebar">
         {/* Header */}
-        <div className="border-b border-border px-6 py-5">
-          <h2 className="font-heading text-lg font-semibold tracking-tight">Filtros Avançados</h2>
-          <p className="text-sm text-muted-foreground">Refine os resultados da sua busca de licitações</p>
-        </div>
+        <SheetHeader className="space-y-0 border-b border-border px-6 py-5 text-left">
+          <SheetTitle className="font-heading text-lg font-semibold tracking-tight">Filtros Avançados</SheetTitle>
+          <SheetDescription className="text-sm text-muted-foreground">Refine os resultados da sua busca de licitações</SheetDescription>
+        </SheetHeader>
 
         {/* Body (scrollable) */}
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">

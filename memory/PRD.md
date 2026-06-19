@@ -84,6 +84,15 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - #6 Ordenação por coluna: setas duplas, asc/desc, type-aware (texto pt-BR numeric, datas cronológicas) — `bid-th-<key>`.
 - Verificado: backend 31/31 pytest, frontend 100% em ambas as rotas (iteration_11).
 
+## Updates (Iteration 12 — Tabela de Licitações: PROP., ordenação restrita, multi-anexos, portal texto, title case, painel fluido)
+- #1 Coluna "PROP." com toggle "P" por linha (cinza→azul, persiste via `PATCH /api/bids/{id}/proposta`) + botão "P" de filtro rápido no cabeçalho (ao lado da estrela) + "Status da Proposta" (Todas/Enviadas/Não Enviadas) no drawer.
+- #2 Ordenação acionada SOMENTE pelo ícone de setas (não no texto/th); cursor pointer só nas setas; `stopPropagation`.
+- #3 Múltiplos anexos: `BidInput.anexos[]`; modal aceita Termo (obrigatório) + Anexos adicionais; coluna "Arquivos" mostra ícone (1 arquivo abre direto) ou badge numérico laranja + Popover com lista (2+), abrindo cada arquivo em nova guia (click-away fecha).
+- #4 Portal renderizado como texto em negrito colorido (cor dinâmica do parâmetro), sem badge/fundo/borda, com truncagem.
+- #5 Smart Title Case (`lib/textcase.js`) aplicado no blur do campo Objeto (1ª letra maiúscula por palavra, exceto preposições/artigos; 1ª palavra sempre maiúscula). Não aplica em email/senha.
+- #6 Painel "Licitações do Dia" em largura total (removido maxWidth fixo).
+- a11y: drawer usa SheetTitle/SheetDescription. Verificado: frontend 100% (iteration_12) nas 2 rotas; backend pytest +2 testes (proposta, anexos).
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
