@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, DollarSign, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import api, { formatApiError } from "@/lib/api";
-import { computeRow, computeTotals, brl, pct, num } from "@/lib/calc";
+import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 let _rid = 0;
 const newRow = (defaults) => ({
   _id: `r${Date.now()}_${_rid++}`,
-  selecionado: true, item: "", produto: "", marca: "", fornecedor: "", site: "",
+  selecionado: true, lote: "1", item: "", produto: "", marca: "", fornecedor: "", site: "",
   valor_compra: "", qtd: "1", valor_venda: "", margem: "30",
   icms: String(defaults.icms ?? 18), pis_cofins: String(defaults.pis_cofins ?? 9.25),
   outros_sem_imp: "0", outros_com_imp: "0", frete_receber: "0", frete_enviar: "0",
@@ -22,6 +27,7 @@ const newRow = (defaults) => ({
 // Column model — drives header, body, resizing, hide/show, keyboard nav.
 const COLUMNS = [
   { key: "selecionar", label: "SELECIONAR", w: 70, type: "select", sticky: true, noHide: true },
+  { key: "lote", label: "LOTE", w: 90, type: "lote" },
   { key: "item", label: "ITEM", w: 70, type: "text" },
   { key: "produto", label: "PRODUTO", w: 180, type: "text" },
   { key: "marca", label: "MARCA", w: 110, type: "text" },
@@ -48,15 +54,95 @@ const DEFAULT_WIDTHS = COLUMNS.map((c) => c.w);
 const EDITABLE_TYPES = new Set(["text", "number", "currency", "percent", "venda", "margem"]);
 const isCellEditable = (col) => EDITABLE_TYPES.has(col.type);
 
-function GlobalCard({ icon: Icon, label, value, accent, testid }) {
+// Card individual de uma "camada" de lote — cores fiéis à referência.
+function LoteStatCard({ variant, label, value, icon: Icon, testid }) {
+  const styles = {
+    id: "bg-[#EEF2F8] border-transparent text-[#1A1A1A] dark:bg-slate-800",
+    blue: "bg-[#2563EB] border-transparent text-white",
+    green: "bg-[#E8F8EF] border-transparent text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+    orange: "bg-[#FFF4E8] border-transparent text-orange-600 dark:bg-orange-950/40 dark:text-orange-300",
+    white: "bg-card border-border text-foreground",
+  };
+  const labelCls = variant === "blue" ? "text-white/80" : "text-current opacity-70";
   return (
-    <div data-testid={testid} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className={cn("flex h-11 w-11 items-center justify-center rounded-lg", accent)}><Icon size={22} /></div>
+    <div data-testid={testid} className={cn("flex items-center gap-3 rounded-xl border p-4 shadow-sm", styles[variant])}>
+      {Icon && (
+        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", variant === "blue" ? "bg-white/20" : "bg-black/5")}>
+          <Icon size={20} />
+        </div>
+      )}
       <div className="min-w-0">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="font-mono-num truncate font-heading text-xl font-bold text-foreground">{value}</p>
+        <p className={cn("text-[11px] font-bold uppercase tracking-wider", labelCls)}>{label}</p>
+        <p className="font-mono-num truncate font-heading text-xl font-bold">{value}</p>
       </div>
     </div>
+  );
+}
+
+// Camada (linha) de 5 cartões para um lote.
+function LoteLayer({ data }) {
+  return (
+    <div data-testid={`lote-layer-${data.lote}`} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <LoteStatCard testid={`lote-id-${data.lote}`} variant="id" label="Lote" value={`Lote ${data.lote}`} />
+      <LoteStatCard testid={`lote-valor-${data.lote}`} variant="blue" label="Valor Total" value={brl(data.valor_total)} icon={TrendingUp} />
+      <LoteStatCard testid={`lote-lucro-${data.lote}`} variant="green" label="Lucro do Lote" value={brl(data.lucro)} icon={BadgePercent} />
+      <LoteStatCard testid={`lote-margem-${data.lote}`} variant="orange" label="Margem do Lote" value={pct(data.margem)} icon={Percent} />
+      <LoteStatCard testid={`lote-investido-${data.lote}`} variant="white" label="Valor Investido" value={brl(data.investido)} icon={Wallet} />
+    </div>
+  );
+}
+
+// Célula de Lote: dropdown numérico (1-5 + custom) com máscara "Lote N".
+function LoteCell({ value, options, onChange, onAddOption }) {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const cur = num(value) || 1;
+
+  const add = () => {
+    const n = parseInt(draft, 10);
+    if (!isNaN(n) && n > 0) { onAddOption(n); onChange(n); setOpen(false); }
+    setDraft(""); setAdding(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" data-testid="lote-trigger" className="flex h-[37px] w-full items-center justify-between px-2 text-sm hover:bg-accent/40">
+          <span className="font-medium">Lote {cur}</span>
+          <ChevronDown size={13} className="text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-32 p-1" data-testid="lote-menu">
+        <div className="max-h-48 overflow-y-auto">
+          {options.map((o) => (
+            <button key={o} type="button" data-testid={`lote-opt-${o}`} onClick={() => { onChange(o); setOpen(false); }}
+              className={cn("flex w-full items-center rounded px-2 py-1.5 text-left text-sm hover:bg-accent", o === cur && "bg-accent font-semibold")}>
+              Lote {o}
+            </button>
+          ))}
+        </div>
+        <div className="mt-1 border-t border-border pt-1">
+          {adding ? (
+            <div className="flex items-center gap-1 px-1">
+              <input
+                autoFocus type="number" min="1" value={draft}
+                onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } if (e.key === "Escape") { setAdding(false); setDraft(""); } }}
+                data-testid="lote-add-input" placeholder="Nº"
+                className="no-spin w-full rounded border border-input bg-transparent px-1.5 py-1 text-sm outline-none focus:ring-1 focus:ring-brand"
+              />
+              <button type="button" onClick={add} data-testid="lote-add-confirm" className="text-emerald-600"><Check size={15} /></button>
+            </div>
+          ) : (
+            <button type="button" data-testid="lote-add" onClick={() => setAdding(true)}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
+              <Plus size={14} /> Adicionar
+            </button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -211,6 +297,9 @@ export default function Budget() {
   const [selectedCols, setSelectedCols] = useState(() => new Set());
   const [ctx, setCtx] = useState(null); // { x, y, idx, targets }
   const [focusCell, setFocusCell] = useState(null); // { rowId, colKey }
+  const [loteOptions, setLoteOptions] = useState([1, 2, 3, 4, 5]);
+  const [selectedLotes, setSelectedLotes] = useState([]); // filtro global de lote
+  const [pendingDelete, setPendingDelete] = useState(null); // id da linha a excluir
 
   const dirtyRef = useRef(false);
   const timerRef = useRef(null);
@@ -230,8 +319,26 @@ export default function Budget() {
     })();
   }, [bidId]);
 
-  const totals = useMemo(() => computeTotals(rows), [rows]);
-  const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v3", DEFAULT_WIDTHS);
+  const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v4", DEFAULT_WIDTHS);
+
+  // Opções de lote = 1..5 ∪ customizados ∪ lotes presentes nas linhas.
+  const allLoteOptions = useMemo(() => {
+    const s = new Set(loteOptions);
+    rows.forEach((r) => s.add(num(r.lote) || 1));
+    return [...s].sort((a, b) => a - b);
+  }, [loteOptions, rows]);
+
+  // Lotes efetivos para os cartões: selecionados, ou todos presentes se nada selecionado.
+  const lotesPresentes = useMemo(() => {
+    const s = new Set();
+    rows.forEach((r) => s.add(num(r.lote) || 1));
+    return [...s].sort((a, b) => a - b);
+  }, [rows]);
+  const effectiveLotes = selectedLotes.length ? [...selectedLotes].sort((a, b) => a - b) : lotesPresentes;
+  const loteLayers = useMemo(() => effectiveLotes.map((l) => computeLote(rows, l)), [rows, effectiveLotes]);
+
+  // Linhas exibidas na tabela (aplicando filtro de lote, se houver).
+  const displayRows = selectedLotes.length ? rows.filter((r) => selectedLotes.includes(num(r.lote) || 1)) : rows;
 
   // Auto-save (debounced full-budget) — fires only after user edits.
   useEffect(() => {
@@ -261,6 +368,9 @@ export default function Budget() {
   const onMargem = (id, v) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" });
   const addRow = () => { markDirty(); setRows((p) => [...p, newRow(defaults)]); };
   const removeRow = (id) => { markDirty(); setRows((p) => p.filter((r) => r._id !== id)); };
+  const addLoteOption = (n) => setLoteOptions((p) => (p.includes(n) ? p : [...p, n]));
+  const toggleLoteFilter = (l) => setSelectedLotes((p) => (p.includes(l) ? p.filter((x) => x !== l) : [...p, l]));
+  const confirmDelete = () => { if (pendingDelete) removeRow(pendingDelete); setPendingDelete(null); };
 
   // Keyboard nav: advance focus to next editable cell (right; wraps to next row).
   const advanceFocus = (rowId, colKey) => {
@@ -364,6 +474,8 @@ export default function Budget() {
     switch (col.type) {
       case "select":
         return <Checkbox data-testid={`erp-select-${r._id}`} checked={r.selecionado} onCheckedChange={(v) => updateRow(r._id, { selecionado: !!v })} />;
+      case "lote":
+        return <LoteCell value={r.lote} options={allLoteOptions} onChange={(n) => updateRow(r._id, { lote: String(n) })} onAddOption={addLoteOption} />;
       case "site":
         return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
       case "text":
@@ -379,7 +491,7 @@ export default function Budget() {
       case "margem":
         return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
       case "calc_pct":
-        return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-amber-600 dark:text-amber-400">{pct(c[col.key])}</div>;
+        return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-emerald-700 dark:text-emerald-300">{pct(c[col.key])}</div>;
       case "calc_currency": {
         const val = c[col.key];
         const neg = col.neg && val < 0;
@@ -417,21 +529,47 @@ export default function Budget() {
               <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
             </Button>
           )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="lote-filter-trigger">
+                <Layers size={15} className="mr-1.5" /> Filtrar por Lote{selectedLotes.length > 0 ? ` (${selectedLotes.length})` : ""}
+                <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1" data-testid="lote-filter-menu">
+              <div className="max-h-60 overflow-y-auto">
+                {allLoteOptions.map((l) => (
+                  <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
+                    <Checkbox checked={selectedLotes.includes(l)} className="pointer-events-none" />
+                    Lote {l}
+                  </button>
+                ))}
+              </div>
+              {selectedLotes.length > 0 && (
+                <button type="button" data-testid="lote-filter-clear" onClick={() => setSelectedLotes([])}
+                  className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
+                  Limpar filtro
+                </button>
+              )}
+            </PopoverContent>
+          </Popover>
           <Button variant="outline" data-testid="budget-add-row" onClick={addRow}><Plus size={16} className="mr-1.5" /> Linha</Button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden p-6">
-        {/* Global totals */}
-        <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <GlobalCard testid="total-custo" icon={DollarSign} label="Custo Global" value={brl(totals.custo_global)} accent="bg-slate-200 text-slate-700" />
-          <GlobalCard testid="total-proposta" icon={Wallet} label="Valor Total da Proposta" value={brl(totals.valor_total)} accent="bg-brand/10 text-brand" />
-          <GlobalCard testid="total-lucro" icon={TrendingUp} label="Lucro Líquido Global" value={brl(totals.lucro_global)} accent="bg-emerald-100 text-emerald-600" />
-          <GlobalCard testid="total-margem" icon={Percent} label="Margem Média Global" value={pct(totals.margem_media)} accent="bg-amber-100 text-amber-600" />
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+        {/* Camadas de cartões por lote (apenas linhas marcadas + do lote) */}
+        <div className="max-h-[42%] shrink-0 space-y-3 overflow-y-auto pr-1" data-testid="lote-layers">
+          {loteLayers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Marque itens e selecione um lote para ver os totais.</p>
+          ) : (
+            loteLayers.map((l) => <LoteLayer key={l.lote} data={l} />)
+          )}
         </div>
 
         {/* Spreadsheet */}
-        <div className="h-[calc(100%-7rem)] overflow-auto rounded-xl border border-border bg-card">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card">
           <table className="rt-fixed border-collapse text-sm" style={{ width: totalW }}>
             <colgroup>
               {visible.map(({ i }) => <col key={i} style={{ width: ew[i] }} />)}
@@ -465,12 +603,12 @@ export default function Budget() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
+              {displayRows.length === 0 && (
                 <tr><td colSpan={visible.length + 1} className="px-4 py-16 text-center text-muted-foreground">
                   Nenhum item. Clique em <strong>Linha</strong> para adicionar.
                 </td></tr>
               )}
-              {rows.map((r) => {
+              {displayRows.map((r) => {
                 const c = computeRow(r);
                 return (
                   <tr key={r._id} data-testid={`erp-row-${r._id}`} className={cn("border-b border-border", r.selecionado ? "bg-card" : "bg-muted/30")}>
@@ -484,7 +622,7 @@ export default function Budget() {
                       </td>
                     ))}
                     <td className="sticky right-0 z-10 bg-card px-2 py-2">
-                      <button data-testid={`erp-remove-${r._id}`} onClick={() => removeRow(r._id)} className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-alert/10 hover:text-alert"><Trash2 size={14} /></button>
+                      <button data-testid={`erp-remove-${r._id}`} onClick={() => setPendingDelete(r._id)} className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-alert/10 hover:text-alert"><Trash2 size={14} /></button>
                     </td>
                   </tr>
                 );
@@ -526,6 +664,22 @@ export default function Budget() {
           )}
         </div>
       )}
+
+      {/* Confirmação de exclusão de linha */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent data-testid="erp-delete-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir esta linha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir esta linha? Esta ação não poderá ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="erp-delete-cancel">Cancelar</AlertDialogCancel>
+            <AlertDialogAction data-testid="erp-delete-confirm" onClick={confirmDelete} className="bg-alert text-white hover:bg-alert/90">Excluir</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

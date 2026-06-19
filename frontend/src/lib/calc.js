@@ -10,7 +10,9 @@ export function num(v) {
 }
 
 export function computeRow(row) {
-  const qtd = num(row.qtd) || 1;
+  const qtdRaw = num(row.qtd);
+  const active = qtdRaw > 0;            // Trava: quantidade 0/vazia não calcula totais
+  const qtd = active ? qtdRaw : 1;      // divisor seguro p/ rateio por unidade
   const icms_rate = num(row.icms) / 100;
   const pis_rate = num(row.pis_cofins) / 100;
 
@@ -50,8 +52,9 @@ export function computeRow(row) {
   const lucro_unit = valor_unidade - custoMaisImposto;
   // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo Total) / Preço
   const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
-  const valor_total = valor_unidade * qtd;
-  const lucro_total = lucro_unit * qtd;
+  // Totais zerados quando a quantidade é 0/vazia (Req: trava de cálculo).
+  const valor_total = active ? valor_unidade * qtd : 0;
+  const lucro_total = active ? lucro_unit * qtd : 0;
 
   return {
     custo_base_unit,
@@ -62,8 +65,27 @@ export function computeRow(row) {
     lucro_total,
     margem_real,
     margem_calc: margem_real,
-    custo_total: custo_base_unit * qtd,
+    custo_total: active ? custo_base_unit * qtd : 0,
+    investido: active ? custoMaisImposto * qtd : 0,
   };
+}
+
+// Agrega valores de um lote específico considerando APENAS linhas marcadas
+// (selecionado) E pertencentes àquele lote.
+export function computeLote(rows, lote) {
+  let valor_total = 0;
+  let lucro = 0;
+  let investido = 0;
+  rows.forEach((r) => {
+    if (!r.selecionado) return;
+    if ((num(r.lote) || 1) !== lote) return;
+    const c = computeRow(r);
+    valor_total += c.valor_total;
+    lucro += c.lucro_total;
+    investido += c.investido;
+  });
+  const margem = valor_total > 0 ? (lucro / valor_total) * 100 : 0;
+  return { lote, valor_total, lucro, investido, margem };
 }
 
 export function computeTotals(rows) {
