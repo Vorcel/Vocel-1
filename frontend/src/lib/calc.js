@@ -50,8 +50,9 @@ export function computeRow(row) {
   }
 
   const lucro_unit = valor_unidade - custoMaisImposto;
-  // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo Total) / Preço
-  const margem_real = valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
+  // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo Total) / Preço.
+  // Zerada quando a quantidade é 0/vazia (consistência com a trava de cálculo).
+  const margem_real = active && valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
   // Totais zerados quando a quantidade é 0/vazia (Req: trava de cálculo).
   const valor_total = active ? valor_unidade * qtd : 0;
   const lucro_total = active ? lucro_unit * qtd : 0;

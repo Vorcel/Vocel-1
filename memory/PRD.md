@@ -93,6 +93,14 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - #6 Painel "Licitações do Dia" em largura total (removido maxWidth fixo).
 - a11y: drawer usa SheetTitle/SheetDescription. Verificado: frontend 100% (iteration_12) nas 2 rotas; backend pytest +2 testes (proposta, anexos).
 
+## Updates (Iteration 13 — Tela 2 ERP: Lote, trava qtd=0, Margem Real verde, confirmação de exclusão)
+- #1 Coluna "LOTE" entre SELECIONAR e ITEM (default "Lote 1"); célula é dropdown 1-5 + "Adicionar" (somente números) com máscara "Lote N". Filtro global "Filtrar por Lote" (multi-select) filtra a tabela.
+- #1.4/1.5 Cartões dinâmicos por lote (camadas), 5 cards na ordem: Lote N (texto) | Valor Total (azul) | Lucro do Lote (verde) | Margem do Lote (laranja) | Valor Investido (branco). Soma APENAS linhas marcadas (checkbox) E do lote (`computeLote`). Layout flex: cartões scrolláveis + tabela preenche o resto.
+- #2 Trava qtd=0/vazia: zera Valor Total, Lucro Total, Custo, Investido e Margem Real da linha (não soma nos cartões). `calc.js` usa divisor seguro para rateio por unidade.
+- #3 Margem Real em verde (`text-emerald-700`, mesmo tom do Lucro).
+- #4 Exclusão de linha com AlertDialog (Cancelar / Excluir vermelho); recalcula cartões após confirmar.
+- Verificado: frontend 100% (iteration_13), persistência do campo `lote` após reload, 5/5 unit tests.
+
 ## Backlog
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
