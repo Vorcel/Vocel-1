@@ -9,7 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { fileUrl } from "@/lib/api";
 
-export const Header = ({ title, subtitle }) => {
+export const Header = ({ title, subtitle, leftContent }) => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -22,13 +22,19 @@ export const Header = ({ title, subtitle }) => {
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/70 px-6 backdrop-blur-md">
-      <div className="min-w-0">
-        <h1 className="truncate font-heading text-xl font-semibold tracking-tight text-foreground">{title}</h1>
-        {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+    <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-4 border-b border-border bg-card/80 px-6 shadow-sm backdrop-blur-md">
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto">
+        {leftContent ? (
+          leftContent
+        ) : (
+          <div className="min-w-0">
+            <h1 className="truncate font-heading text-xl font-semibold tracking-tight text-foreground">{title}</h1>
+            {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <button
           data-testid="header-theme-toggle"
           onClick={toggleTheme}
