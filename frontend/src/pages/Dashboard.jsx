@@ -58,7 +58,7 @@ export default function Dashboard() {
         <section>
           <div
             data-testid="hero-banner"
-            style={{ height: 280, maxWidth: 1148, width: "100%", backgroundColor: dayColor, transition: "background-color 0.5s ease" }}
+            style={{ height: 280, width: "100%", backgroundColor: dayColor, transition: "background-color 0.5s ease" }}
             className="flex flex-col overflow-hidden rounded-2xl p-6"
           >
             <div className="mb-4 flex shrink-0 items-center gap-2">

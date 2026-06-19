@@ -159,7 +159,9 @@ class BidInput(BaseModel):
     uasg: str = ""
     observacao: str = ""
     observacoes: List[dict] = []
+    proposta_enviada: bool = False
     termo_referencia: Optional[dict] = None   # {id, filename, url}
+    anexos: List[dict] = []                    # arquivos adicionais [{id, filename, url}]
     status: str = "Disputar"
     favorito: bool = False
 
@@ -246,6 +248,19 @@ async def update_observacoes(bid_id: str, body: ObservacoesInput, current=Depend
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"observacoes": body.observacoes}})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    return ser(bid)
+
+
+class PropostaInput(BaseModel):
+    proposta_enviada: bool
+
+
+@api.patch("/bids/{bid_id}/proposta")
+async def update_proposta(bid_id: str, body: PropostaInput, current=Depends(get_current_user)):
+    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"proposta_enviada": body.proposta_enviada}})
+    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    if not bid:
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
     return ser(bid)
 
 

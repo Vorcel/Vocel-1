@@ -10,7 +10,7 @@ import { toast } from "sonner";
 
 const EMPTY_FILTERS = {
   objeto: "", pregao: "", uasg: "", data: { from: "", to: "" },
-  portal: "", itens: "", modalidade: "", status: [], favoritos: false,
+  portal: "", itens: "", modalidade: "", status: [], proposta: "all", favoritos: false,
 };
 
 export const BidsSection = () => {
@@ -30,6 +30,7 @@ export const BidsSection = () => {
     if (filters.itens) n++;
     if (filters.modalidade) n++;
     n += Array.isArray(filters.status) ? filters.status.length : filters.status ? 1 : 0;
+    if (filters.proposta && filters.proposta !== "all") n++;
     if (filters.favoritos) n++;
     return n;
   }, [filters]);
@@ -50,6 +51,8 @@ export const BidsSection = () => {
       if (filters.modalidade && b.modalidade !== filters.modalidade) return false;
       if (Array.isArray(filters.status) ? filters.status.length && !filters.status.includes(b.status) : filters.status && b.status !== filters.status) return false;
       if (filters.favoritos && !b.favorito) return false;
+      if (filters.proposta === "sent" && !b.proposta_enviada) return false;
+      if (filters.proposta === "notsent" && b.proposta_enviada) return false;
       if (filters.itens && !(b.itens_list || []).includes(filters.itens.trim())) return false;
       return true;
     });

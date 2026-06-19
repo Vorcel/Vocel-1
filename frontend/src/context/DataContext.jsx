@@ -71,6 +71,10 @@ export function DataProvider({ children }) {
     setBids((prev) => prev.map((b) => (b.id === id ? { ...b, observacoes } : b)));
     await api.patch(`/bids/${id}/observacoes`, { observacoes });
   };
+  const toggleProposta = async (id, proposta_enviada) => {
+    setBids((prev) => prev.map((b) => (b.id === id ? { ...b, proposta_enviada } : b)));
+    await api.patch(`/bids/${id}/proposta`, { proposta_enviada });
+  };
   const deleteBid = async (id) => {
     await api.delete(`/bids/${id}`);
     await refreshBids();
@@ -140,7 +144,7 @@ export function DataProvider({ children }) {
       value={{
         bids, executions, lists, prefs, company, loading, summary,
         refreshBids, refreshExecutions, refreshLists,
-        createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
+        createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, toggleProposta, deleteBid,
         addListItem, removeListItem, updateListItem, savePrefs, saveCompany,
       }}
     >

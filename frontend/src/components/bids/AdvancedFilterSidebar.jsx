@@ -124,6 +124,18 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
             </div>
           </div>
 
+          <div className="space-y-1.5">
+            <Label>Status da Proposta</Label>
+            <Select value={filters.proposta || "all"} onValueChange={(v) => setFilter("proposta", v)}>
+              <SelectTrigger data-testid="adv-proposta"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="sent">Apenas Enviadas (P)</SelectItem>
+                <SelectItem value="notsent">Não Enviadas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="flex items-center justify-between rounded-lg border border-border p-3">
             <Label htmlFor="fav-only" className="cursor-pointer">Somente favoritos</Label>
             <Switch id="fav-only" data-testid="adv-favoritos" checked={filters.favoritos} onCheckedChange={(v) => setFilter("favoritos", v)} />

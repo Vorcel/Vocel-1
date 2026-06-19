@@ -49,6 +49,18 @@ export const FilterBar = ({ filters, setFilter, onOpenAdvanced, activeAdvanced }
       >
         <Star size={16} className={cn(filters.favoritos && "fill-amber-400")} />
       </button>
+      <button
+        type="button"
+        data-testid="filter-proposta-toggle"
+        onClick={() => setFilter("proposta", filters.proposta === "sent" ? "all" : "sent")}
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-sm font-bold transition-colors",
+          filters.proposta === "sent" ? "border-brand bg-brand/10 text-brand" : "border-input text-muted-foreground hover:bg-accent"
+        )}
+        title="Somente com proposta enviada"
+      >
+        P
+      </button>
       <Button
         variant="outline"
         onClick={onOpenAdvanced}

@@ -245,6 +245,38 @@ class TestBidsCRUD:
         assert r2.status_code == 200
         assert r2.json()["observacoes"] == []
 
+    def test_update_proposta_persists(self, session, created_bid_ids):
+        """REQ #1 — PATCH /api/bids/{id}/proposta toggles proposta_enviada and persists."""
+        bid_id = created_bid_ids[0]
+        # Toggle ON
+        r = session.patch(f"{API}/bids/{bid_id}/proposta", json={"proposta_enviada": True}, timeout=30)
+        assert r.status_code == 200
+        assert r.json().get("proposta_enviada") is True
+        # GET verify persistence
+        g = session.get(f"{API}/bids/{bid_id}", timeout=30)
+        assert g.status_code == 200 and g.json()["proposta_enviada"] is True
+        # Toggle OFF
+        r2 = session.patch(f"{API}/bids/{bid_id}/proposta", json={"proposta_enviada": False}, timeout=30)
+        assert r2.status_code == 200 and r2.json()["proposta_enviada"] is False
+        g2 = session.get(f"{API}/bids/{bid_id}", timeout=30)
+        assert g2.json()["proposta_enviada"] is False
+
+    def test_create_bid_with_anexos(self, session, created_bid_ids):
+        """REQ #3 — POST /api/bids accepts termo_referencia + anexos[] (multi files)."""
+        payload = _bid_payload(objeto="TEST_ANEXOS")
+        payload["termo_referencia"] = {"id": "fake-tr", "filename": "termo.pdf", "url": "/api/files/fake-tr"}
+        payload["anexos"] = [
+            {"id": "fake-a1", "filename": "extra1.pdf", "url": "/api/files/fake-a1"},
+            {"id": "fake-a2", "filename": "extra2.png", "url": "/api/files/fake-a2"},
+        ]
+        r = session.post(f"{API}/bids", json=payload, timeout=30)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["termo_referencia"]["filename"] == "termo.pdf"
+        assert isinstance(d.get("anexos"), list) and len(d["anexos"]) == 2
+        assert d["anexos"][1]["filename"] == "extra2.png"
+        created_bid_ids.append(d["id"])
+
     def test_create_bid_with_observacoes(self, session, created_bid_ids):
         """REQ #1 — POST /api/bids accepts observacoes[] in payload."""
         payload = _bid_payload(objeto="TEST_OBS_CREATE")

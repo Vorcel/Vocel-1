@@ -8,7 +8,9 @@ import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { FileUpload } from "@/components/FileUpload";
 import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
-import { formatApiError } from "@/lib/api";
+import { formatApiError, fileUrl } from "@/lib/api";
+import { smartTitleCase } from "@/lib/textcase";
+import { X, FileText } from "lucide-react";
 
 const ITENS_REGEX = /^\d+(,\s*\d+)*$/;
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -18,7 +20,8 @@ const Req = () => <span className="text-alert"> *</span>;
 const empty = {
   objeto: "", modalidade: "", itens: "", portal: "",
   data_disputa: "", hora: "", pregao: "", uasg: "",
-  observacao: "", observacoes: [], termo_referencia: null, status: "Disputar", favorito: false,
+  observacao: "", observacoes: [], proposta_enviada: false,
+  termo_referencia: null, anexos: [], status: "Disputar", favorito: false,
 };
 
 export const BidFormModal = ({ open, onOpenChange, editing }) => {
@@ -100,7 +103,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
               data-testid="bid-objeto"
               value={form.objeto}
               onChange={(e) => set("objeto", e.target.value)}
-              onBlur={() => setTouched((t) => ({ ...t, objeto: true }))}
+              onBlur={() => { setTouched((t) => ({ ...t, objeto: true })); set("objeto", smartTitleCase(form.objeto)); }}
               placeholder="Ex: Aquisição de equipamentos de informática"
             />
             {err("objeto") && <p className="text-xs text-alert">{errors.objeto}</p>}
@@ -188,6 +191,31 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
               onRemove={() => set("termo_referencia", null)}
             />
             {err("termo") && <p className="text-xs text-alert">{errors.termo}</p>}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Anexos adicionais (opcional)</Label>
+            {(form.anexos || []).length > 0 && (
+              <div className="space-y-1.5" data-testid="bid-anexos-list">
+                {form.anexos.map((a, i) => (
+                  <div key={a.id || i} className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm">
+                    <a href={fileUrl(a.id)} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2 truncate hover:underline">
+                      <FileText size={15} className="shrink-0 text-brand" />
+                      <span className="truncate">{a.filename}</span>
+                    </a>
+                    <button type="button" data-testid={`bid-anexo-remove-${i}`} onClick={() => set("anexos", form.anexos.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-alert">
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <FileUpload
+              testid="bid-anexo"
+              accept=".pdf,.png,.jpg,.jpeg"
+              value={null}
+              onUploaded={(f) => set("anexos", [...(form.anexos || []), f])}
+            />
           </div>
         </div>
 
