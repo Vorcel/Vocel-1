@@ -105,5 +105,8 @@ Centralized, modular Brazilian public bidding (licitações) management system �
 - P1: Produtos/Entregas/Notas Fiscais/Atestados/Comunicações/Histórico tabs in Tela 4 (currently placeholders).
 - P2: Export/print proposal PDF from ERP; brute-force lockout & password reset email; pagination on large tables; per-row delivery sub-tracking.
 
+## Changelog
+- 2026-06-19: Realocados os 3 cards indicadores do Dashboard (Participações no Mês, Adjudicadas, Em Acompanhamento) para o Header fixo como mini-cards (ícone + label + número + delta) via `leftContent`. Subtítulo removido; corpo inicia no banner "Licitações do Dia".
+
 ## Test Credentials
 admin@licita.com / admin123 — see /app/memory/test_credentials.md

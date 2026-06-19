@@ -6,25 +6,27 @@ import { useData } from "@/context/DataContext";
 import { colorStyles, findColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
-const SummaryCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
-  <div data-testid={testid} className="relative flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
-    {delta != null && (
-      <span
-        data-testid={`${testid}-delta`}
-        className={cn(
-          "absolute right-3 top-3 rounded-full px-2 py-0.5 text-xs font-semibold",
-          delta >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-        )}
-      >
-        {delta >= 0 ? "+" : ""}{delta}%
-      </span>
-    )}
-    <div className={cn("flex h-12 w-12 items-center justify-center rounded-lg", accent)}>
-      <Icon size={24} />
+const MiniCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
+  <div data-testid={testid} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-1.5 shadow-sm transition-shadow hover:shadow">
+    <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", accent)}>
+      <Icon size={16} />
     </div>
-    <div>
-      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="font-heading text-3xl font-bold text-foreground">{value}</p>
+    <div className="min-w-0">
+      <p className="truncate text-[10px] font-bold uppercase leading-tight tracking-wide text-muted-foreground">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="font-heading text-lg font-bold leading-none text-foreground">{value}</p>
+        {delta != null && (
+          <span
+            data-testid={`${testid}-delta`}
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+              delta >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+            )}
+          >
+            {delta >= 0 ? "+" : ""}{delta}%
+          </span>
+        )}
+      </div>
     </div>
   </div>
 );
@@ -43,17 +45,18 @@ export default function Dashboard() {
     [bids, todayStr]
   );
 
+  const headerCards = (
+    <div className="flex items-center gap-3 overflow-x-auto">
+      <MiniCard testid="card-mes" icon={CalendarDays} label="Participações no Mês" value={summary.licitacoes_mes} delta={summary.licitacoes_mes_delta} accent="bg-brand/10 text-brand" />
+      <MiniCard testid="card-adjudicadas" icon={Award} label="Adjudicadas" value={summary.adjudicadas} delta={summary.adjudicadas_delta} accent="bg-emerald-100 text-emerald-600" />
+      <MiniCard testid="card-acompanhando" icon={Star} label="Em Acompanhamento" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
+    </div>
+  );
+
   return (
     <>
-      <Header title="Página Inicial" subtitle="Monitoramento diário das suas licitações" />
+      <Header leftContent={headerCards} />
       <main className="space-y-8 p-6">
-        {/* Seção 1 — Resumo */}
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <SummaryCard testid="card-mes" icon={CalendarDays} label="Participações no Mês" value={summary.licitacoes_mes} delta={summary.licitacoes_mes_delta} accent="bg-brand/10 text-brand" />
-          <SummaryCard testid="card-adjudicadas" icon={Award} label="Adjudicadas" value={summary.adjudicadas} delta={summary.adjudicadas_delta} accent="bg-emerald-100 text-emerald-600" />
-          <SummaryCard testid="card-acompanhando" icon={Star} label="Em Acompanhamento" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
-        </section>
-
         {/* Seção 2 — Licitações do Dia (Hero Banner dinâmico) */}
         <section>
           <div
