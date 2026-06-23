@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Truck, TrendingUp, Activity, Wallet, Filter, FileText, Calculator, FileCheck,
-  Pencil, Clock, CheckCircle2, Circle, Paperclip, Save, FileX,
+  Pencil, Clock, CheckCircle2, Circle, Paperclip, Save, FileX, Plus,
   ShoppingCart, Package, PackageCheck, Receipt, PackageOpen, Banknote, ClipboardCheck, AlertTriangle,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileUpload } from "@/components/FileUpload";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
+import { BidFormModal } from "@/components/bids/BidFormModal";
 import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
@@ -59,6 +60,7 @@ export default function Execution() {
   const [filters, setFilters] = useState({ q: "", modalidade: "", portal: "", status: "", from: "", to: "" });
   const [timeModal, setTimeModal] = useState(null); // execution being edited for delivery
   const [editModal, setEditModal] = useState(null);
+  const [addWonOpen, setAddWonOpen] = useState(false); // modal "Adicionar Licitação Ganha"
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const { widths: mw, startResize: mResize, total: mTotal } = useColumnResize("exec_master_widths", [100, 140, 130, 220, 92, 120, 120, 120, 150, 150, 150]);
@@ -130,10 +132,15 @@ export default function Execution() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-heading text-lg font-semibold">Licitações Ganhas</h2>
-            <Button variant="outline" onClick={() => setFilterOpen(true)} data-testid="exec-filter-open" className="relative">
-              <Filter size={16} className="mr-2" /> Filtros
-              {activeFilters > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{activeFilters}</span>}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button data-testid="exec-add-won" onClick={() => setAddWonOpen(true)} className="bg-brand hover:bg-brand-hover">
+                <Plus size={16} className="mr-2" /> Adicionar Licitação Ganha
+              </Button>
+              <Button variant="outline" onClick={() => setFilterOpen(true)} data-testid="exec-filter-open" className="relative">
+                <Filter size={16} className="mr-2" /> Filtros
+                {activeFilters > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{activeFilters}</span>}
+              </Button>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -364,6 +371,8 @@ export default function Execution() {
       <DeliveryModal execution={timeModal} onClose={() => setTimeModal(null)} onSave={updateExec} />
       {/* Edit modal */}
       <EditModal execution={editModal} statuses={TIMELINE_STEPS} onClose={() => setEditModal(null)} onSave={updateExec} />
+      {/* Adicionar licitação já ganha — reutiliza o modal de cadastro; cria bid "Adjudicado" + execução automática */}
+      <BidFormModal open={addWonOpen} onOpenChange={setAddWonOpen} wonMode onCreated={(bid) => bid?.id && setSelectedId(bid.id)} />
     </>
   );
 }

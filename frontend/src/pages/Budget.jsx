@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -8,6 +8,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext, verticalListSortingStrategy, useSortable, sortableKeyboardCoordinates, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
@@ -282,6 +290,62 @@ function tdBg(col, r, c) {
   return "";
 }
 
+// Linha arrastável (drag-and-drop) — usa a alça (grip) na coluna de ações.
+// Reordena apenas a posição de exibição; não toca em nenhum cálculo.
+function SortableRow({ r, c, visible, renderCell, selectedCols, onRequestDelete }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: r._id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { position: "relative", zIndex: 30 } : null),
+  };
+  return (
+    <tr
+      ref={setNodeRef}
+      style={style}
+      data-testid={`erp-row-${r._id}`}
+      className={cn(
+        "border-b border-border",
+        r.selecionado ? "bg-card" : "bg-muted/30",
+        isDragging && "shadow-[0_6px_20px_rgba(0,0,0,0.18)]"
+      )}
+    >
+      {visible.map(({ c: col, i }) => (
+        <td key={col.key}
+          className={cn("border-r border-border",
+            col.sticky ? "sticky left-0 z-10 bg-inherit px-3 py-2" : "p-0",
+            tdBg(col, r, c),
+            selectedCols.has(i) && "!bg-[#E8F0FE] dark:!bg-blue-950/40")}>
+          {col.type === "select" ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                data-testid={`erp-drag-${r._id}`}
+                {...attributes}
+                {...listeners}
+                style={{ touchAction: "none" }}
+                title="Arraste para reordenar a linha"
+                className="flex h-6 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
+              >
+                <GripVertical size={14} />
+              </button>
+              {renderCell(col, r, c)}
+            </div>
+          ) : (
+            renderCell(col, r, c)
+          )}
+        </td>
+      ))}
+      <td className="sticky right-0 z-10 bg-card px-2 py-2">
+        <button type="button" data-testid={`erp-remove-${r._id}`} onClick={() => onRequestDelete(r._id)}
+          className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-alert/10 hover:text-alert">
+          <Trash2 size={14} />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
 export default function Budget() {
   const { bidId } = useParams();
   const navigate = useNavigate();
@@ -371,6 +435,23 @@ export default function Budget() {
   const addLoteOption = (n) => setLoteOptions((p) => (p.includes(n) ? p : [...p, n]));
   const toggleLoteFilter = (l) => setSelectedLotes((p) => (p.includes(l) ? p.filter((x) => x !== l) : [...p, l]));
   const confirmDelete = () => { if (pendingDelete) removeRow(pendingDelete); setPendingDelete(null); };
+
+  // Drag-and-drop (reordenação de linhas) — mouse + touch + teclado.
+  // PointerSensor com pequena distância evita arraste acidental ao clicar na alça.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    markDirty();
+    setRows((prev) => {
+      const from = prev.findIndex((r) => r._id === active.id);
+      const to = prev.findIndex((r) => r._id === over.id);
+      if (from === -1 || to === -1) return prev;
+      return arrayMove(prev, from, to);
+    });
+  };
 
   // Keyboard nav: advance focus to next editable cell (right; wraps to next row).
   const advanceFocus = (rowId, colKey) => {
@@ -570,6 +651,7 @@ export default function Budget() {
 
         {/* Spreadsheet */}
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} onDragEnd={onDragEnd}>
           <table className="rt-fixed border-collapse text-sm" style={{ width: totalW }}>
             <colgroup>
               {visible.map(({ i }) => <col key={i} style={{ width: ew[i] }} />)}
@@ -608,27 +690,22 @@ export default function Budget() {
                   Nenhum item. Clique em <strong>Linha</strong> para adicionar.
                 </td></tr>
               )}
-              {displayRows.map((r) => {
-                const c = computeRow(r);
-                return (
-                  <tr key={r._id} data-testid={`erp-row-${r._id}`} className={cn("border-b border-border", r.selecionado ? "bg-card" : "bg-muted/30")}>
-                    {visible.map(({ c: col, i }) => (
-                      <td key={col.key}
-                        className={cn("border-r border-border",
-                          col.sticky ? "sticky left-0 z-10 bg-inherit px-3 py-2" : "p-0",
-                          tdBg(col, r, c),
-                          selectedCols.has(i) && "!bg-[#E8F0FE] dark:!bg-blue-950/40")}>
-                        {renderCell(col, r, c)}
-                      </td>
-                    ))}
-                    <td className="sticky right-0 z-10 bg-card px-2 py-2">
-                      <button data-testid={`erp-remove-${r._id}`} onClick={() => setPendingDelete(r._id)} className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-alert/10 hover:text-alert"><Trash2 size={14} /></button>
-                    </td>
-                  </tr>
-                );
-              })}
+              <SortableContext items={displayRows.map((r) => r._id)} strategy={verticalListSortingStrategy}>
+                {displayRows.map((r) => (
+                  <SortableRow
+                    key={r._id}
+                    r={r}
+                    c={computeRow(r)}
+                    visible={visible}
+                    renderCell={renderCell}
+                    selectedCols={selectedCols}
+                    onRequestDelete={setPendingDelete}
+                  />
+                ))}
+              </SortableContext>
             </tbody>
           </table>
+          </DndContext>
         </div>
       </div>
 

@@ -101,3 +101,10 @@ frontend/node_modules/.cache/default-development/11.pack
 frontend/node_modules/.cache/default-development/6.pack_
 frontend/node_modules/.cache/default-development/7.pack
 frontend/node_modules/.cache/default-development/7.pack
+
+# Local-only (não versionar): lockfile do npm (projeto usa yarn na Vercel),
+# tooling do Claude Code, referências de design e docs locais.
+frontend/package-lock.json
+.claude/
+referências/
+CLAUDE.md

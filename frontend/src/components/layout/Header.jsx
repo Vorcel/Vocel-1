@@ -9,7 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { fileUrl } from "@/lib/api";
 
-export const Header = ({ title, subtitle, leftContent }) => {
+export const Header = ({ title, subtitle, leftContent, centerContent }) => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -22,7 +22,7 @@ export const Header = ({ title, subtitle, leftContent }) => {
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-4 border-b border-border bg-card/80 px-6 shadow-sm backdrop-blur-md">
+    <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-card/80 px-6 shadow-sm backdrop-blur-md">
       <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto">
         {leftContent ? (
           leftContent
@@ -34,7 +34,13 @@ export const Header = ({ title, subtitle, leftContent }) => {
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      {centerContent && (
+        <div className="flex shrink-0 items-center gap-3 overflow-x-auto">
+          {centerContent}
+        </div>
+      )}
+
+      <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
         <button
           data-testid="header-theme-toggle"
           onClick={toggleTheme}

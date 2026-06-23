@@ -24,7 +24,7 @@ const empty = {
   termo_referencia: null, anexos: [], status: "Disputar", favorito: false,
 };
 
-export const BidFormModal = ({ open, onOpenChange, editing }) => {
+export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onCreated }) => {
   const { createBid, updateBid } = useData();
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
@@ -54,13 +54,14 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
     else if (!ITENS_REGEX.test(form.itens.trim())) e.itens = "Use números separados por vírgula. Ex: 1, 2, 3";
     if (!form.portal) e.portal = "Obrigatório";
     if (!form.data_disputa) e.data_disputa = "Obrigatório";
-    else if (!editing && form.data_disputa < todayStr()) e.data_disputa = "Não é permitida data retroativa";
+    // Em wonMode a licitação já foi ganha (pode ser passada), então não bloqueia data retroativa.
+    else if (!editing && !wonMode && form.data_disputa < todayStr()) e.data_disputa = "Não é permitida data retroativa";
     if (!form.hora) e.hora = "Obrigatório";
     if (!form.pregao.trim()) e.pregao = "Obrigatório";
     if (!form.uasg.trim()) e.uasg = "Obrigatório";
     if (!form.termo_referencia) e.termo = "Anexe o Termo de Referência (PDF)";
     return e;
-  }, [form, editing]);
+  }, [form, editing, wonMode]);
 
   const valid = Object.keys(errors).length === 0;
 
@@ -73,11 +74,15 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
         ...form,
         observacoes: obsList,
         observacao: obsList.map((o) => o.text).join("; "),
-        status: editing ? form.status : "Disputar",
+        status: editing ? form.status : (wonMode ? "Adjudicado" : "Disputar"),
       };
-      if (editing) await updateBid(editing.id, payload);
-      else await createBid(payload);
-      toast.success(editing ? "Licitação atualizada" : "Licitação cadastrada");
+      if (editing) {
+        await updateBid(editing.id, payload);
+      } else {
+        const created = await createBid(payload);
+        if (wonMode) onCreated?.(created);
+      }
+      toast.success(editing ? "Licitação atualizada" : (wonMode ? "Licitação ganha cadastrada" : "Licitação cadastrada"));
       onOpenChange(false);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
@@ -92,8 +97,8 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" data-testid="bid-modal">
         <DialogHeader>
-          <DialogTitle className="font-heading">{editing ? "Editar Licitação" : "Nova Licitação"}</DialogTitle>
-          <DialogDescription>Preencha os campos obrigatórios (*) para cadastrar a disputa.</DialogDescription>
+          <DialogTitle className="font-heading">{editing ? "Editar Licitação" : wonMode ? "Adicionar Licitação Ganha" : "Nova Licitação"}</DialogTitle>
+          <DialogDescription>{wonMode ? "Cadastre uma licitação já ganha. Ela será marcada como Adjudicada e entrará automaticamente no fluxo de execução/pós-venda." : "Preencha os campos obrigatórios (*) para cadastrar a disputa."}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -140,7 +145,7 @@ export const BidFormModal = ({ open, onOpenChange, editing }) => {
               <Input
                 type="date"
                 data-testid="bid-data"
-                min={editing ? undefined : todayStr()}
+                min={editing || wonMode ? undefined : todayStr()}
                 value={form.data_disputa}
                 onChange={(e) => set("data_disputa", e.target.value)}
                 onBlur={() => setTouched((t) => ({ ...t, data_disputa: true }))}

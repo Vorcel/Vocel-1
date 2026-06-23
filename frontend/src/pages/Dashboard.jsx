@@ -46,16 +46,16 @@ export default function Dashboard() {
   );
 
   const headerCards = (
-    <div className="flex items-center gap-3 overflow-x-auto">
+    <>
       <MiniCard testid="card-mes" icon={CalendarDays} label="Participações no Mês" value={summary.licitacoes_mes} delta={summary.licitacoes_mes_delta} accent="bg-brand/10 text-brand" />
       <MiniCard testid="card-adjudicadas" icon={Award} label="Adjudicadas" value={summary.adjudicadas} delta={summary.adjudicadas_delta} accent="bg-emerald-100 text-emerald-600" />
       <MiniCard testid="card-acompanhando" icon={Star} label="Em Acompanhamento" value={summary.acompanhando} accent="bg-amber-100 text-amber-600" />
-    </div>
+    </>
   );
 
   return (
     <>
-      <Header leftContent={headerCards} />
+      <Header centerContent={headerCards} />
       <main className="space-y-8 p-6">
         {/* Seção 2 — Licitações do Dia (Hero Banner dinâmico) */}
         <section>
