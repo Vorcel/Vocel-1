@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Header, Response
 
 from db import db, now_iso
-from auth import get_current_user
+from auth import get_current_user, user_id_from_token
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +112,22 @@ async def upload(file: UploadFile = File(...), current=Depends(get_current_user)
 
 @files_router.get("/files/{file_id}")
 async def download(file_id: str, auth: str = Query(None), authorization: str = Header(None)):
+    # Token chega via query (?auth=) quando carregado por <img>/<a>, ou via header Bearer.
+    token = auth
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    requester = user_id_from_token(token)
+    if not requester:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
     record = await db.files.find_one({"id": file_id, "is_deleted": False})
 
     if not record:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    # Isolamento: só o dono do arquivo pode baixá-lo.
+    if record.get("owner_id") != requester:
+        raise HTTPException(status_code=403, detail="Acesso negado")
 
     try:
         data, content_type = get_object(record["storage_path"])

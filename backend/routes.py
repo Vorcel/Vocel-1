@@ -1,4 +1,8 @@
-"""Core business routes: bids, lists/params, settings, budget (ERP), execution (post-sale)."""
+"""Core business routes: bids, lists/params, settings, budget (ERP), execution (post-sale).
+
+Todos os registros são isolados por usuário via `owner_id` (multi-tenant no mesmo banco).
+Cada consulta/edição filtra pelo usuário autenticado; acesso a registros de outro
+usuário retorna 404 (não revela existência)."""
 from datetime import datetime, timezone
 from typing import Optional, List, Any
 
@@ -66,6 +70,11 @@ def ser(doc: dict) -> dict:
     return doc
 
 
+def uid(current: dict) -> str:
+    """Id do usuário autenticado — chave de isolamento de todos os dados."""
+    return current["id"]
+
+
 # =================== PARAMS / LISTS ===================
 class ListItemInput(BaseModel):
     nome: str
@@ -78,11 +87,11 @@ class ListItemUpdate(BaseModel):
     cor: str = DEFAULT_COLOR
 
 
-async def _get_params() -> dict:
-    p = await db.params.find_one({"_key": "global"})
+async def _get_params(owner_id: str) -> dict:
+    p = await db.params.find_one({"owner_id": owner_id})
     if not p:
         p = {
-            "_key": "global",
+            "owner_id": owner_id,
             "modalidades": DEFAULT_MODALIDADES,
             "portais": DEFAULT_PORTAIS,
             "statuses": DEFAULT_STATUSES,
@@ -93,7 +102,7 @@ async def _get_params() -> dict:
 
 @api.get("/lists")
 async def get_lists(current=Depends(get_current_user)):
-    p = await _get_params()
+    p = await _get_params(uid(current))
     return {
         "modalidades": _normalize_list(p.get("modalidades", DEFAULT_MODALIDADES), "modalidades"),
         "portais": _normalize_list(p.get("portais", DEFAULT_PORTAIS), "portais"),
@@ -109,12 +118,13 @@ _BID_FIELD = {"modalidades": "modalidade", "portais": "portal", "statuses": "sta
 async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
         raise HTTPException(status_code=400, detail="Tipo de lista inválido")
-    p = await _get_params()
+    owner = uid(current)
+    p = await _get_params(owner)
     items = _normalize_list(p.get(list_type, []), list_type)
     nome = body.nome.strip()
     if nome and not any(i["nome"].lower() == nome.lower() for i in items):
         items.append({"nome": nome, "cor": body.cor})
-    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
+    await db.params.update_one({"owner_id": owner}, {"$set": {list_type: items}})
     return await get_lists(current)
 
 
@@ -122,18 +132,19 @@ async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get
 async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
         raise HTTPException(status_code=400, detail="Tipo de lista inválido")
-    p = await _get_params()
+    owner = uid(current)
+    p = await _get_params(owner)
     items = _normalize_list(p.get(list_type, []), list_type)
     new_nome = body.nome.strip()
     for i in items:
         if i["nome"] == body.old_nome:
             i["nome"] = new_nome
             i["cor"] = body.cor
-    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
-    # Retroactive rename propagation to bids
+    await db.params.update_one({"owner_id": owner}, {"$set": {list_type: items}})
+    # Retroactive rename propagation to this user's bids only
     if new_nome and new_nome != body.old_nome:
         field = _BID_FIELD[list_type]
-        await db.bids.update_many({field: body.old_nome}, {"$set": {field: new_nome}})
+        await db.bids.update_many({field: body.old_nome, "owner_id": owner}, {"$set": {field: new_nome}})
     return await get_lists(current)
 
 
@@ -141,9 +152,10 @@ async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends
 async def remove_list_item(list_type: str, value: str, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
         raise HTTPException(status_code=400, detail="Tipo de lista inválido")
-    p = await _get_params()
+    owner = uid(current)
+    p = await _get_params(owner)
     items = [i for i in _normalize_list(p.get(list_type, []), list_type) if i["nome"] != value]
-    await db.params.update_one({"_key": "global"}, {"$set": {list_type: items}})
+    await db.params.update_one({"owner_id": owner}, {"$set": {list_type: items}})
     return await get_lists(current)
 
 
@@ -172,9 +184,18 @@ def _itens_list(itens: str) -> List[str]:
     return [i.strip() for i in itens.split(",") if i.strip()]
 
 
+async def _owned_bid(bid_id: str, owner: str) -> Optional[dict]:
+    """Busca um bid garantindo que pertence ao usuário. ObjectId inválido => None."""
+    try:
+        oid = ObjectId(bid_id)
+    except Exception:
+        return None
+    return await db.bids.find_one({"_id": oid, "owner_id": owner})
+
+
 @api.get("/bids")
 async def list_bids(current=Depends(get_current_user)):
-    bids = await db.bids.find().sort("data_disputa", 1).to_list(2000)
+    bids = await db.bids.find({"owner_id": uid(current)}).sort("data_disputa", 1).to_list(2000)
     return [ser(b) for b in bids]
 
 
@@ -182,7 +203,7 @@ async def list_bids(current=Depends(get_current_user)):
 async def create_bid(body: BidInput, current=Depends(get_current_user)):
     doc = body.model_dump()
     doc["itens_list"] = _itens_list(body.itens)
-    doc["owner_id"] = current["id"]
+    doc["owner_id"] = uid(current)
     doc["created_at"] = now_iso()
     res = await db.bids.insert_one(doc)
     created = await db.bids.find_one({"_id": res.inserted_id})
@@ -193,7 +214,7 @@ async def create_bid(body: BidInput, current=Depends(get_current_user)):
 
 @api.get("/bids/{bid_id}")
 async def get_bid(bid_id: str, current=Depends(get_current_user)):
-    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    bid = await _owned_bid(bid_id, uid(current))
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     return ser(bid)
@@ -201,9 +222,13 @@ async def get_bid(bid_id: str, current=Depends(get_current_user)):
 
 @api.put("/bids/{bid_id}")
 async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_user)):
+    owner = uid(current)
+    existing = await _owned_bid(bid_id, owner)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
     doc = body.model_dump()
     doc["itens_list"] = _itens_list(body.itens)
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": doc})
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     if body.status == "Adjudicado":
         await _ensure_execution(bid)
@@ -216,10 +241,11 @@ class StatusInput(BaseModel):
 
 @api.patch("/bids/{bid_id}/status")
 async def change_status(bid_id: str, body: StatusInput, current=Depends(get_current_user)):
-    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    owner = uid(current)
+    bid = await _owned_bid(bid_id, owner)
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"status": body.status}})
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"status": body.status}})
     bid["status"] = body.status
     if body.status == "Adjudicado":
         await _ensure_execution(bid)
@@ -232,7 +258,10 @@ class FavoriteInput(BaseModel):
 
 @api.patch("/bids/{bid_id}/favorite")
 async def toggle_favorite(bid_id: str, body: FavoriteInput, current=Depends(get_current_user)):
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"favorito": body.favorito}})
+    owner = uid(current)
+    if not await _owned_bid(bid_id, owner):
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"favorito": body.favorito}})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     return ser(bid)
 
@@ -243,10 +272,10 @@ class ObservacoesInput(BaseModel):
 
 @api.patch("/bids/{bid_id}/observacoes")
 async def update_observacoes(bid_id: str, body: ObservacoesInput, current=Depends(get_current_user)):
-    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
-    if not bid:
+    owner = uid(current)
+    if not await _owned_bid(bid_id, owner):
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"observacoes": body.observacoes}})
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"observacoes": body.observacoes}})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     return ser(bid)
 
@@ -257,24 +286,28 @@ class PropostaInput(BaseModel):
 
 @api.patch("/bids/{bid_id}/proposta")
 async def update_proposta(bid_id: str, body: PropostaInput, current=Depends(get_current_user)):
-    await db.bids.update_one({"_id": ObjectId(bid_id)}, {"$set": {"proposta_enviada": body.proposta_enviada}})
-    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
-    if not bid:
+    owner = uid(current)
+    if not await _owned_bid(bid_id, owner):
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"proposta_enviada": body.proposta_enviada}})
+    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     return ser(bid)
 
 
 @api.delete("/bids/{bid_id}")
 async def delete_bid(bid_id: str, current=Depends(get_current_user)):
-    await db.bids.delete_one({"_id": ObjectId(bid_id)})
-    await db.budgets.delete_one({"bid_id": bid_id})
-    await db.executions.delete_one({"bid_id": bid_id})
+    owner = uid(current)
+    if not await _owned_bid(bid_id, owner):
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    await db.bids.delete_one({"_id": ObjectId(bid_id), "owner_id": owner})
+    await db.budgets.delete_one({"bid_id": bid_id, "owner_id": owner})
+    await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
     return {"message": "Licitação removida"}
 
 
 @api.get("/dashboard/summary")
 async def dashboard_summary(current=Depends(get_current_user)):
-    bids = await db.bids.find().to_list(5000)
+    bids = await db.bids.find({"owner_id": uid(current)}).to_list(5000)
     now = datetime.now(timezone.utc)
     month_count = 0
     adjudicadas = 0
@@ -327,11 +360,12 @@ class BudgetInput(BaseModel):
 
 @api.get("/bids/{bid_id}/budget")
 async def get_budget(bid_id: str, current=Depends(get_current_user)):
-    bud = await db.budgets.find_one({"bid_id": bid_id})
-    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    owner = uid(current)
+    bid = await _owned_bid(bid_id, owner)
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    prefs = await db.preferences.find_one({"_key": "global"}) or {}
+    bud = await db.budgets.find_one({"bid_id": bid_id, "owner_id": owner})
+    prefs = await db.preferences.find_one({"owner_id": owner}) or {}
     if not bud:
         return {
             "bid_id": bid_id,
@@ -357,17 +391,20 @@ async def get_budget(bid_id: str, current=Depends(get_current_user)):
 
 @api.put("/bids/{bid_id}/budget")
 async def save_budget(bid_id: str, body: BudgetInput, current=Depends(get_current_user)):
+    owner = uid(current)
+    if not await _owned_bid(bid_id, owner):
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
     await db.budgets.update_one(
-        {"bid_id": bid_id},
-        {"$set": {"rows": body.rows, "summary": body.summary, "updated_at": now_iso()}},
+        {"bid_id": bid_id, "owner_id": owner},
+        {"$set": {"rows": body.rows, "summary": body.summary, "owner_id": owner, "updated_at": now_iso()}},
         upsert=True,
     )
     # Propagate financials to execution if it exists
-    exec_doc = await db.executions.find_one({"bid_id": bid_id})
+    exec_doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     if exec_doc:
         s = body.summary or {}
         await db.executions.update_one(
-            {"bid_id": bid_id},
+            {"bid_id": bid_id, "owner_id": owner},
             {"$set": {
                 "valor_empenho": s.get("valor_total", 0),
                 "valor_compra": s.get("custo_global", 0),
@@ -379,8 +416,10 @@ async def save_budget(bid_id: str, body: BudgetInput, current=Depends(get_curren
 
 # =================== EXECUTION / POST-SALE (Tela 4) ===================
 async def _ensure_execution(bid: dict):
-    """Create an execution record when a bid becomes Adjudicado (idempotent)."""
+    """Create an execution record when a bid becomes Adjudicado (idempotent).
+    Herda o owner_id do bid, mantendo o isolamento por usuário."""
     bid_id = str(bid["_id"])
+    owner = bid.get("owner_id")
     existing = await db.executions.find_one({"bid_id": bid_id})
     if existing:
         return existing
@@ -388,6 +427,7 @@ async def _ensure_execution(bid: dict):
     s = (bud or {}).get("summary", {})
     doc = {
         "bid_id": bid_id,
+        "owner_id": owner,
         "objeto": bid.get("objeto", ""),
         "portal": bid.get("portal", ""),
         "modalidade": bid.get("modalidade", ""),
@@ -411,13 +451,13 @@ async def _ensure_execution(bid: dict):
 
 @api.get("/executions")
 async def list_executions(current=Depends(get_current_user)):
-    docs = await db.executions.find().sort("created_at", -1).to_list(2000)
+    docs = await db.executions.find({"owner_id": uid(current)}).sort("created_at", -1).to_list(2000)
     return [ser(d) for d in docs]
 
 
 @api.get("/executions/kpis")
 async def execution_kpis(current=Depends(get_current_user)):
-    docs = await db.executions.find().to_list(2000)
+    docs = await db.executions.find({"owner_id": uid(current)}).to_list(2000)
     lucro_total = sum(float(d.get("lucro_previsto", 0) or 0) for d in docs)
     em_andamento = sum(1 for d in docs if d.get("status_atual") != "Concluído")
     pagamentos_pendentes = sum(1 for d in docs if d.get("pagamento_pendente"))
@@ -430,7 +470,7 @@ async def execution_kpis(current=Depends(get_current_user)):
 
 @api.get("/executions/{bid_id}")
 async def get_execution(bid_id: str, current=Depends(get_current_user)):
-    doc = await db.executions.find_one({"bid_id": bid_id})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": uid(current)})
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
     return ser(doc)
@@ -451,6 +491,10 @@ class ExecutionUpdate(BaseModel):
 
 @api.put("/executions/{bid_id}")
 async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(get_current_user)):
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     # keep current_step and status_atual in sync
     if "current_step" in updates and "status_atual" not in updates:
@@ -460,8 +504,8 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
         if updates["status_atual"] in TIMELINE_STEPS:
             updates["current_step"] = TIMELINE_STEPS.index(updates["status_atual"])
     if updates:
-        await db.executions.update_one({"bid_id": bid_id}, {"$set": updates})
-    doc = await db.executions.find_one({"bid_id": bid_id})
+        await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": updates})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return ser(doc)
 
 
@@ -471,27 +515,29 @@ class TimelineFileInput(BaseModel):
 
 @api.post("/executions/{bid_id}/timeline/{step}/file")
 async def add_timeline_file(bid_id: str, step: int, body: TimelineFileInput, current=Depends(get_current_user)):
-    doc = await db.executions.find_one({"bid_id": bid_id})
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
     timeline = doc.get("timeline", [])
     if 0 <= step < len(timeline):
         timeline[step].setdefault("files", []).append(body.file)
-    await db.executions.update_one({"bid_id": bid_id}, {"$set": {"timeline": timeline}})
-    doc = await db.executions.find_one({"bid_id": bid_id})
+    await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": {"timeline": timeline}})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return ser(doc)
 
 
 @api.delete("/executions/{bid_id}/timeline/{step}/file/{file_id}")
 async def remove_timeline_file(bid_id: str, step: int, file_id: str, current=Depends(get_current_user)):
-    doc = await db.executions.find_one({"bid_id": bid_id})
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
     timeline = doc.get("timeline", [])
     if 0 <= step < len(timeline):
         timeline[step]["files"] = [f for f in timeline[step].get("files", []) if f.get("id") != file_id]
-    await db.executions.update_one({"bid_id": bid_id}, {"$set": {"timeline": timeline}})
-    doc = await db.executions.find_one({"bid_id": bid_id})
+    await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": {"timeline": timeline}})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return ser(doc)
 
 
@@ -507,24 +553,28 @@ class CompanyInput(BaseModel):
     logo_url: Optional[str] = None
 
 
-@api.get("/company")
-async def get_company(current=Depends(get_current_user)):
-    doc = await db.company.find_one({"_key": "global"})
-    if not doc:
-        return {}
+def _strip_meta(doc: dict) -> dict:
     doc.pop("_id", None)
     doc.pop("_key", None)
+    doc.pop("owner_id", None)
     return doc
+
+
+@api.get("/company")
+async def get_company(current=Depends(get_current_user)):
+    doc = await db.company.find_one({"owner_id": uid(current)})
+    if not doc:
+        return {}
+    return _strip_meta(doc)
 
 
 @api.put("/company")
 async def update_company(body: CompanyInput, current=Depends(get_current_user)):
+    owner = uid(current)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    await db.company.update_one({"_key": "global"}, {"$set": updates}, upsert=True)
-    doc = await db.company.find_one({"_key": "global"})
-    doc.pop("_id", None)
-    doc.pop("_key", None)
-    return doc
+    await db.company.update_one({"owner_id": owner}, {"$set": {**updates, "owner_id": owner}}, upsert=True)
+    doc = await db.company.find_one({"owner_id": owner})
+    return _strip_meta(doc)
 
 
 class PreferencesInput(BaseModel):
@@ -536,19 +586,16 @@ class PreferencesInput(BaseModel):
 
 @api.get("/preferences")
 async def get_preferences(current=Depends(get_current_user)):
-    doc = await db.preferences.find_one({"_key": "global"})
+    doc = await db.preferences.find_one({"owner_id": uid(current)})
     if not doc:
         return {"theme": "light", "icms_padrao": 18, "pis_cofins_padrao": 9.25}
-    doc.pop("_id", None)
-    doc.pop("_key", None)
-    return doc
+    return _strip_meta(doc)
 
 
 @api.put("/preferences")
 async def update_preferences(body: PreferencesInput, current=Depends(get_current_user)):
+    owner = uid(current)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    await db.preferences.update_one({"_key": "global"}, {"$set": updates}, upsert=True)
-    doc = await db.preferences.find_one({"_key": "global"})
-    doc.pop("_id", None)
-    doc.pop("_key", None)
-    return doc
+    await db.preferences.update_one({"owner_id": owner}, {"$set": {**updates, "owner_id": owner}}, upsert=True)
+    doc = await db.preferences.find_one({"owner_id": owner})
+    return _strip_meta(doc)

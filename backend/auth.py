@@ -1,6 +1,7 @@
 """Email/password JWT authentication."""
 import os
 import secrets
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 
 import bcrypt
@@ -47,6 +48,20 @@ def _public_user(user: dict) -> dict:
     user.pop("_id", None)
     user.pop("password_hash", None)
     return user
+
+
+def user_id_from_token(token: str) -> Optional[str]:
+    """Decode a JWT and return its user id (sub), or None if invalid.
+    Used where the token arrives outside the normal header (e.g. file download via query param)."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "access":
+            return None
+        return payload.get("sub")
+    except jwt.InvalidTokenError:
+        return None
 
 
 async def get_current_user(request: Request) -> dict:
