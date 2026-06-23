@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { useTheme } from "@/context/ThemeContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
+import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -62,9 +63,9 @@ function ProfileTab() {
             </div>
           </div>
           <div className="grid flex-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5 sm:col-span-2"><Label>Nome</Label><Input data-testid="profile-name" value={form.name} onChange={(e) => set("name", e.target.value)} /></div>
+            <div className="space-y-1.5 sm:col-span-2"><Label>Nome</Label><Input data-testid="profile-name" value={form.name} onChange={(e) => set("name", e.target.value)} onBlur={() => set("name", smartTitleCase(form.name))} /></div>
             <div className="space-y-1.5"><Label>Telefone</Label><Input data-testid="profile-phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Cargo</Label><Input data-testid="profile-cargo" value={form.cargo} onChange={(e) => set("cargo", e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Cargo</Label><Input data-testid="profile-cargo" value={form.cargo} onChange={(e) => set("cargo", e.target.value)} onBlur={() => set("cargo", smartTitleCase(form.cargo))} /></div>
             <div className="space-y-1.5 sm:col-span-2"><Label>E-mail</Label><Input value={user?.email || ""} disabled /></div>
           </div>
         </div>
@@ -99,12 +100,12 @@ function CompanyTab() {
     <div className="rounded-xl border border-border bg-card p-6">
       <h3 className="mb-4 font-heading text-base font-semibold">Identificação & Identidade Visual</h3>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5 sm:col-span-2"><Label>Razão Social</Label><Input data-testid="company-razao" value={form.razao_social || ""} onChange={(e) => set("razao_social", e.target.value)} /></div>
-        <div className="space-y-1.5"><Label>Nome Fantasia</Label><Input data-testid="company-fantasia" value={form.nome_fantasia || ""} onChange={(e) => set("nome_fantasia", e.target.value)} /></div>
+        <div className="space-y-1.5 sm:col-span-2"><Label>Razão Social</Label><Input data-testid="company-razao" value={form.razao_social || ""} onChange={(e) => set("razao_social", e.target.value)} onBlur={() => set("razao_social", smartTitleCase(form.razao_social || ""))} /></div>
+        <div className="space-y-1.5"><Label>Nome Fantasia</Label><Input data-testid="company-fantasia" value={form.nome_fantasia || ""} onChange={(e) => set("nome_fantasia", e.target.value)} onBlur={() => set("nome_fantasia", smartTitleCase(form.nome_fantasia || ""))} /></div>
         <div className="space-y-1.5"><Label>CNPJ</Label><Input data-testid="company-cnpj" value={form.cnpj || ""} onChange={(e) => set("cnpj", e.target.value)} /></div>
         <div className="space-y-1.5"><Label>E-mail</Label><Input data-testid="company-email" value={form.email || ""} onChange={(e) => set("email", e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Telefone</Label><Input data-testid="company-tel" value={form.telefone || ""} onChange={(e) => set("telefone", e.target.value)} /></div>
-        <div className="space-y-1.5 sm:col-span-2"><Label>Endereço</Label><Input data-testid="company-end" value={form.endereco || ""} onChange={(e) => set("endereco", e.target.value)} /></div>
+        <div className="space-y-1.5 sm:col-span-2"><Label>Endereço</Label><Input data-testid="company-end" value={form.endereco || ""} onChange={(e) => set("endereco", e.target.value)} onBlur={() => set("endereco", smartTitleCase(form.endereco || ""))} /></div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label>Logotipo</Label>
           {form.logo_url ? (
@@ -178,14 +179,14 @@ function ListManager({ title, type }) {
 
   const add = async () => {
     if (!text.trim()) return;
-    await addListItem(type, text.trim(), cor);
+    await addListItem(type, smartTitleCase(text.trim()), cor);
     setText("");
     toast.success("Item adicionado");
   };
   const startEdit = (item) => { setEditing(item.nome); setEditName(item.nome); setEditCor(item.cor); };
   const saveEdit = async () => {
     if (!editName.trim()) return;
-    await updateListItem(type, editing, editName.trim(), editCor);
+    await updateListItem(type, editing, smartTitleCase(editName.trim()), editCor);
     setEditing(null);
     toast.success("Item atualizado");
   };

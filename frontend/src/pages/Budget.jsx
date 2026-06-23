@@ -19,6 +19,7 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
+import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -171,7 +172,8 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
   }, [editing]);
 
   const start = () => { if (readOnly) return; setDraft(value ?? ""); setEditing(true); };
-  const commit = (advance) => { setEditing(false); onCommit(draft); if (advance && onAdvance) onAdvance(); };
+  // Texto livre recebe Smart Title Case; tipos técnicos (currency/percent/number) ficam intactos.
+  const commit = (advance) => { setEditing(false); onCommit(type === "text" ? smartTitleCase(draft) : draft); if (advance && onAdvance) onAdvance(); };
 
   const right = align === "right";
 

@@ -24,6 +24,7 @@ import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { TIMELINE_STEPS, colorStyles } from "@/lib/constants";
+import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -425,7 +426,7 @@ function ContractSummary({ execution, onSave }) {
   useEffect(() => { setText(execution.resumo_contrato || ""); setPend(execution.pagamento_pendente); }, [execution.bid_id]);
   return (
     <div className="space-y-3">
-      <Textarea data-testid="resumo-text" value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="Notas do contrato..." />
+      <Textarea data-testid="resumo-text" value={text} onChange={(e) => setText(e.target.value)} onBlur={() => setText((t) => smartTitleCase(t))} rows={3} placeholder="Notas do contrato..." />
       <div className="flex items-center justify-between rounded-lg border border-border p-3">
         <Label className="cursor-pointer">Pagamento pendente</Label>
         <Switch data-testid="resumo-pend" checked={pend} onCheckedChange={setPend} />

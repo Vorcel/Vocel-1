@@ -5,6 +5,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { hexToRgba, tagColorAt } from "@/lib/constants";
+import { smartTitleCase } from "@/lib/textcase";
 
 let _tid = 0;
 const newId = () => `obs_${Date.now()}_${_tid++}`;
@@ -20,12 +21,12 @@ export const ObservacaoTags = ({ value = [], onChange, testid = "obs" }) => {
   const [pendingDelete, setPendingDelete] = useState(null);
 
   const commitEdit = (id) => {
-    const t = draft.trim();
+    const t = smartTitleCase(draft.trim());
     onChange(t ? tags.map((tg) => (tg.id === id ? { ...tg, text: t } : tg)) : tags.filter((tg) => tg.id !== id));
     setEditingId(null);
   };
   const addTag = () => {
-    const t = newText.trim();
+    const t = smartTitleCase(newText.trim());
     if (t) onChange([...tags, { id: newId(), text: t, color: tagColorAt(tags.length) }]);
     setNewText("");
     setAdding(false);

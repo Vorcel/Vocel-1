@@ -3,6 +3,7 @@ import { Plus, Check, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/context/DataContext";
+import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 
 // Select with an inline "+" to add a new option to a managed list (modalidades/portais).
@@ -14,7 +15,7 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }
   const options = lists[listType] || [];
 
   const confirm = async () => {
-    const v = text.trim();
+    const v = smartTitleCase(text.trim());
     if (!v) return;
     try {
       await addListItem(listType, v, cor);
