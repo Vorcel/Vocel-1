@@ -74,15 +74,15 @@ function LoteStatCard({ variant, label, value, icon: Icon, testid }) {
   };
   const labelCls = variant === "blue" ? "text-white/80" : "text-current opacity-70";
   return (
-    <div data-testid={testid} className={cn("flex items-center gap-3 rounded-xl border p-4 shadow-sm", styles[variant])}>
+    <div data-testid={testid} className={cn("flex items-center gap-2.5 rounded-xl border px-3 py-2 shadow-sm", styles[variant])}>
       {Icon && (
-        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", variant === "blue" ? "bg-white/20" : "bg-black/5")}>
-          <Icon size={20} />
+        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", variant === "blue" ? "bg-white/20" : "bg-black/5")}>
+          <Icon size={16} />
         </div>
       )}
       <div className="min-w-0">
-        <p className={cn("text-[11px] font-bold uppercase tracking-wider", labelCls)}>{label}</p>
-        <p className="font-mono-num truncate font-heading text-xl font-bold">{value}</p>
+        <p className={cn("text-[10px] font-bold uppercase leading-tight tracking-wider", labelCls)}>{label}</p>
+        <p className="font-mono-num truncate font-heading text-base font-bold leading-tight">{value}</p>
       </div>
     </div>
   );
@@ -364,7 +364,10 @@ export default function Budget() {
   const [ctx, setCtx] = useState(null); // { x, y, idx, targets }
   const [focusCell, setFocusCell] = useState(null); // { rowId, colKey }
   const [loteOptions, setLoteOptions] = useState([1, 2, 3, 4, 5]);
-  const [selectedLotes, setSelectedLotes] = useState([]); // filtro global de lote
+  // Filtro de lote por visibilidade (marcado = visível). Persistido por orçamento no localStorage.
+  const [hiddenLotes, setHiddenLotes] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(`erp_lote_hidden_${bidId}`) || "[]")); } catch { return new Set(); }
+  });
   const [pendingDelete, setPendingDelete] = useState(null); // id da linha a excluir
 
   const dirtyRef = useRef(false);
@@ -394,17 +397,21 @@ export default function Budget() {
     return [...s].sort((a, b) => a - b);
   }, [loteOptions, rows]);
 
-  // Lotes efetivos para os cartões: selecionados, ou todos presentes se nada selecionado.
+  // Lotes presentes nas linhas (cada um gera um card).
   const lotesPresentes = useMemo(() => {
     const s = new Set();
     rows.forEach((r) => s.add(num(r.lote) || 1));
     return [...s].sort((a, b) => a - b);
   }, [rows]);
-  const effectiveLotes = selectedLotes.length ? [...selectedLotes].sort((a, b) => a - b) : lotesPresentes;
-  const loteLayers = useMemo(() => effectiveLotes.map((l) => computeLote(rows, l)), [rows, effectiveLotes]);
+  // Filtro = visibilidade. Visível = presente e NÃO ocultado. Lote novo nasce visível.
+  const visibleLotes = useMemo(() => lotesPresentes.filter((l) => !hiddenLotes.has(l)), [lotesPresentes, hiddenLotes]);
+  const loteLayers = useMemo(() => visibleLotes.map((l) => computeLote(rows, l)), [rows, visibleLotes]);
+  // Quantos lotes presentes estão ocultos no momento (para badge/ação "mostrar todos").
+  const hiddenCount = lotesPresentes.filter((l) => hiddenLotes.has(l)).length;
 
-  // Linhas exibidas na tabela (aplicando filtro de lote, se houver).
-  const displayRows = selectedLotes.length ? rows.filter((r) => selectedLotes.includes(num(r.lote) || 1)) : rows;
+  // A tabela mostra SEMPRE todas as linhas. O filtro "Filtrar por Lote" afeta apenas
+  // os cards/resumos superiores (via visibleLotes), nunca as linhas da tabela.
+  const displayRows = rows;
 
   // Auto-save (debounced full-budget) — fires only after user edits.
   useEffect(() => {
@@ -428,6 +435,11 @@ export default function Budget() {
     return () => clearTimeout(timerRef.current);
   }, [rows, loading, bidId]);
 
+  // Persiste o filtro de lote (cards) por orçamento, para sobreviver à saída/retorno da página.
+  useEffect(() => {
+    try { localStorage.setItem(`erp_lote_hidden_${bidId}`, JSON.stringify([...hiddenLotes])); } catch { /* ignore */ }
+  }, [hiddenLotes, bidId]);
+
   const markDirty = () => { dirtyRef.current = true; };
   const updateRow = (id, patch) => { markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r))); };
   const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" });
@@ -435,7 +447,8 @@ export default function Budget() {
   const addRow = () => { markDirty(); setRows((p) => [...p, newRow(defaults)]); };
   const removeRow = (id) => { markDirty(); setRows((p) => p.filter((r) => r._id !== id)); };
   const addLoteOption = (n) => setLoteOptions((p) => (p.includes(n) ? p : [...p, n]));
-  const toggleLoteFilter = (l) => setSelectedLotes((p) => (p.includes(l) ? p.filter((x) => x !== l) : [...p, l]));
+  const toggleLoteFilter = (l) => setHiddenLotes((prev) => { const n = new Set(prev); n.has(l) ? n.delete(l) : n.add(l); return n; });
+  const showAllLotes = () => setHiddenLotes(new Set());
   const confirmDelete = () => { if (pendingDelete) removeRow(pendingDelete); setPendingDelete(null); };
 
   // Drag-and-drop (reordenação de linhas) — mouse + touch + teclado.
@@ -615,24 +628,29 @@ export default function Budget() {
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" data-testid="lote-filter-trigger">
-                <Layers size={15} className="mr-1.5" /> Filtrar por Lote{selectedLotes.length > 0 ? ` (${selectedLotes.length})` : ""}
+                <Layers size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount > 1 ? "s" : ""})` : ""}
                 <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-44 p-1" data-testid="lote-filter-menu">
+            <PopoverContent align="end" className="w-52 p-1" data-testid="lote-filter-menu">
+              <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Marcado = visível</p>
               <div className="max-h-60 overflow-y-auto">
-                {allLoteOptions.map((l) => (
-                  <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
-                    <Checkbox checked={selectedLotes.includes(l)} className="pointer-events-none" />
-                    Lote {l}
-                  </button>
-                ))}
+                {lotesPresentes.length === 0 ? (
+                  <p className="px-2 py-2 text-sm text-muted-foreground">Nenhum lote ainda.</p>
+                ) : (
+                  lotesPresentes.map((l) => (
+                    <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
+                      <Checkbox checked={!hiddenLotes.has(l)} className="pointer-events-none" />
+                      Lote {l}
+                    </button>
+                  ))
+                )}
               </div>
-              {selectedLotes.length > 0 && (
-                <button type="button" data-testid="lote-filter-clear" onClick={() => setSelectedLotes([])}
+              {hiddenCount > 0 && (
+                <button type="button" data-testid="lote-filter-clear" onClick={showAllLotes}
                   className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
-                  Limpar filtro
+                  Mostrar todos os lotes
                 </button>
               )}
             </PopoverContent>
