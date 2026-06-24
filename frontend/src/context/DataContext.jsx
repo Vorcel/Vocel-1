@@ -46,22 +46,24 @@ export function DataProvider({ children }) {
   }, [user, refreshBids, refreshExecutions, refreshLists, refreshPrefs, refreshCompany]);
 
   // ---- Bid operations ----
+  // A execução é sincronizada pelo status no backend (Adjudicado cria; outro status
+  // remove), então sempre recarregamos as execuções para a página refletir na hora.
   const createBid = async (payload) => {
     const { data } = await api.post("/bids", payload);
     await refreshBids();
-    if (payload.status === "Adjudicado") await refreshExecutions();
+    await refreshExecutions();
     return data;
   };
   const updateBid = async (id, payload) => {
     const { data } = await api.put(`/bids/${id}`, payload);
     await refreshBids();
-    if (payload.status === "Adjudicado") await refreshExecutions();
+    await refreshExecutions();
     return data;
   };
   const changeStatus = async (id, status) => {
     await api.patch(`/bids/${id}/status`, { status });
     await refreshBids();
-    if (status === "Adjudicado") await refreshExecutions();
+    await refreshExecutions();
   };
   const toggleFavorite = async (id, favorito) => {
     setBids((prev) => prev.map((b) => (b.id === id ? { ...b, favorito } : b)));

@@ -39,6 +39,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Escala visual global (~10% mais compacto). Como o Tailwind usa rem para fontes,
+   espaçamentos, alturas e raios, reduzir o font-size da raiz encolhe a interface
+   inteira de forma proporcional — equivalente a usar o navegador em ~90% de zoom,
+   mas com o navegador em 100%. Não afeta os breakpoints responsivos (que usam px
+   de viewport) e não usa transform: scale (preserva cliques, scroll, modais e dropdowns). */
+html {
+    font-size: 90%;
+}
+
 body {
     margin: 0;
     font-family: 'CondNum', 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -153,9 +162,9 @@ body {
 
 /* Hero Banner "Licitações do Dia" — floating fixed-size cards */
 .hero-bid-card {
-    height: 144px;
-    width: 352px;
-    min-width: 352px;
+    height: 9rem;
+    width: 22rem;
+    min-width: 22rem;
     background: #ffffff;
     border-radius: 16px;
     box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.2);

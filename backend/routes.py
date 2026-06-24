@@ -207,8 +207,7 @@ async def create_bid(body: BidInput, current=Depends(get_current_user)):
     doc["created_at"] = now_iso()
     res = await db.bids.insert_one(doc)
     created = await db.bids.find_one({"_id": res.inserted_id})
-    if body.status == "Adjudicado":
-        await _ensure_execution(created)
+    await _sync_execution(created)
     return ser(created)
 
 
@@ -230,8 +229,7 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
     doc["itens_list"] = _itens_list(body.itens)
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
-    if body.status == "Adjudicado":
-        await _ensure_execution(bid)
+    await _sync_execution(bid)
     return ser(bid)
 
 
@@ -247,8 +245,7 @@ async def change_status(bid_id: str, body: StatusInput, current=Depends(get_curr
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"status": body.status}})
     bid["status"] = body.status
-    if body.status == "Adjudicado":
-        await _ensure_execution(bid)
+    await _sync_execution(bid)
     return ser(bid)
 
 
@@ -447,6 +444,22 @@ async def _ensure_execution(bid: dict):
     }
     await db.executions.insert_one(doc)
     return doc
+
+
+async def _sync_execution(bid: dict):
+    """Mantém a página de Execução/Pós-vendas em sincronia com o status da licitação.
+    - Status "Adjudicado": garante a execução correspondente (idempotente).
+    - Qualquer outro status: remove a execução da Execução/Pós-vendas. A licitação,
+      o orçamento e os arquivos vinculados permanecem intactos — só o registro de
+      execução é descartado.
+    Respeita o owner_id (recebido no próprio bid já verificado) para nunca tocar
+    dados de outro usuário."""
+    bid_id = str(bid["_id"])
+    owner = bid.get("owner_id")
+    if bid.get("status") == "Adjudicado":
+        await _ensure_execution(bid)
+    else:
+        await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
 
 
 @api.get("/executions")
