@@ -71,6 +71,21 @@ async def migrate_owner_isolation():
     logger.info(f"Owner isolation migration: executions={n_exec}, budgets={n_bud} backfilled")
 
 
+async def migrate_add_status(nome: str, cor: str, flag: str):
+    """Adiciona um status à lista de cada usuário, uma única vez (flag por doc).
+    Idempotente e não-destrutivo: só acrescenta se ainda não existir; se o usuário
+    apagar o status depois, ele não volta (o flag impede re-inserção)."""
+    n = 0
+    async for p in db.params.find({flag: {"$ne": True}}):
+        statuses = p.get("statuses", [])
+        names = [s.get("nome") if isinstance(s, dict) else s for s in statuses]
+        if nome not in names:
+            statuses = list(statuses) + [{"nome": nome, "cor": cor}]
+        await db.params.update_one({"_id": p["_id"]}, {"$set": {"statuses": statuses, flag: True}})
+        n += 1
+    logger.info(f"Status seed '{nome}': {n} usuário(s) processado(s)")
+
+
 @app.on_event("startup")
 async def startup():
     try:
@@ -90,6 +105,10 @@ async def startup():
         await migrate_owner_isolation()
     except Exception as e:
         logger.error(f"Owner isolation migration failed: {e}")
+    try:
+        await migrate_add_status("Encerrado", "#475569", "_encerrado_seeded")
+    except Exception as e:
+        logger.error(f"Status seed migration failed: {e}")
     try:
         init_storage()
         logger.info("Storage initialized")

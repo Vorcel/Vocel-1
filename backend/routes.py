@@ -40,6 +40,7 @@ DEFAULT_STATUSES = [
     {"nome": "Desclassificado", "cor": "#EF4444"},
     {"nome": "Perdido", "cor": "#94A3B8"},
     {"nome": "Adiado", "cor": "#F97316"},
+    {"nome": "Encerrado", "cor": "#475569"},
 ]
 _DEFAULT_STATUS_COLORS = {s["nome"]: s["cor"] for s in DEFAULT_STATUSES}
 
@@ -55,10 +56,12 @@ def _normalize_list(items, kind=None):
             out.append({"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)})
     return out
 TIMELINE_STEPS = [
-    "Aguardando Empenho", "Empenho Recebido", "Pedido de Compra",
-    "Aguardando Mercadoria", "Mercadoria Recebida", "Faturamento / NF",
-    "Expedição", "Em Transporte", "Entregue", "Concluído",
+    "Aguardando Empenho", "Empenho Recebido", "Comprar Mercadoria",
+    "Aguardando Mercadoria", "Mercadoria Recebida", "Preparar para Transporte",
+    "Emitir NF", "Em Transporte", "Entregue", "Solicitar Atestado",
+    "Pagamento Recebido",
 ]
+STEP_PENDENTE = "Pendente"
 
 
 def ser(doc: dict) -> dict:
@@ -437,7 +440,7 @@ async def _ensure_execution(bid: dict):
         "data_entrega": "",
         "status_atual": TIMELINE_STEPS[0],
         "current_step": 0,
-        "timeline": [{"step": i, "name": name, "files": []} for i, name in enumerate(TIMELINE_STEPS)],
+        "timeline": [{"step": i, "name": name, "status": STEP_PENDENTE, "files": []} for i, name in enumerate(TIMELINE_STEPS)],
         "resumo_contrato": "",
         "pagamento_pendente": True,
         "created_at": now_iso(),
@@ -462,10 +465,38 @@ async def _sync_execution(bid: dict):
         await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
 
 
+async def _budget_totals(bid_id: str, owner: str) -> dict:
+    """Agrega os valores financeiros do orçamento (soma de todos os lotes).
+    O orçamento salva `summary = computeTotals(rows)` = soma das linhas selecionadas
+    de todos os lotes, com as chaves valor_total / custo_global / lucro_global."""
+    bud = await db.budgets.find_one({"bid_id": bid_id, "owner_id": owner})
+    s = (bud or {}).get("summary") or {}
+    return {
+        "valor_total": float(s.get("valor_total", 0) or 0),
+        "custo_global": float(s.get("custo_global", 0) or 0),
+        "lucro_global": float(s.get("lucro_global", 0) or 0),
+    }
+
+
+async def _enrich_execution(doc: dict, owner: str) -> dict:
+    """Injeta os valores reais agregados do orçamento na execução (tempo real).
+    - valor_compra  = soma do custo de todos os lotes
+    - lucro_previsto = soma do lucro de todos os lotes
+    - valor_empenho  = override manual (edição inline), se houver; senão o valor total agregado"""
+    t = await _budget_totals(doc.get("bid_id", ""), owner)
+    # Empenho, Compra e Lucro Previsto seguem a MESMA base: o orçamento vinculado
+    # (soma de todos os lotes). Empenho = "Valor Total" do orçamento (card azul).
+    doc["valor_empenho"] = t["valor_total"]
+    doc["valor_compra"] = t["custo_global"]
+    doc["lucro_previsto"] = t["lucro_global"]
+    return doc
+
+
 @api.get("/executions")
 async def list_executions(current=Depends(get_current_user)):
-    docs = await db.executions.find({"owner_id": uid(current)}).sort("created_at", -1).to_list(2000)
-    return [ser(d) for d in docs]
+    owner = uid(current)
+    docs = await db.executions.find({"owner_id": owner}).sort("created_at", -1).to_list(2000)
+    return [await _enrich_execution(ser(d), owner) for d in docs]
 
 
 @api.get("/executions/kpis")
@@ -483,10 +514,11 @@ async def execution_kpis(current=Depends(get_current_user)):
 
 @api.get("/executions/{bid_id}")
 async def get_execution(bid_id: str, current=Depends(get_current_user)):
-    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": uid(current)})
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
-    return ser(doc)
+    return await _enrich_execution(ser(doc), owner)
 
 
 class ExecutionUpdate(BaseModel):
@@ -519,7 +551,7 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     if updates:
         await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": updates})
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
-    return ser(doc)
+    return await _enrich_execution(ser(doc), owner)
 
 
 class TimelineFileInput(BaseModel):

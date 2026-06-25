@@ -39,12 +39,13 @@ export function findColor(list, nome, fallback = "#64748B") {
 export const TIMELINE_STEPS = [
   "Aguardando Empenho",
   "Empenho Recebido",
-  "Pedido de Compra",
+  "Comprar Mercadoria",
   "Aguardando Mercadoria",
   "Mercadoria Recebida",
-  "Faturamento / NF",
-  "Expedição",
+  "Preparar para Transporte",
+  "Emitir NF",
   "Em Transporte",
   "Entregue",
-  "Concluído",
+  "Solicitar Atestado",
+  "Pagamento Recebido",
 ];
