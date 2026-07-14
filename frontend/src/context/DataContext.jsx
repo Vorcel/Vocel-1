@@ -9,7 +9,7 @@ export function DataProvider({ children }) {
   const [bids, setBids] = useState([]);
   const [executions, setExecutions] = useState([]);
   const [lists, setLists] = useState({ modalidades: [], portais: [], statuses: [] });
-  const [prefs, setPrefs] = useState({ theme: "light", icms_padrao: 18, pis_cofins_padrao: 9.25 });
+  const [prefs, setPrefs] = useState({ theme: "light", icms_padrao: 18, pis_cofins_padrao: 9.25, margem_padrao: 30 });
   const [company, setCompany] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -97,6 +97,17 @@ export function DataProvider({ children }) {
     const { data } = await api.delete(`/lists/${type}/${encodeURIComponent(nome)}`);
     setLists(data);
   };
+  // Ordem manual (drag-and-drop): aplica localmente na hora (sem F5) e persiste.
+  const reorderList = async (type, names) => {
+    setLists((prev) => {
+      const byName = Object.fromEntries((prev[type] || []).map((i) => [i.nome, i]));
+      const ordered = names.map((n) => byName[n]).filter(Boolean);
+      const rest = (prev[type] || []).filter((i) => !names.includes(i.nome));
+      return { ...prev, [type]: [...ordered, ...rest] };
+    });
+    const { data } = await api.put(`/lists/${type}/reorder`, { names });
+    setLists(data);
+  };
 
   // ---- Settings ----
   const savePrefs = async (payload) => {
@@ -147,7 +158,7 @@ export function DataProvider({ children }) {
         bids, executions, lists, prefs, company, loading, summary,
         refreshBids, refreshExecutions, refreshLists,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, toggleProposta, deleteBid,
-        addListItem, removeListItem, updateListItem, savePrefs, saveCompany,
+        addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany,
       }}
     >
       {children}

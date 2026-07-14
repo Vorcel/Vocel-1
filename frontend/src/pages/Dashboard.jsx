@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { CalendarDays, Award, Star, Clock, MapPin } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { BidsSection } from "@/components/bids/BidsSection";
@@ -31,18 +32,44 @@ const MiniCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
   </div>
 );
 
+// Data/hora da disputa como Date no fuso LOCAL do navegador (America/Sao_Paulo
+// no uso real) — evita o deslocamento de dia causado por conversão UTC.
+// Sem horário cadastrado, assume o fim do dia (23:59).
+const disputaDateTime = (b) => {
+  if (!b.data_disputa) return null;
+  const d = new Date(`${b.data_disputa}T${b.hora || "23:59"}:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const WINDOW_MS = 24 * 60 * 60 * 1000; // 24 horas antes da disputa
+
 export default function Dashboard() {
   const { summary, bids, lists } = useData();
+  const navigate = useNavigate();
 
-  const now = new Date();
+  // Relógio interno (1 min): retira/insere cards da janela sem precisar de F5.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
+
   const DAY_COLORS = ["#18181B", "#1E293B", "#2D283E", "#334155", "#1F2937", "#475569", "#121417"];
   const dayColor = DAY_COLORS[now.getDay()];
   const longDate = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Janela de exibição: de (disputa - 24h) até a data/hora exata da disputa.
   const todayBids = useMemo(
-    () => bids.filter((b) => b.data_disputa === todayStr).sort((a, b) => (a.hora || "").localeCompare(b.hora || "")),
-    [bids, todayStr]
+    () =>
+      bids
+        .filter((b) => {
+          const d = disputaDateTime(b);
+          if (!d) return false;
+          const diff = d - now;
+          return diff >= 0 && diff <= WINDOW_MS;
+        })
+        .sort((a, b) => disputaDateTime(a) - disputaDateTime(b)),
+    [bids, now]
   );
 
   const headerCards = (
@@ -80,7 +107,16 @@ export default function Dashboard() {
                 {todayBids.map((b) => {
                   const portalStyle = colorStyles(findColor(lists.portais, b.portal)).badge;
                   return (
-                    <div key={b.id} data-testid={`today-alert-${b.id}`} className="hero-bid-card flex shrink-0 flex-col justify-between p-5">
+                    <div
+                      key={b.id}
+                      data-testid={`today-alert-${b.id}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate(`/orcamento/${b.id}`)}
+                      onKeyDown={(e) => e.key === "Enter" && navigate(`/orcamento/${b.id}`)}
+                      title="Abrir orçamento"
+                      className="hero-bid-card flex shrink-0 cursor-pointer flex-col justify-between p-5"
+                    >
                       <div className="flex items-center gap-2">
                         <Clock size={22} className="text-brand" />
                         <span className="font-mono-num text-4xl font-extrabold tracking-tighter text-[#121417]">{b.hora || "--:--"}</span>

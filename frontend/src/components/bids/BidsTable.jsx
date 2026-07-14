@@ -2,12 +2,13 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX, ChevronUp, ChevronDown } from "lucide-react";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
+import { PortalName } from "@/components/bids/PortalName";
 import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import { useData } from "@/context/DataContext";
 import { fileUrl } from "@/lib/api";
-import { findColor, hexToRgba, tagColorAt } from "@/lib/constants";
+import { hexToRgba, tagColorAt } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const fmtDate = (d) => {
@@ -20,13 +21,12 @@ const isImage = (name = "") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
 const FileTypeIcon = ({ name, size = 16 }) =>
   isImage(name) ? <ImageIcon size={size} className="shrink-0 text-emerald-600" /> : <FileText size={size} className="shrink-0 text-alert" />;
 
-// Ordem: Modalidade > Portal > Itens; Observação ao lado de Objeto; PROP. logo após ★.
+// Portal e Modalidade compartilham uma coluna (portal em cima, modalidade abaixo).
 const COLS = [
   { label: "Data / Hora", key: "data_disputa", type: "date", w: 110 },
   { label: "★", key: null, w: 52 },
   { label: "PROP.", key: null, w: 56 },
-  { label: "Modalidade", key: "modalidade", type: "text", w: 150 },
-  { label: "Portal", key: "portal", type: "text", w: 140 },
+  { label: "Portal / Modalidade", key: "portal", type: "text", w: 170 },
   { label: "Itens", key: null, w: 130 },
   { label: "Objeto", key: "objeto", type: "text", w: 260 },
   { label: "Observação", key: null, w: 230 },
@@ -90,10 +90,11 @@ const FilesCell = ({ files }) => {
 };
 
 export const BidsTable = ({ bids, onEdit, onDelete }) => {
-  const { toggleFavorite, updateObservacoes, toggleProposta, lists } = useData();
+  const { toggleFavorite, updateObservacoes, toggleProposta } = useData();
   const navigate = useNavigate();
-  const { widths, startResize, total } = useColumnResize("bidstable_widths_v3", COLS.map((c) => c.w));
-  const [sort, setSort] = useState({ key: null, dir: "asc" });
+  const { widths, startResize, total } = useColumnResize("bidstable_widths_v4", COLS.map((c) => c.w));
+  // Padrão: data/hora da disputa decrescente (mais recente primeiro).
+  const [sort, setSort] = useState({ key: "data_disputa", dir: "desc" });
 
   const toggleSort = (col) => {
     if (!col.key) return;
@@ -101,11 +102,17 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
   };
 
   const sorted = useMemo(() => {
-    if (!sort.key) return bids;
     const col = COLS.find((c) => c.key === sort.key);
+    if (!col) return bids;
     const dir = sort.dir === "asc" ? 1 : -1;
     const val = (b) => (col.key === "data_disputa" ? `${b.data_disputa || ""}T${b.hora || ""}` : (b[col.key] ?? "").toString());
-    return [...bids].sort((a, b) => dir * val(a).localeCompare(val(b), "pt-BR", { numeric: true, sensitivity: "base" }));
+    return [...bids].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      // Registros sem valor (ex.: sem data) sempre no fim, em qualquer direção.
+      const ea = !va || va === "T", eb = !vb || vb === "T";
+      if (ea || eb) return ea && eb ? 0 : ea ? 1 : -1;
+      return dir * va.localeCompare(vb, "pt-BR", { numeric: true, sensitivity: "base" });
+    });
   }, [bids, sort]);
 
   return (
@@ -163,15 +170,12 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
                     P
                   </button>
                 </td>
-                {/* 4. Modalidade */}
-                <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{b.modalidade}</td>
-                {/* 5. Portal — texto simples em negrito, cor dinâmica do parâmetro */}
+                {/* 4. Portal / Modalidade (portal em cima com cor do parâmetro, modalidade abaixo) */}
                 <td className="px-3 py-3">
-                  <span className="block truncate font-semibold" style={{ color: findColor(lists.portais, b.portal) }} title={b.portal}>
-                    {b.portal}
-                  </span>
+                  <PortalName portal={b.portal} />
+                  <span className="block truncate text-xs text-muted-foreground" title={b.modalidade}>{b.modalidade}</span>
                 </td>
-                {/* 6. Itens (cores pastel alternadas, texto escuro) */}
+                {/* 5. Itens (cores pastel alternadas, texto escuro) */}
                 <td className="px-3 py-3">
                   <div className="flex max-w-[150px] flex-wrap gap-1">
                     {(b.itens_list || []).map((it, i) => (

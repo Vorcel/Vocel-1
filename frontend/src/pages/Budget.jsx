@@ -27,7 +27,7 @@ let _rid = 0;
 const newRow = (defaults) => ({
   _id: `r${Date.now()}_${_rid++}`,
   selecionado: true, lote: "1", item: "", produto: "", marca: "", fornecedor: "", site: "",
-  valor_compra: "", qtd: "1", valor_venda: "", margem: "30",
+  valor_compra: "", qtd: "1", valor_venda: "", margem: String(defaults.margem ?? 30),
   icms: String(defaults.icms ?? 18), pis_cofins: String(defaults.pis_cofins ?? 9.25),
   outros_sem_imp: "0", outros_com_imp: "0", frete_receber: "0", frete_enviar: "0",
   mode: "margem",
@@ -353,7 +353,7 @@ export default function Budget() {
   const navigate = useNavigate();
   const [bid, setBid] = useState(null);
   const [rows, setRows] = useState([]);
-  const [defaults, setDefaults] = useState({ icms: 18, pis_cofins: 9.25 });
+  const [defaults, setDefaults] = useState({ icms: 18, pis_cofins: 9.25, margem: 30 });
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
 

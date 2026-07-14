@@ -15,12 +15,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileUpload } from "@/components/FileUpload";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { DatePickerInput } from "@/components/DatePickerInput";
 import { BidFormModal } from "@/components/bids/BidFormModal";
+import { PortalName } from "@/components/bids/PortalName";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
-import { TIMELINE_STEPS, colorStyles } from "@/lib/constants";
+import { TIMELINE_STEPS } from "@/lib/constants";
 import {
   normalizeTimeline, progressOf, doneCount, currentStage, isPaid, needsAtestado, isLate, statusForIndex,
   ACTION_STAGES, PHASE_GROUPS, phaseOfStage, STEP_PENDING, STEP_ACTIVE, STEP_DONE,
@@ -278,14 +281,14 @@ export default function Execution() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    {["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Ações"].map((h) => (
+                    {["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Progresso", "Ações"].map((h) => (
                       <th key={h} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {currentSet.length === 0 && (
-                    <tr><td colSpan={11} className="px-4 py-16 text-center">
+                    <tr><td colSpan={12} className="px-4 py-16 text-center">
                       <FileX size={40} className="mx-auto mb-3 text-muted-foreground/50" />
                       <p className="text-muted-foreground">Nenhuma licitação adjudicada ainda. Mude o status de uma licitação para <strong>Adjudicado</strong>.</p>
                     </td></tr>
@@ -293,7 +296,7 @@ export default function Execution() {
                   {pageRows.map((e) => {
                     const nodes = nodesById[e.bid_id] || [];
                     const stage = currentStage(nodes);
-                    const s = colorStyles(stageColor(stage));
+                    const progress = progressOf(nodes);
                     const bid = bidsById[e.bid_id];
                     const docs = baseDocs(e);
                     return (
@@ -302,7 +305,7 @@ export default function Execution() {
                         className={cn("cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/40", selectedId === e.bid_id && "bg-brand/5")}>
                         <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_cadastro)}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{e.modalidade}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><span className="rounded-md bg-secondary px-2 py-1 text-xs font-medium">{e.portal}</span></td>
+                        <td className="whitespace-nowrap px-3 py-3"><PortalName portal={e.portal} className="max-w-[140px]" /></td>
                         <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{e.objeto}</span></td>
                         <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                           <button data-testid={`exec-time-${e.bid_id}`} onClick={() => setTimeModal(e)} className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs hover:bg-brand/10 hover:text-brand">
@@ -314,9 +317,16 @@ export default function Execution() {
                         <td className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(e.valor_compra)}</td>
                         <td className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600">{brl(e.lucro_previsto)}</td>
                         <td className="px-3 py-3">
-                          <span style={s.badge} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold">
-                            <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />{stage}
-                          </span>
+                          <StatusBadge color={stageColor(stage)}>{stage}</StatusBadge>
+                        </td>
+                        {/* Progresso — mesma regra da barra principal (progressOf) */}
+                        <td className="px-3 py-3">
+                          <div className="flex w-28 items-center gap-2" data-testid={`exec-progress-${e.bid_id}`}>
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, backgroundColor: PROGRESS_BLUE }} />
+                            </div>
+                            <span className="font-mono-num shrink-0 text-xs font-semibold" style={{ color: PROGRESS_BLUE }}>{progress}%</span>
+                          </div>
                         </td>
                         <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                           <div className="flex items-center gap-0.5">
@@ -518,7 +528,6 @@ function DetailPanel({ execution, nodes, onBack, onMove, onAddFile, onRemoveFile
   const stage = currentStage(nodes);
   const progress = Math.round((Math.min(currentStep, nodes.length) / nodes.length) * 100);
   const paid = isPaid(nodes);
-  const s = colorStyles(stageColor(stage));
 
   return (
     <section data-testid="exec-detail" className="rounded-xl border border-border bg-card p-5">
@@ -534,9 +543,7 @@ function DetailPanel({ execution, nodes, onBack, onMove, onAddFile, onRemoveFile
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span style={s.badge} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold">
-            <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />{stage}
-          </span>
+          <StatusBadge color={stageColor(stage)} className="px-3">{stage}</StatusBadge>
           {!paid && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-alert/40 bg-alert/10 px-3 py-1 text-xs font-semibold text-alert">
               <AlertTriangle size={13} /> Pagamento Pendente
@@ -639,23 +646,36 @@ function InlineUpload({ step, onUploaded }) {
 function DeliveryModal({ execution, onClose, onSave }) {
   const [dias, setDias] = useState(30);
   const [tipo, setTipo] = useState("corridos");
+  const [refDate, setRefDate] = useState("");
   useEffect(() => {
     if (execution) {
       setDias(execution.tempo_entrega_dias || 30);
       setTipo(execution.prazo_entrega_tipo || "corridos");
+      // Data de referência salva; registros antigos usam a base anterior (data de cadastro).
+      setRefDate((execution.data_referencia_entrega || execution.data_cadastro || todayIso()).slice(0, 10));
     }
   }, [execution]);
   if (!execution) return null;
-  // Recalcula automaticamente conforme dias e tipo; base = data de cadastro (preservada).
-  const previewDate = addDaysByType(execution.data_cadastro, dias, tipo);
+  const diasNum = Number(dias);
+  const diasValid = Number.isFinite(diasNum) && diasNum > 0;
+  // Recalcula em tempo real: Data prevista = Data de referência + prazo (corridos/úteis).
+  const previewDate = refDate && diasValid ? addDaysByType(refDate, diasNum, tipo) : "";
+  const canSave = !!refDate && diasValid && !!tipo;
   return (
     <Dialog open={!!execution} onOpenChange={onClose}>
       <DialogContent data-testid="delivery-modal">
         <DialogHeader><DialogTitle className="font-heading">Prazo de Entrega</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Data de referência</Label>
+            <DatePickerInput value={refDate} onChange={setRefDate} testid="delivery-ref-date" invalid={!refDate} />
+            {!refDate && <p className="text-xs text-alert">Informe uma data válida (DD/MM/AAAA).</p>}
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5"><Label>Prazo de entrega (dias)</Label>
-              <Input type="number" min="0" data-testid="delivery-days" value={dias} onChange={(e) => setDias(e.target.value)} />
+              <Input type="number" min="1" data-testid="delivery-days" value={dias} onChange={(e) => setDias(e.target.value)}
+                className={cn(!diasValid && "border-alert focus-visible:ring-alert")} />
+              {!diasValid && <p className="text-xs text-alert">Informe um prazo maior que zero.</p>}
             </div>
             <div className="space-y-1.5"><Label>Tipo de contagem</Label>
               <Select value={tipo} onValueChange={setTipo}>
@@ -668,14 +688,24 @@ function DeliveryModal({ execution, onClose, onSave }) {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            {tipo === "uteis" ? "Conta apenas dias úteis (ignora sábados, domingos e feriados nacionais)." : "Soma dias corridos diretamente à data de cadastro."}
+            {tipo === "uteis"
+              ? "Conta somente dias úteis a partir da data de referência, desconsiderando sábados, domingos e feriados."
+              : "Soma os dias corridos à data de referência informada."}
           </p>
           <p className="text-sm text-muted-foreground">Data prevista: <strong className="text-foreground">{fmtDate(previewDate)}</strong></p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button data-testid="delivery-save" className="bg-brand hover:bg-brand-hover"
-            onClick={() => { onSave(execution.bid_id, { tempo_entrega_dias: Number(dias), prazo_entrega_tipo: tipo, data_entrega: previewDate }); onClose(); }}>Salvar</Button>
+          <Button data-testid="delivery-save" className="bg-brand hover:bg-brand-hover" disabled={!canSave}
+            onClick={() => {
+              onSave(execution.bid_id, {
+                data_referencia_entrega: refDate,
+                tempo_entrega_dias: diasNum,
+                prazo_entrega_tipo: tipo,
+                data_entrega: previewDate,
+              });
+              onClose();
+            }}>Salvar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { User, Building2, Palette, Calculator, ListChecks, Save, Trash2, Plus, Moon, Sun, Loader2 } from "lucide-react";
+import { User, Building2, Palette, Calculator, ListChecks, Save, Trash2, Plus, Moon, Sun, Loader2, GripVertical } from "lucide-react";
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext, rectSortingStrategy, useSortable, sortableKeyboardCoordinates, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Header } from "@/components/layout/Header";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -153,14 +160,19 @@ function BudgetDefaultsTab() {
   const { prefs, savePrefs } = useData();
   const [icms, setIcms] = useState(prefs.icms_padrao ?? 18);
   const [pis, setPis] = useState(prefs.pis_cofins_padrao ?? 9.25);
-  const save = async () => { await savePrefs({ icms_padrao: parseFloat(icms), pis_cofins_padrao: parseFloat(pis) }); toast.success("Padrões salvos"); };
+  const [margem, setMargem] = useState(prefs.margem_padrao ?? 30);
+  const save = async () => {
+    await savePrefs({ icms_padrao: parseFloat(icms), pis_cofins_padrao: parseFloat(pis), margem_padrao: parseFloat(margem) });
+    toast.success("Padrões salvos");
+  };
   return (
     <div className="rounded-xl border border-border bg-card p-6">
-      <h3 className="mb-1 font-heading text-base font-semibold">Impostos Padrão</h3>
-      <p className="mb-4 text-sm text-muted-foreground">Injetados automaticamente nas novas linhas do orçamento (Tela 2).</p>
-      <div className="grid max-w-md gap-4 sm:grid-cols-2">
+      <h3 className="mb-1 font-heading text-base font-semibold">Impostos e Margem Padrão</h3>
+      <p className="mb-4 text-sm text-muted-foreground">Injetados automaticamente nas novas linhas do orçamento (Tela 2). Linhas já existentes não são alteradas.</p>
+      <div className="grid max-w-xl gap-4 sm:grid-cols-3">
         <div className="space-y-1.5"><Label>ICMS % Padrão</Label><Input type="number" step="0.01" data-testid="default-icms" value={icms} onChange={(e) => setIcms(e.target.value)} /></div>
         <div className="space-y-1.5"><Label>PIS/COFINS % Padrão</Label><Input type="number" step="0.01" data-testid="default-pis" value={pis} onChange={(e) => setPis(e.target.value)} /></div>
+        <div className="space-y-1.5"><Label>Margem padrão (%)</Label><Input type="number" step="0.01" data-testid="default-margem" value={margem} onChange={(e) => setMargem(e.target.value)} /></div>
       </div>
       <div className="mt-4 flex justify-end">
         <Button data-testid="defaults-save" onClick={save} className="bg-brand hover:bg-brand-hover"><Save size={16} className="mr-2" /> Salvar</Button>
@@ -169,13 +181,55 @@ function BudgetDefaultsTab() {
   );
 }
 
-function ListManager({ title, type }) {
-  const { lists, addListItem, removeListItem, updateListItem } = useData();
+// Chip de item de lista. Quando `sortable`, ganha alça de arrastar (drag-and-drop).
+function ListTag({ item, type, sortable, onEdit, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.nome, disabled: !sortable });
+  return (
+    <span
+      ref={setNodeRef}
+      data-testid={`list-${type}-tag-${item.nome}`}
+      style={{ ...colorStyles(item.cor).badge, transform: CSS.Transform.toString(transform), transition }}
+      className={cn("flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium", isDragging && "relative z-10 opacity-80 shadow-lg")}
+    >
+      {sortable && (
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          data-testid={`list-${type}-drag-${item.nome}`}
+          className="-ml-1.5 cursor-grab touch-none opacity-50 hover:opacity-100 active:cursor-grabbing"
+          title="Arrastar para reordenar"
+        >
+          <GripVertical size={13} />
+        </button>
+      )}
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.cor }} />
+      <button onClick={onEdit} data-testid={`list-${type}-edit-${item.nome}`} className="hover:underline" title="Editar">{item.nome}</button>
+      <button data-testid={`list-${type}-remove-${item.nome}`} onClick={onRemove} className="opacity-60 transition-opacity hover:opacity-100"><Trash2 size={13} /></button>
+    </span>
+  );
+}
+
+function ListManager({ title, type, sortable = false }) {
+  const { lists, addListItem, removeListItem, updateListItem, reorderList } = useData();
   const [text, setText] = useState("");
   const [cor, setCor] = useState("#0C7B93");
   const [editing, setEditing] = useState(null);
   const [editName, setEditName] = useState("");
   const [editCor, setEditCor] = useState("#0C7B93");
+
+  const items = lists[type] || [];
+  // Distância mínima evita que o clique em editar/remover vire arraste.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const names = items.map((i) => i.nome);
+    reorderList(type, arrayMove(names, names.indexOf(active.id), names.indexOf(over.id)));
+  };
 
   const add = async () => {
     if (!text.trim()) return;
@@ -199,15 +253,23 @@ function ListManager({ title, type }) {
         <input type="color" value={cor} onChange={(e) => setCor(e.target.value)} data-testid={`list-${type}-color`} className="h-10 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" title="Cor" />
         <Button data-testid={`list-${type}-add`} onClick={add} className="bg-brand hover:bg-brand-hover"><Plus size={16} /></Button>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {(lists[type] || []).map((item) => (
-          <span key={item.nome} data-testid={`list-${type}-tag-${item.nome}`} style={colorStyles(item.cor).badge} className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.cor }} />
-            <button onClick={() => startEdit(item)} data-testid={`list-${type}-edit-${item.nome}`} className="hover:underline" title="Editar">{item.nome}</button>
-            <button data-testid={`list-${type}-remove-${item.nome}`} onClick={() => removeListItem(type, item.nome)} className="opacity-60 transition-opacity hover:opacity-100"><Trash2 size={13} /></button>
-          </span>
-        ))}
-      </div>
+      {sortable && <p className="mb-2 text-xs text-muted-foreground">Arraste pela alça para definir a ordem exibida nos menus, filtros e formulários. A ordem é salva automaticamente.</p>}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={items.map((i) => i.nome)} strategy={rectSortingStrategy}>
+          <div className="flex flex-wrap gap-2">
+            {items.map((item) => (
+              <ListTag
+                key={item.nome}
+                item={item}
+                type={type}
+                sortable={sortable}
+                onEdit={() => startEdit(item)}
+                onRemove={() => removeListItem(type, item.nome)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent data-testid={`list-${type}-edit-modal`}>
@@ -251,9 +313,9 @@ export default function Settings() {
           <TabsContent value="aparencia"><AppearanceTab /></TabsContent>
           <TabsContent value="orcamento"><BudgetDefaultsTab /></TabsContent>
           <TabsContent value="listas" className="space-y-6">
-            <ListManager title="Portais de Compra" type="portais" />
+            <ListManager title="Portais de Compra" type="portais" sortable />
             <ListManager title="Modalidades" type="modalidades" />
-            <ListManager title="Status Personalizados" type="statuses" />
+            <ListManager title="Status Personalizados" type="statuses" sortable />
           </TabsContent>
         </Tabs>
       </main>

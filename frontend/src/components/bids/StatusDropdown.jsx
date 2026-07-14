@@ -2,36 +2,38 @@ import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useData } from "@/context/DataContext";
-import { colorStyles, findColor } from "@/lib/constants";
+import { findColor } from "@/lib/constants";
 
+// Menu de status — mesmo visual da Execução & Pós-Venda (StatusBadge):
+// fechado mostra o status atual com a cor configurada; aberto, cada opção
+// aparece como badge na sua própria cor.
 export const StatusDropdown = ({ bid }) => {
   const { lists, changeStatus } = useData();
-  const s = colorStyles(findColor(lists.statuses, bid.status));
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <StatusBadge
+          as="button"
+          color={findColor(lists.statuses, bid.status)}
           data-testid={`status-trigger-${bid.id}`}
-          style={s.badgeDark}
-          className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-transform hover:scale-105"
+          className="cursor-pointer transition-transform hover:scale-105"
         >
-          <span className="h-1.5 w-1.5 rounded-full" style={s.dot} />
           {bid.status}
           <ChevronDown size={12} />
-        </button>
+        </StatusBadge>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-48">
+      <DropdownMenuContent align="start" className="w-52">
         {(lists.statuses || []).map((st) => (
           <DropdownMenuItem
             key={st.nome}
             data-testid={`status-option-${bid.id}-${st.nome}`}
             onClick={() => st.nome !== bid.status && changeStatus(bid.id, st.nome)}
-            className="gap-2"
+            className="cursor-pointer"
           >
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: st.cor }} />
-            {st.nome}
+            <StatusBadge color={st.cor}>{st.nome}</StatusBadge>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

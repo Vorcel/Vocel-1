@@ -151,6 +151,27 @@ async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends
     return await get_lists(current)
 
 
+class ListReorderInput(BaseModel):
+    names: List[str]
+
+
+@api.put("/lists/{list_type}/reorder")
+async def reorder_list(list_type: str, body: ListReorderInput, current=Depends(get_current_user)):
+    """Persiste a ordem manual (drag-and-drop) de uma lista de parâmetros.
+    A ordem é a posição no próprio array do doc `params` — todos os menus,
+    filtros e formulários já consomem o array em ordem. Itens não citados
+    no payload são preservados no fim (retrocompatível, nada é recriado)."""
+    if list_type not in _VALID_LISTS:
+        raise HTTPException(status_code=400, detail="Tipo de lista inválido")
+    owner = uid(current)
+    p = await _get_params(owner)
+    by_name = {i["nome"]: i for i in _normalize_list(p.get(list_type, []), list_type)}
+    ordered = [by_name.pop(n) for n in body.names if n in by_name]
+    ordered.extend(by_name.values())
+    await db.params.update_one({"owner_id": owner}, {"$set": {list_type: ordered}})
+    return await get_lists(current)
+
+
 @api.delete("/lists/{list_type}/{value}")
 async def remove_list_item(list_type: str, value: str, current=Depends(get_current_user)):
     if list_type not in _VALID_LISTS:
@@ -375,6 +396,7 @@ async def get_budget(bid_id: str, current=Depends(get_current_user)):
             "defaults": {
                 "icms": prefs.get("icms_padrao", 18),
                 "pis_cofins": prefs.get("pis_cofins_padrao", 9.25),
+                "margem": prefs.get("margem_padrao", 30),
             },
         }
     return {
@@ -385,6 +407,7 @@ async def get_budget(bid_id: str, current=Depends(get_current_user)):
         "defaults": {
             "icms": prefs.get("icms_padrao", 18),
             "pis_cofins": prefs.get("pis_cofins_padrao", 9.25),
+            "margem": prefs.get("margem_padrao", 30),
         },
     }
 
@@ -527,6 +550,7 @@ class ExecutionUpdate(BaseModel):
     current_step: Optional[int] = None
     tempo_entrega_dias: Optional[int] = None
     data_entrega: Optional[str] = None
+    data_referencia_entrega: Optional[str] = None   # base do cálculo do prazo (ISO YYYY-MM-DD)
     resumo_contrato: Optional[str] = None
     pagamento_pendente: Optional[bool] = None
     valor_empenho: Optional[float] = None
@@ -627,13 +651,14 @@ class PreferencesInput(BaseModel):
     theme: Optional[str] = None
     icms_padrao: Optional[float] = None
     pis_cofins_padrao: Optional[float] = None
+    margem_padrao: Optional[float] = None
 
 
 @api.get("/preferences")
 async def get_preferences(current=Depends(get_current_user)):
     doc = await db.preferences.find_one({"owner_id": uid(current)})
     if not doc:
-        return {"theme": "light", "icms_padrao": 18, "pis_cofins_padrao": 9.25}
+        return {"theme": "light", "icms_padrao": 18, "pis_cofins_padrao": 9.25, "margem_padrao": 30}
     return _strip_meta(doc)
 
 
