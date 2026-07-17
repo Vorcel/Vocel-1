@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent, GripVertical } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent, GripVertical, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -67,6 +67,7 @@ const isCellEditable = (col) => EDITABLE_TYPES.has(col.type);
 function LoteStatCard({ variant, label, value, icon: Icon, testid }) {
   const styles = {
     id: "bg-[#EEF2F8] border-transparent text-[#1A1A1A] dark:bg-slate-800",
+    violet: "bg-[#F1EDFB] border-transparent text-violet-700 dark:bg-violet-950/40 dark:text-violet-300",
     blue: "bg-[#2563EB] border-transparent text-white",
     green: "bg-[#E8F8EF] border-transparent text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
     orange: "bg-[#FFF4E8] border-transparent text-orange-600 dark:bg-orange-950/40 dark:text-orange-300",
@@ -88,11 +89,12 @@ function LoteStatCard({ variant, label, value, icon: Icon, testid }) {
   );
 }
 
-// Camada (linha) de 5 cartões para um lote.
+// Camada (linha) de 6 cartões para um lote.
 function LoteLayer({ data }) {
   return (
-    <div data-testid={`lote-layer-${data.lote}`} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div data-testid={`lote-layer-${data.lote}`} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
       <LoteStatCard testid={`lote-id-${data.lote}`} variant="id" label="Lote" value={`Lote ${data.lote}`} />
+      <LoteStatCard testid={`lote-unitario-${data.lote}`} variant="violet" label="Valor Unitário" value={brl(data.valor_unitario)} icon={Tag} />
       <LoteStatCard testid={`lote-valor-${data.lote}`} variant="blue" label="Valor Total" value={brl(data.valor_total)} icon={TrendingUp} />
       <LoteStatCard testid={`lote-lucro-${data.lote}`} variant="green" label="Lucro do Lote" value={brl(data.lucro)} icon={BadgePercent} />
       <LoteStatCard testid={`lote-margem-${data.lote}`} variant="orange" label="Margem do Lote" value={pct(data.margem)} icon={Percent} />

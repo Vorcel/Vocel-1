@@ -75,6 +75,7 @@ export function computeRow(row) {
 // (selecionado) E pertencentes àquele lote.
 export function computeLote(rows, lote) {
   let valor_total = 0;
+  let valor_unitario = 0;
   let lucro = 0;
   let investido = 0;
   rows.forEach((r) => {
@@ -82,11 +83,14 @@ export function computeLote(rows, lote) {
     if ((num(r.lote) || 1) !== lote) return;
     const c = computeRow(r);
     valor_total += c.valor_total;
+    // Soma do "Valor da Unidade" (sem multiplicar pela quantidade) das mesmas
+    // linhas que entram no Valor Total (selecionadas e do lote).
+    valor_unitario += num(c.valor_unidade);
     lucro += c.lucro_total;
     investido += c.investido;
   });
   const margem = valor_total > 0 ? (lucro / valor_total) * 100 : 0;
-  return { lote, valor_total, lucro, investido, margem };
+  return { lote, valor_total, valor_unitario, lucro, investido, margem };
 }
 
 export function computeTotals(rows) {

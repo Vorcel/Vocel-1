@@ -1,4 +1,4 @@
-import { computeRow } from "../calc";
+import { computeRow, computeLote } from "../calc";
 
 const base = {
   qtd: "1", valor_compra: "0", outros_sem_imp: "0", outros_com_imp: "0",
@@ -39,4 +39,30 @@ test("Lucro negativo quando preço de venda < custo total", () => {
   const c = computeRow({ ...base, valor_compra: "1000", mode: "venda", valor_venda: "500" });
   expect(c.lucro_unit).toBeLessThan(0);
   expect(c.lucro_total).toBeLessThan(0);
+});
+
+test("computeLote.valor_unitario soma o Valor da Unidade sem multiplicar pela quantidade", () => {
+  // 3 linhas no lote 1, com quantidades diferentes; valor_unidade = valor_venda.
+  const rows = [
+    { ...base, selecionado: true, lote: 1, qtd: "30", mode: "venda", valor_venda: "1000" },
+    { ...base, selecionado: true, lote: 1, qtd: "5", mode: "venda", valor_venda: "850" },
+    { ...base, selecionado: true, lote: 1, qtd: "2", mode: "venda", valor_venda: "450" },
+  ];
+  const l = computeLote(rows, 1);
+  expect(l.valor_unitario).toBeCloseTo(2300, 2); // 1000 + 850 + 450 (sem qtd)
+  expect(l.valor_total).toBeCloseTo(1000 * 30 + 850 * 5 + 450 * 2, 2);
+});
+
+test("computeLote.valor_unitario separa por lote e ignora linhas não selecionadas", () => {
+  const rows = [
+    { ...base, selecionado: true, lote: 1, qtd: "1", mode: "venda", valor_venda: "1261.19" },
+    { ...base, selecionado: true, lote: 2, qtd: "1", mode: "venda", valor_venda: "1363.25" },
+    { ...base, selecionado: false, lote: 1, qtd: "1", mode: "venda", valor_venda: "9999" },
+  ];
+  expect(computeLote(rows, 1).valor_unitario).toBeCloseTo(1261.19, 2);
+  expect(computeLote(rows, 2).valor_unitario).toBeCloseTo(1363.25, 2);
+});
+
+test("computeLote.valor_unitario = 0 quando o lote não tem linhas válidas", () => {
+  expect(computeLote([], 1).valor_unitario).toBe(0);
 });
