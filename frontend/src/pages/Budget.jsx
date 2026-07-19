@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Layers, BadgePercent, GripVertical, Tag } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -17,6 +17,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
+import { PortalName } from "@/components/bids/PortalName";
+import { BidFilesButton } from "@/components/bids/BidFilesButton";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
 import { smartTitleCase } from "@/lib/textcase";
@@ -32,6 +34,27 @@ const newRow = (defaults) => ({
   outros_sem_imp: "0", outros_com_imp: "0", frete_receber: "0", frete_enviar: "0",
   mode: "margem",
 });
+
+// Data da disputa (YYYY-MM-DD) -> DD/MM/AAAA. Vazio: retorna "".
+const fmtDispDate = (d) => {
+  if (!d) return "";
+  const [y, m, day] = d.split("-");
+  return day && m && y ? `${day}/${m}/${y}` : "";
+};
+
+// Bloco compacto do cabeçalho (padrão ref23): ícone neutro + label pequena
+// em cima + valor embaixo. O valor pode ser um nó (ex.: Portal colorido).
+function HeaderInfo({ icon: Icon, label, value }) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Icon size={15} className="shrink-0 text-muted-foreground" />
+      <div className="min-w-0 leading-none">
+        <div className="text-[10px] leading-none text-muted-foreground">{label}</div>
+        <div className="mt-0.5 truncate text-xs font-medium leading-none text-foreground">{value}</div>
+      </div>
+    </div>
+  );
+}
 
 // Column model — drives header, body, resizing, hide/show, keyboard nav.
 const COLUMNS = [
@@ -70,14 +93,16 @@ function LoteStatCard({ variant, label, value, icon: Icon, testid }) {
     violet: "bg-[#F1EDFB] border-transparent text-violet-700 dark:bg-violet-950/40 dark:text-violet-300",
     blue: "bg-[#2563EB] border-transparent text-white",
     green: "bg-[#E8F8EF] border-transparent text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+    red: "bg-[#DC2626] border-transparent text-white shadow-md shadow-red-500/30 ring-1 ring-red-400/50",
     orange: "bg-[#FFF4E8] border-transparent text-orange-600 dark:bg-orange-950/40 dark:text-orange-300",
     white: "bg-card border-border text-foreground",
   };
-  const labelCls = variant === "blue" ? "text-white/80" : "text-current opacity-70";
+  const filled = variant === "blue" || variant === "red"; // fundos sólidos: texto/ícone claros
+  const labelCls = filled ? "text-white/80" : "text-current opacity-70";
   return (
     <div data-testid={testid} className={cn("flex items-center gap-2.5 rounded-xl border px-3 py-2 shadow-sm", styles[variant])}>
       {Icon && (
-        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", variant === "blue" ? "bg-white/20" : "bg-black/5")}>
+        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", filled ? "bg-white/20" : "bg-black/5")}>
           <Icon size={16} />
         </div>
       )}
@@ -96,7 +121,7 @@ function LoteLayer({ data }) {
       <LoteStatCard testid={`lote-id-${data.lote}`} variant="id" label="Lote" value={`Lote ${data.lote}`} />
       <LoteStatCard testid={`lote-unitario-${data.lote}`} variant="violet" label="Valor Unitário" value={brl(data.valor_unitario)} icon={Tag} />
       <LoteStatCard testid={`lote-valor-${data.lote}`} variant="blue" label="Valor Total" value={brl(data.valor_total)} icon={TrendingUp} />
-      <LoteStatCard testid={`lote-lucro-${data.lote}`} variant="green" label="Lucro do Lote" value={brl(data.lucro)} icon={BadgePercent} />
+      <LoteStatCard testid={`lote-lucro-${data.lote}`} variant={data.lucro < 0 ? "red" : "green"} label="Lucro do Lote" value={brl(data.lucro)} icon={BadgePercent} />
       <LoteStatCard testid={`lote-margem-${data.lote}`} variant="orange" label="Margem do Lote" value={pct(data.margem)} icon={Percent} />
       <LoteStatCard testid={`lote-investido-${data.lote}`} variant="white" label="Valor Investido" value={brl(data.investido)} icon={Wallet} />
     </div>
@@ -606,58 +631,90 @@ export default function Budget() {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-brand" /></div>;
   }
 
+  // Resumo compacto da licitação (padrão ref23) — cada bloco só entra se tiver
+  // valor (evita "undefined"/separadores soltos). Somente o Portal é colorido
+  // (reaproveita PortalName com a cor configurada); o resto fica neutro.
+  const tituloObjeto = bid?.objeto || "Orçamento";
+  const infoNodes = [];
+  if (bid?.uasg) infoNodes.push({ key: "uasg", node: <HeaderInfo icon={Building2} label="UASG" value={bid.uasg} /> });
+  if (bid?.pregao) infoNodes.push({ key: "pregao", node: <HeaderInfo icon={Gavel} label="Pregão" value={bid.pregao} /> });
+  if (bid?.portal) infoNodes.push({ key: "portal", node: <HeaderInfo icon={Globe} label="Portal" value={<PortalName portal={bid.portal} className="max-w-[140px] text-xs" />} /> });
+  if (bid?.modalidade) infoNodes.push({ key: "mod", node: <HeaderInfo icon={Briefcase} label="Modalidade" value={bid.modalidade} /> });
+  if (bid?.data_disputa) infoNodes.push({ key: "data", node: <HeaderInfo icon={Calendar} label="Data" value={fmtDispDate(bid.data_disputa)} /> });
+  if (bid?.hora) infoNodes.push({ key: "hora", node: <HeaderInfo icon={Clock} label="Horário" value={bid.hora} /> });
+  infoNodes.push({ key: "files", node: <BidFilesButton bid={bid} /> });
+
+  const vDivider = <span className="h-7 w-px shrink-0 bg-border" />;
+
   return (
     <div className="flex h-screen flex-col">
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/70 px-6 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" data-testid="budget-back" onClick={() => navigate(-1)}><ArrowLeft size={18} /></Button>
-          <div>
-            <h1 className="font-heading text-lg font-semibold tracking-tight">Orçamento & Precificação</h1>
-            <p className="max-w-md truncate text-xs text-muted-foreground">{bid?.objeto}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div data-testid="budget-save-state" className="flex min-w-[92px] items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            {saveState === "saving" && (<><Loader2 size={13} className="animate-spin" /> Salvando…</>)}
-            {saveState === "saved" && (<><CheckCircle2 size={13} className="text-emerald-600" /> Salvo</>)}
-            {saveState === "idle" && (<><Cloud size={13} /> Salvo na nuvem</>)}
-          </div>
-          {hiddenList.length > 0 && (
-            <Button variant="outline" size="sm" data-testid="budget-show-all" onClick={showAll}>
-              <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
-            </Button>
-          )}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" data-testid="lote-filter-trigger">
-                <Layers size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount > 1 ? "s" : ""})` : ""}
-                <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-52 p-1" data-testid="lote-filter-menu">
-              <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Marcado = visível</p>
-              <div className="max-h-60 overflow-y-auto">
-                {lotesPresentes.length === 0 ? (
-                  <p className="px-2 py-2 text-sm text-muted-foreground">Nenhum lote ainda.</p>
-                ) : (
-                  lotesPresentes.map((l) => (
-                    <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
-                      <Checkbox checked={!hiddenLotes.has(l)} className="pointer-events-none" />
-                      Lote {l}
-                    </button>
-                  ))
-                )}
+      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/70 px-6 backdrop-blur-md">
+        <Button
+          variant="ghost" size="icon" data-testid="budget-back" onClick={() => navigate(-1)}
+          className="h-9 w-9 shrink-0 rounded-lg bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+        >
+          <ArrowLeft size={18} />
+        </Button>
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+          <h1 data-testid="budget-bid-title" title={bid?.objeto || undefined} className="truncate font-heading text-lg font-bold leading-none tracking-tight">{tituloObjeto}</h1>
+          <div data-testid="budget-bid-meta" className="scrollbar-hide flex items-center gap-2.5 overflow-x-auto">
+            {infoNodes.map((it, i) => (
+              <div key={it.key} className="flex shrink-0 items-center gap-2.5">
+                {i > 0 && vDivider}
+                {it.node}
               </div>
-              {hiddenCount > 0 && (
-                <button type="button" data-testid="lote-filter-clear" onClick={showAllLotes}
-                  className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
-                  Mostrar todos os lotes
-                </button>
+            ))}
+
+            <div className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
+              {vDivider}
+              <div data-testid="budget-save-state" className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                {saveState === "saving" && (<><Loader2 size={14} className="animate-spin" /> Salvando…</>)}
+                {saveState === "saved" && (<><CheckCircle2 size={14} className="text-emerald-600" /> Salvo</>)}
+                {saveState === "idle" && (<><Cloud size={14} /> Salvo na nuvem</>)}
+              </div>
+              {hiddenList.length > 0 && (
+                <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="budget-show-all" onClick={showAll}>
+                  <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
+                </Button>
               )}
-            </PopoverContent>
-          </Popover>
-          <Button variant="outline" data-testid="budget-add-row" onClick={addRow}><Plus size={16} className="mr-1.5" /> Linha</Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="lote-filter-trigger">
+                    <Filter size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount})` : ""}
+                    <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-52 p-1" data-testid="lote-filter-menu">
+                  <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Marcado = visível</p>
+                  <div className="max-h-60 overflow-y-auto">
+                    {lotesPresentes.length === 0 ? (
+                      <p className="px-2 py-2 text-sm text-muted-foreground">Nenhum lote ainda.</p>
+                    ) : (
+                      lotesPresentes.map((l) => (
+                        <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
+                          <Checkbox checked={!hiddenLotes.has(l)} className="pointer-events-none" />
+                          Lote {l}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {hiddenCount > 0 && (
+                    <button type="button" data-testid="lote-filter-clear" onClick={showAllLotes}
+                      className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
+                      Mostrar todos os lotes
+                    </button>
+                  )}
+                </PopoverContent>
+              </Popover>
+              <Button
+                size="sm" data-testid="budget-add-row" onClick={addRow}
+                className="h-8 shrink-0 bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+              >
+                <Plus size={16} className="mr-1.5" /> Linha
+              </Button>
+            </div>
+          </div>
         </div>
       </header>
 

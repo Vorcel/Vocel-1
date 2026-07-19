@@ -41,7 +41,12 @@ const disputaDateTime = (b) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-const WINDOW_MS = 24 * 60 * 60 * 1000; // 24 horas antes da disputa
+const WINDOW_MS = 24 * 60 * 60 * 1000; // aparece 24h antes da disputa
+const AFTER_MS = 30 * 60 * 1000; // permanece até 30 min depois da disputa
+
+// Data local (YYYY-MM-DD) de um Date, sem conversão UTC.
+const toDateStr = (dt) =>
+  `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 
 export default function Dashboard() {
   const { summary, bids, lists } = useData();
@@ -58,19 +63,25 @@ export default function Dashboard() {
   const dayColor = DAY_COLORS[now.getDay()];
   const longDate = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
-  // Janela de exibição: de (disputa - 24h) até a data/hora exata da disputa.
-  const todayBids = useMemo(
-    () =>
-      bids
-        .filter((b) => {
-          const d = disputaDateTime(b);
-          if (!d) return false;
-          const diff = d - now;
-          return diff >= 0 && diff <= WINDOW_MS;
-        })
-        .sort((a, b) => disputaDateTime(a) - disputaDateTime(b)),
-    [bids, now]
-  );
+  // Janela de exibição: de (disputa - 24h) até 30 min depois da disputa.
+  // Sexta/sábado/domingo também puxam as sessões da segunda (fim de semana sem disputas).
+  const todayBids = useMemo(() => {
+    const day = now.getDay(); // 0=dom, 5=sex, 6=sáb
+    const mondayStr =
+      day === 5 || day === 6 || day === 0
+        ? toDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() + ((8 - day) % 7)))
+        : null;
+    return bids
+      .filter((b) => {
+        const d = disputaDateTime(b);
+        if (!d) return false;
+        const diff = d - now;
+        const inWindow = diff <= WINDOW_MS && diff >= -AFTER_MS;
+        const isNextMonday = mondayStr && b.data_disputa === mondayStr;
+        return inWindow || isNextMonday;
+      })
+      .sort((a, b) => disputaDateTime(a) - disputaDateTime(b));
+  }, [bids, now]);
 
   const headerCards = (
     <>
