@@ -1,8 +1,11 @@
 // Pricing engine for the ERP budget table (Tela 2).
-// Cost model: PIS/COFINS embutido "por dentro" (gross-up) no Custo Base Un.;
-// ICMS somado "por fora" sobre (Valor Compra + Outros C/ Imposto), formando o
-// Custo Total. Margem "por dentro": Preço = Custo Total / (1 - Margem%/100);
-// Margem Real = (Preço - Custo Total) / Preço.
+// Cost model: ICMS "por fora" sobre (Valor Compra + Outros C/ Imposto) forma o
+// Custo Total (sem PIS). Margem "por dentro": Base = Custo Total / (1 - Margem%/100).
+// PIS/COFINS é imposto sobre a NF, embutido "POR DENTRO" no PREÇO FINAL (gross-up):
+//   Preço final = Valor antes do PIS / (1 - PIS%/100)   -> preserva o valor-base
+// no preço formado automaticamente. Quando o Valor de Venda é DIGITADO manualmente,
+// ele já é o preço final da NF: não há gross-up, só se extrai o PIS contido nele.
+// Margem Real = (Preço - Custo Total - PIS devido) / Preço.
 
 export function num(v) {
   const n = parseFloat(v);
@@ -24,33 +27,50 @@ export function computeRow(row) {
   // Custo Inicial (sem imposto): Produto + Frete + Outros Gastos
   const custo_inicial = num(row.valor_compra) + outrosComUnit + outrosSemUnit + freteUnit;
 
-  // Custo Base Un.: PIS/COFINS "POR DENTRO" (gross-up) embutido na própria base.
-  // Custo Base = Custo Inicial / (1 - PIS%/100)
-  const pis_div = 1 - pis_rate;
-  const custo_base_unit = pis_div > 0 ? custo_inicial / pis_div : custo_inicial;
+  // Custo Base Un. = Custo Inicial. O PIS/COFINS NÃO entra no custo: é imposto sobre
+  // a NF, embutido "por dentro" no PREÇO FINAL (gross-up) — ver adiante.
+  const custo_base_unit = custo_inicial;
 
   // ICMS "POR FORA": aplicado sobre (Valor de Compra + Outros Gastos COM Imposto).
   // Não é exibido isoladamente; entra no Custo Total que serve de base para a margem.
   const imposto_icms = (num(row.valor_compra) + outrosComUnit) * icms_rate;
 
-  // Custo Total = Custo Base Un. (com PIS por dentro) + ICMS por fora
+  // Custo Total (SEM PIS) = Custo Base Un. + ICMS por fora. Base do markup da margem.
   const custoMaisImposto = custo_base_unit + imposto_icms;
 
+  // Fator de gross-up do PIS/COFINS "por dentro": preço final = base / (1 - PIS%/100).
+  // Alíquota válida: 0 <= PIS < 100%. Fora disso (denominador <= 0), não aplica gross-up.
+  const pis_div = 1 - pis_rate;
+  const gross_up_pis = pis_rate > 0 && pis_div > 0 ? 1 / pis_div : 1;
+
   let valor_unidade = 0;
+  let pis_cofins_unit = 0;
   if (row.mode === "venda" && row.valor_venda != null && row.valor_venda !== "") {
-    // Gatilho pelo Valor de Venda Desejado
+    // PREÇO MANUAL: o valor digitado JÁ é o preço final da NF. NÃO aplicar gross-up;
+    // apenas extrair o PIS/COFINS contido nele.
     valor_unidade = num(row.valor_venda);
-  } else if (row.margem != null && row.margem !== "") {
-    // Margem "POR DENTRO" (markup divisor / gross-up):
-    // Preço = Custo Total / (1 - Margem%/100)
-    const m = num(row.margem) / 100;
-    valor_unidade = m < 1 ? custoMaisImposto / (1 - m) : 0;
+    pis_cofins_unit = valor_unidade * pis_rate;
   } else {
-    valor_unidade = custoMaisImposto;
+    // PREÇO AUTOMÁTICO: formar o "Valor antes do PIS" (custo + margem) e então
+    // embutir o PIS/COFINS "por dentro" no preço final (gross-up), preservando a base.
+    let valor_antes_pis;
+    if (row.margem != null && row.margem !== "") {
+      // Margem "POR DENTRO" (markup divisor): Base = Custo Total / (1 - Margem%/100)
+      const m = num(row.margem) / 100;
+      valor_antes_pis = m < 1 ? custoMaisImposto / (1 - m) : 0;
+    } else {
+      valor_antes_pis = custoMaisImposto;
+    }
+    // Preço final = Valor antes do PIS / (1 - PIS%/100)
+    valor_unidade = valor_antes_pis * gross_up_pis;
+    // PIS/COFINS embutido = preço final - valor antes do PIS (fonte única de verdade;
+    // equivale a valor_unidade * PIS%). Preserva valor_antes_pis após pagar o imposto.
+    pis_cofins_unit = valor_unidade - valor_antes_pis;
   }
 
-  const lucro_unit = valor_unidade - custoMaisImposto;
-  // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo Total) / Preço.
+  // Lucro = Preço final - Custo Total - PIS/COFINS devido sobre a NF (nunca em dobro).
+  const lucro_unit = valor_unidade - custoMaisImposto - pis_cofins_unit;
+  // Margem Real "por dentro" (sobre o Preço de Venda): (Preço - Custo - PIS) / Preço.
   // Zerada quando a quantidade é 0/vazia (consistência com a trava de cálculo).
   const margem_real = active && valor_unidade > 0 ? (lucro_unit / valor_unidade) * 100 : 0;
   // Totais zerados quando a quantidade é 0/vazia (Req: trava de cálculo).
@@ -60,6 +80,7 @@ export function computeRow(row) {
   return {
     custo_base_unit,
     imposto_icms,
+    pis_cofins_unit,
     lucro_unit,
     valor_unidade,
     valor_total,
@@ -67,7 +88,7 @@ export function computeRow(row) {
     margem_real,
     margem_calc: margem_real,
     custo_total: active ? custo_base_unit * qtd : 0,
-    investido: active ? custoMaisImposto * qtd : 0,
+    investido: active ? (custoMaisImposto + pis_cofins_unit) * qtd : 0,
   };
 }
 

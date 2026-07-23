@@ -14,9 +14,45 @@ test("Frete Receber SOMA ao custo (mesma mecânica do Frete Enviar)", () => {
   expect(d.custo_base_unit).toBeCloseTo(150, 2);
 });
 
-test("PIS/COFINS por dentro (gross-up) no Custo Base Un.", () => {
-  const c = computeRow({ ...base, valor_compra: "2500", pis_cofins: "10", margem: "0" });
-  expect(c.custo_base_unit).toBeCloseTo(2777.78, 2);
+// PIS/COFINS "por dentro" (gross-up) embutido no PREÇO FINAL quando o preço é
+// formado automaticamente. Base antes do PIS = Custo Total (margem 0 => = custo).
+test("Teste A — gross-up PIS 10%: base 2000 => preço 2222,22, líquido preservado", () => {
+  const c = computeRow({ ...base, valor_compra: "2000", pis_cofins: "10", margem: "0" });
+  expect(c.valor_unidade).toBeCloseTo(2222.2222, 2);        // 2000 / (1 - 0,10)
+  expect(c.pis_cofins_unit).toBeCloseTo(222.2222, 2);       // 2222,22 * 10%
+  // Valor líquido preservado após pagar o imposto:
+  expect(c.valor_unidade - c.pis_cofins_unit).toBeCloseTo(2000, 2);
+});
+
+test("Teste B — gross-up PIS 5,6%: base 2000 => preço 2118,64, líquido preservado", () => {
+  const c = computeRow({ ...base, valor_compra: "2000", pis_cofins: "5.6", margem: "0" });
+  expect(c.valor_unidade).toBeCloseTo(2118.6441, 2);        // 2000 / (1 - 0,056)
+  expect(c.pis_cofins_unit).toBeCloseTo(118.6441, 2);
+  expect(c.valor_unidade - c.pis_cofins_unit).toBeCloseTo(2000, 2);
+});
+
+test("Teste C — valor de venda MANUAL: 305 permanece, PIS 5,6% = 17,08 (sem gross-up)", () => {
+  const c = computeRow({ ...base, mode: "venda", valor_venda: "305", pis_cofins: "5.6" });
+  expect(c.valor_unidade).toBeCloseTo(305, 2);              // não vira outro preço
+  expect(c.pis_cofins_unit).toBeCloseTo(17.08, 2);          // 305 * 5,6%
+});
+
+test("Teste D — alíquota zero: preço = base, PIS = 0 (sem NaN/Infinity)", () => {
+  const c = computeRow({ ...base, valor_compra: "2000", pis_cofins: "0", margem: "0" });
+  expect(c.valor_unidade).toBeCloseTo(2000, 2);
+  expect(c.pis_cofins_unit).toBeCloseTo(0, 2);
+  expect(Number.isFinite(c.valor_unidade)).toBe(true);
+});
+
+test("Cenário de referência (169/305, ICMS 18%, PIS 5,6%, frete 600, qtd 36, manual)", () => {
+  const c = computeRow({
+    ...base, qtd: "36", valor_compra: "169", icms: "18", pis_cofins: "5.6",
+    frete_enviar: "600", mode: "venda", valor_venda: "305",
+  });
+  expect(c.pis_cofins_unit).toBeCloseTo(17.08, 2);
+  expect(c.lucro_unit).toBeCloseTo(71.83, 2);   // 305 - (185,67 + 30,42) - 17,08
+  expect(c.lucro_total).toBeCloseTo(2586.0, 1);
+  expect(c.valor_total).toBeCloseTo(10980, 2);
 });
 
 test("ICMS por fora entra no Custo Total (preço/lucro)", () => {
