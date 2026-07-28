@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Truck, TrendingUp, Activity, Filter, FileText, Calculator, Clock, Paperclip,
@@ -19,13 +19,16 @@ import { DatePickerInput } from "@/components/DatePickerInput";
 import { BidFormModal } from "@/components/bids/BidFormModal";
 import { PortalName } from "@/components/bids/PortalName";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SortArrows } from "@/components/table/SortArrows";
+import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
+import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
 import { TIMELINE_STEPS } from "@/lib/constants";
 import {
-  normalizeTimeline, progressOf, doneCount, currentStage, isPaid, needsAtestado, isLate, statusForIndex,
+  normalizeTimeline, progressOf, doneCount, currentStage, isPaid, isPaymentPending, needsAtestado, isLate, statusForIndex,
   ACTION_STAGES, PHASE_GROUPS, phaseOfStage, STEP_PENDING, STEP_ACTIVE, STEP_DONE,
 } from "@/lib/execution";
 import { toast } from "sonner";
@@ -34,6 +37,22 @@ import { cn } from "@/lib/utils";
 const ALL = "__all__";
 const EMPTY_FILTERS = { q: "", modalidade: "", portal: "", status: "", from: "", to: "" };
 const STEP_ICONS = [FileText, ClipboardCheck, ShoppingCart, Hourglass, PackageIcon, Boxes, Receipt, Truck, CircleCheck, Award, Banknote];
+
+// Colunas da tabela de execução — `sort` = chave ordenável; `num` ordena numérico.
+const EXEC_COLS = [
+  { label: "Data", sort: "data", type: "text" },
+  { label: "Modalidade" },
+  { label: "Portal", sort: "portal", type: "text" },
+  { label: "Objeto" },
+  { label: "Entrega", sort: "entrega", type: "num" },
+  { label: "Data Entrega", sort: "data_entrega", type: "text" },
+  { label: "Empenho", sort: "empenho", type: "num" },
+  { label: "Compra", sort: "compra", type: "num" },
+  { label: "Lucro Previsto", sort: "lucro", type: "num" },
+  { label: "Status", sort: "status", type: "num" },
+  { label: "Progresso", sort: "progresso", type: "num" },
+  { label: "Ações" },
+];
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -88,6 +107,9 @@ export default function Execution() {
   const [timeModal, setTimeModal] = useState(null);   // editar prazo de entrega
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const tableScrollRef = useRef(null);
+  // Ordenação persistida por usuário; padrão = ordem do backend (created_at desc).
+  const [sort, toggleSort] = usePersistentSort("executions", { key: null, dir: "asc" });
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
 
@@ -113,6 +135,38 @@ export default function Execution() {
     return true;
   }), [baseSet, filters.from, filters.to]);
 
+  // Ordenação aplicada sobre o conjunto já filtrado (respeita busca/filtros/datas).
+  // Datas/textos como string (vazios ao fim); numéricas comparadas como número.
+  const sortValue = (e, key) => {
+    const nodes = nodesById[e.bid_id] || [];
+    const bid = bidsById[e.bid_id];
+    switch (key) {
+      case "data": return e.data_cadastro || "";
+      case "portal": return (bid?.portal ?? e.portal ?? "").toLowerCase();
+      case "entrega": return Number(e.tempo_entrega_dias || 0);
+      case "data_entrega": return e.data_entrega || "";
+      case "empenho": return Number(e.valor_empenho || 0);
+      case "compra": return Number(e.valor_compra || 0);
+      case "lucro": return Number(e.lucro_previsto || 0);
+      case "status": return TIMELINE_STEPS.indexOf(currentStage(nodes));
+      case "progresso": return progressOf(nodes);
+      default: return "";
+    }
+  };
+  const sortedSet = useMemo(() => {
+    if (!sort.key) return currentSet;
+    const col = EXEC_COLS.find((c) => c.sort === sort.key);
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...currentSet].sort((a, b) => {
+      const va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
+      if (col?.type === "num") return dir * (va - vb);
+      const ea = !va, eb = !vb;
+      if (ea || eb) return ea && eb ? 0 : ea ? 1 : -1;
+      return dir * String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSet, sort, nodesById, bidsById]);
+
   const bounds = useMemo(() => periodBounds(filters.from, filters.to), [filters.from, filters.to]);
   const curWin = useMemo(() => baseSet.filter((e) => inWindow(e, bounds.cur)), [baseSet, bounds]);
   const prevWin = useMemo(() => baseSet.filter((e) => inWindow(e, bounds.prev)), [baseSet, bounds]);
@@ -125,7 +179,9 @@ export default function Execution() {
       const nodes = nodesById[e.bid_id] || [];
       valor += Number(e.valor_empenho || 0);
       lucro += Number(e.lucro_previsto || 0);
-      if (!isPaid(nodes)) pagamentos += Number(e.valor_empenho || 0);
+      // Pagamentos Pendentes: só de "Empenho Recebido" (incl.) até antes de
+      // "Pagamento Recebido" — exclui "Aguardando Empenho" e "Pagamento Recebido".
+      if (isPaymentPending(nodes)) pagamentos += Number(e.valor_empenho || 0);
       if (e.data_entrega && e.data_entrega >= today && e.data_entrega <= in10) proximas += 1;
       progSum += progressOf(nodes);
       if (ACTION_STAGES.has(currentStage(nodes))) acao += 1;
@@ -167,9 +223,9 @@ export default function Execution() {
   useEffect(() => { refreshExecutions(); }, [refreshExecutions]);
 
   // Paginação
-  useEffect(() => { setPage(1); }, [filters, pageSize]);
+  useEffect(() => { setPage(1); }, [filters, pageSize, sort]);
   const totalPages = Math.max(1, Math.ceil(currentSet.length / pageSize));
-  const pageRows = currentSet.slice((page - 1) * pageSize, page * pageSize);
+  const pageRows = sortedSet.slice((page - 1) * pageSize, page * pageSize);
   const rangeStart = currentSet.length === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, currentSet.length);
 
@@ -239,6 +295,7 @@ export default function Execution() {
         {selected ? (
           <DetailPanel
             execution={selected}
+            bid={bidsById[selected.bid_id]}
             nodes={selectedNodes}
             onBack={() => setSelectedId(null)}
             onMove={(idx) => moveTo(selected, idx)}
@@ -277,12 +334,17 @@ export default function Execution() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <div className="overflow-x-auto">
+            <div ref={tableScrollRef} className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    {["Data", "Modalidade", "Portal", "Objeto", "Entrega", "Data Entrega", "Empenho", "Compra", "Lucro Previsto", "Status", "Progresso", "Ações"].map((h) => (
-                      <th key={h} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                    {EXEC_COLS.map((col) => (
+                      <th key={col.label} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        <span className="inline-flex select-none items-center">
+                          {col.label}
+                          {col.sort && <SortArrows active={sort.key === col.sort} dir={sort.dir} onClick={() => toggleSort(col.sort)} testid={`exec-sort-${col.sort}`} />}
+                        </span>
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -304,9 +366,9 @@ export default function Execution() {
                         onClick={() => setSelectedId(e.bid_id)}
                         className={cn("cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/40", selectedId === e.bid_id && "bg-brand/5")}>
                         <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_cadastro)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{e.modalidade}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><PortalName portal={e.portal} className="max-w-[140px]" /></td>
-                        <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{e.objeto}</span></td>
+                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{bid?.modalidade ?? e.modalidade}</td>
+                        <td className="whitespace-nowrap px-3 py-3"><PortalName portal={bid?.portal ?? e.portal} className="max-w-[140px]" /></td>
+                        <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{bid?.objeto ?? e.objeto}</span></td>
                         <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                           <button data-testid={`exec-time-${e.bid_id}`} onClick={() => setTimeModal(e)} className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs hover:bg-brand/10 hover:text-brand">
                             <Clock size={13} /> {e.tempo_entrega_dias || 0}d
@@ -371,6 +433,7 @@ export default function Execution() {
               </div>
             )}
           </div>
+          <StickyHorizontalScrollbar targetRef={tableScrollRef} />
         </section>
       </main>
 
@@ -522,7 +585,7 @@ function KpiCard({ icon: Icon, label, value, accent, trend, invert, sub, key: _k
 
 /* ============================ COMPONENTE B ============================ */
 const PROGRESS_BLUE = "#2563EB";
-function DetailPanel({ execution, nodes, onBack, onMove, onAddFile, onRemoveFile }) {
+function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemoveFile }) {
   // Fluxo cronológico: uma única referência (etapa atual) deriva todos os status.
   const currentStep = doneCount(nodes);                 // nº de etapas concluídas
   const stage = currentStage(nodes);
@@ -537,9 +600,9 @@ function DetailPanel({ execution, nodes, onBack, onMove, onAddFile, onRemoveFile
             <ArrowLeft size={13} /> Voltar para a visão consolidada
           </button>
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Licitação Selecionada</p>
-          <h2 data-testid="exec-detail-title" className="font-heading text-xl font-bold tracking-tight text-foreground">{execution.objeto}</h2>
+          <h2 data-testid="exec-detail-title" className="font-heading text-xl font-bold tracking-tight text-foreground">{bid?.objeto ?? execution.objeto}</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Portal: {execution.portal} · Modalidade: {execution.modalidade} · ID: {execution.bid_id?.slice(-6)}
+            Portal: {bid?.portal ?? execution.portal} · Modalidade: {bid?.modalidade ?? execution.modalidade} · ID: {execution.bid_id?.slice(-6)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

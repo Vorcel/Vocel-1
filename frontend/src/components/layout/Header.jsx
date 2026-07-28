@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Settings, LogOut, User, Moon, Sun } from "lucide-react";
+import { Settings, LogOut, User, Moon, Sun, FilePenLine } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -41,6 +41,15 @@ export const Header = ({ title, subtitle, leftContent, centerContent }) => {
       )}
 
       <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
+        <button
+          data-testid="header-draft"
+          onClick={() => navigate("/rascunho")}
+          title="Rascunho"
+          className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+        >
+          <FilePenLine size={16} className="shrink-0" />
+          <span className="hidden sm:inline">Rascunho</span>
+        </button>
         <button
           data-testid="header-theme-toggle"
           onClick={toggleTheme}

@@ -84,6 +84,15 @@ export function isPaid(nodes) {
   return nodes.find((n) => n.name === "Pagamento Recebido")?.status === STEP_DONE;
 }
 
+// Card "Pagamentos Pendentes": conta a execução SOMENTE quando a etapa atual está
+// entre "Empenho Recebido" (inclusive) e antes de "Pagamento Recebido".
+// Usa a posição real da etapa atual na timeline (currentStage) — não texto solto.
+// Exclui "Aguardando Empenho" (índice 0) e "Pagamento Recebido" (última, índice 10).
+export function isPaymentPending(nodes) {
+  const idx = TIMELINE_STEPS.indexOf(currentStage(nodes));
+  return idx >= 1 && idx < TIMELINE_STEPS.length - 1;
+}
+
 export function needsAtestado(nodes) {
   const entregue = nodes.find((n) => n.name === "Entregue")?.status === STEP_DONE;
   const atestado = nodes.find((n) => n.name === "Solicitar Atestado")?.status === STEP_DONE;

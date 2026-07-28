@@ -81,7 +81,10 @@ export const Sidebar = () => {
             data-testid={item.testid}
             className={({ isActive }) =>
               cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                // Recolhida: área interativa = quadrado do ícone (sem w-full), centralizado.
+                // Expandida: linha inteira com texto (comportamento original preservado).
+                "group flex items-center rounded-lg text-sm font-medium transition-colors",
+                expanded ? "w-full gap-3 px-3 py-2.5" : "mx-auto h-11 w-11 justify-center",
                 isActive
                   ? "bg-brand text-white"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -94,7 +97,7 @@ export const Sidebar = () => {
             <span
               className={cn(
                 "whitespace-nowrap transition-opacity duration-200",
-                expanded ? "opacity-100" : "opacity-0"
+                expanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
               )}
             >
               {item.label}
@@ -107,7 +110,11 @@ export const Sidebar = () => {
         <button
           data-testid="sidebar-pin"
           onClick={togglePin}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-accent"
+          className={cn(
+            // Mesma regra dos itens: recolhida = quadrado do ícone; expandida = linha inteira.
+            "group flex items-center rounded-lg text-sm font-medium text-muted-foreground transition-colors hover:bg-white hover:text-foreground dark:hover:bg-accent",
+            expanded ? "w-full gap-3 px-3 py-2.5" : "mx-auto h-11 w-11 justify-center"
+          )}
         >
           <span onMouseEnter={openFromTrigger} className="flex shrink-0 items-center justify-center">
             {pinned ? <PinOff size={20} /> : <Pin size={20} />}
@@ -115,7 +122,7 @@ export const Sidebar = () => {
           <span
             className={cn(
               "whitespace-nowrap transition-opacity duration-200",
-              expanded ? "opacity-100" : "opacity-0"
+              expanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
             )}
           >
             {pinned ? "Desafixar menu" : "Fixar menu"}

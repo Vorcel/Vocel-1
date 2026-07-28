@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 // Drag-and-drop file uploader. Calls onUploaded({id, filename, url, content_type}).
-export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb = 10, testid = "file-upload", compact = false }) => {
+export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb = 10, testid = "file-upload", compact = false, invalid = false }) => {
   const inputRef = useRef(null);
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,13 +65,14 @@ export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb
   return (
     <div
       data-testid={testid}
+      aria-invalid={invalid || undefined}
       onClick={() => inputRef.current?.click()}
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); doUpload(e.dataTransfer.files[0]); }}
       className={cn(
         "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors",
-        drag ? "border-brand bg-brand/5" : "border-border hover:border-brand/60 hover:bg-accent/40"
+        drag ? "border-brand bg-brand/5" : invalid ? "border-alert hover:border-alert" : "border-border hover:border-brand/60 hover:bg-accent/40"
       )}
     >
       <input

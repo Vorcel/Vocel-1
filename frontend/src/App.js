@@ -32,6 +32,7 @@ function App() {
               <Route path="/execucao" element={<Execution />} />
               <Route path="/configuracoes" element={<Settings />} />
               <Route path="/orcamento/:bidId" element={<Budget />} />
+              <Route path="/rascunho" element={<Budget mode="draft" />} />
             </Route>
             {/* Cadastro público desativado: qualquer rota antiga/desconhecida (ex: /register, /cadastro) volta ao login */}
             <Route path="/register" element={<Navigate to="/login" replace />} />

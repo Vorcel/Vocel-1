@@ -5,6 +5,7 @@ import { FilterBar } from "@/components/bids/FilterBar";
 import { AdvancedFilterSidebar } from "@/components/bids/AdvancedFilterSidebar";
 import { BidsTable } from "@/components/bids/BidsTable";
 import { BidFormModal } from "@/components/bids/BidFormModal";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
 
@@ -20,6 +21,7 @@ export const BidsSection = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [hiddenIds, setHiddenIds] = useState([]);
+  const [pendingDelete, setPendingDelete] = useState(null); // licitação aguardando confirmação
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const clearFilters = () => setFilters(EMPTY_FILTERS);
@@ -61,7 +63,9 @@ export const BidsSection = () => {
   const openNew = () => { setEditing(null); setModalOpen(true); };
   const openEdit = (bid) => { setEditing(bid); setModalOpen(true); };
 
-  const handleDelete = (bid) => {
+  // Exclusão real (soft-delete otimista + undo de 7s). Chamada só após a
+  // confirmação no modal — a lógica interna permanece inalterada.
+  const performDelete = (bid) => {
     setHiddenIds((prev) => [...prev, bid.id]);
     const timeout = setTimeout(async () => {
       try {
@@ -95,10 +99,19 @@ export const BidsSection = () => {
         </div>
       </div>
 
-      <BidsTable bids={filtered} onEdit={openEdit} onDelete={handleDelete} />
+      <BidsTable bids={filtered} onEdit={openEdit} onDelete={setPendingDelete} />
 
       <AdvancedFilterSidebar open={advOpen} onOpenChange={setAdvOpen} filters={filters} setFilter={setFilter} onClear={clearFilters} />
       <BidFormModal open={modalOpen} onOpenChange={setModalOpen} editing={editing} />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => !o && setPendingDelete(null)}
+        title="Excluir esta licitação?"
+        description="Tem certeza que deseja excluir esta licitação? Esta ação não poderá ser desfeita."
+        testid="bid-delete-dialog"
+        onConfirm={() => { if (pendingDelete) performDelete(pendingDelete); setPendingDelete(null); }}
+      />
     </div>
   );
 };

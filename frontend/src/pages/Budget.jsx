@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -375,8 +375,11 @@ function SortableRow({ r, c, visible, renderCell, selectedCols, onRequestDelete 
   );
 }
 
-export default function Budget() {
+export default function Budget({ mode = "bid" }) {
   const { bidId } = useParams();
+  const isDraft = mode === "draft";
+  // Escopo para chaves de localStorage (filtro de lote): "draft" no rascunho.
+  const scopeKey = isDraft ? "draft" : bidId;
   const navigate = useNavigate();
   const [bid, setBid] = useState(null);
   const [rows, setRows] = useState([]);
@@ -393,9 +396,10 @@ export default function Budget() {
   const [loteOptions, setLoteOptions] = useState([1, 2, 3, 4, 5]);
   // Filtro de lote por visibilidade (marcado = visível). Persistido por orçamento no localStorage.
   const [hiddenLotes, setHiddenLotes] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem(`erp_lote_hidden_${bidId}`) || "[]")); } catch { return new Set(); }
+    try { return new Set(JSON.parse(localStorage.getItem(`erp_lote_hidden_${scopeKey}`) || "[]")); } catch { return new Set(); }
   });
   const [pendingDelete, setPendingDelete] = useState(null); // id da linha a excluir
+  const [resetOpen, setResetOpen] = useState(false);        // modal de reset do rascunho
 
   const dirtyRef = useRef(false);
   const timerRef = useRef(null);
@@ -405,15 +409,27 @@ export default function Budget() {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.get(`/bids/${bidId}/budget`);
-        setBid(data.bid);
-        setDefaults(data.defaults);
-        setRows((data.rows || []).map((r, i) => ({ _id: `s${i}`, mode: r.valor_venda ? "venda" : "margem", ...r })));
+        if (isDraft) {
+          // Rascunho: sem licitação. O backend cria o registro vazio na 1ª vez.
+          const { data } = await api.get("/draft/budget");
+          setBid(null);
+          setDefaults(data.defaults);
+          const loaded = (data.rows || []).map((r, i) => ({ _id: `s${i}`, mode: r.valor_venda ? "venda" : "margem", ...r }));
+          // Começar imediatamente: se vazio, semeia UMA linha com os padrões do usuário.
+          if (loaded.length === 0) { loaded.push(newRow(data.defaults)); dirtyRef.current = true; }
+          setRows(loaded);
+        } else {
+          const { data } = await api.get(`/bids/${bidId}/budget`);
+          setBid(data.bid);
+          setDefaults(data.defaults);
+          setRows((data.rows || []).map((r, i) => ({ _id: `s${i}`, mode: r.valor_venda ? "venda" : "margem", ...r })));
+        }
       } catch (e) {
         toast.error(formatApiError(e.response?.data?.detail));
       } finally { setLoading(false); }
     })();
-  }, [bidId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bidId, isDraft]);
 
   const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v4", DEFAULT_WIDTHS);
 
@@ -451,7 +467,7 @@ export default function Budget() {
           rows: rows.map((r) => ({ ...r, ...computeRow(r) })),
           summary: computeTotals(rows),
         };
-        await api.put(`/bids/${bidId}/budget`, payload);
+        await api.put(isDraft ? "/draft/budget" : `/bids/${bidId}/budget`, payload);
         setSaveState("saved");
         setTimeout(() => setSaveState("idle"), 1600);
       } catch (e) {
@@ -460,12 +476,12 @@ export default function Budget() {
       }
     }, 1000);
     return () => clearTimeout(timerRef.current);
-  }, [rows, loading, bidId]);
+  }, [rows, loading, bidId, isDraft]);
 
-  // Persiste o filtro de lote (cards) por orçamento, para sobreviver à saída/retorno da página.
+  // Persiste o filtro de lote (cards) por escopo, para sobreviver à saída/retorno da página.
   useEffect(() => {
-    try { localStorage.setItem(`erp_lote_hidden_${bidId}`, JSON.stringify([...hiddenLotes])); } catch { /* ignore */ }
-  }, [hiddenLotes, bidId]);
+    try { localStorage.setItem(`erp_lote_hidden_${scopeKey}`, JSON.stringify([...hiddenLotes])); } catch { /* ignore */ }
+  }, [hiddenLotes, scopeKey]);
 
   const markDirty = () => { dirtyRef.current = true; };
   const updateRow = (id, patch) => { markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r))); };
@@ -477,6 +493,22 @@ export default function Budget() {
   const toggleLoteFilter = (l) => setHiddenLotes((prev) => { const n = new Set(prev); n.has(l) ? n.delete(l) : n.add(l); return n; });
   const showAllLotes = () => setHiddenLotes(new Set());
   const confirmDelete = () => { if (pendingDelete) removeRow(pendingDelete); setPendingDelete(null); };
+
+  // Reset do rascunho: limpa no backend (só o doc deste usuário) e recria o
+  // estado inicial com UMA linha padrão. O autosave persiste a linha semeada.
+  const doReset = async () => {
+    try {
+      const { data } = await api.post("/draft/budget/reset");
+      setHiddenLotes(new Set());
+      setLoteOptions([1, 2, 3, 4, 5]);
+      dirtyRef.current = true;
+      setRows([newRow(data?.defaults || defaults)]);
+      setResetOpen(false);
+      toast.success("Rascunho resetado");
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    }
+  };
 
   // Drag-and-drop (reordenação de linhas) — mouse + touch + teclado.
   // PointerSensor com pequena distância evita arraste acidental ao clicar na alça.
@@ -634,17 +666,82 @@ export default function Budget() {
   // Resumo compacto da licitação (padrão ref23) — cada bloco só entra se tiver
   // valor (evita "undefined"/separadores soltos). Somente o Portal é colorido
   // (reaproveita PortalName com a cor configurada); o resto fica neutro.
-  const tituloObjeto = bid?.objeto || "Orçamento";
+  const tituloObjeto = isDraft ? "Rascunho de Orçamento" : (bid?.objeto || "Orçamento");
   const infoNodes = [];
-  if (bid?.uasg) infoNodes.push({ key: "uasg", node: <HeaderInfo icon={Building2} label="UASG" value={bid.uasg} /> });
-  if (bid?.pregao) infoNodes.push({ key: "pregao", node: <HeaderInfo icon={Gavel} label="Pregão" value={bid.pregao} /> });
-  if (bid?.portal) infoNodes.push({ key: "portal", node: <HeaderInfo icon={Globe} label="Portal" value={<PortalName portal={bid.portal} className="max-w-[140px] text-xs" />} /> });
-  if (bid?.modalidade) infoNodes.push({ key: "mod", node: <HeaderInfo icon={Briefcase} label="Modalidade" value={bid.modalidade} /> });
-  if (bid?.data_disputa) infoNodes.push({ key: "data", node: <HeaderInfo icon={Calendar} label="Data" value={fmtDispDate(bid.data_disputa)} /> });
-  if (bid?.hora) infoNodes.push({ key: "hora", node: <HeaderInfo icon={Clock} label="Horário" value={bid.hora} /> });
-  infoNodes.push({ key: "files", node: <BidFilesButton bid={bid} /> });
+  // Campos de licitação só no modo licitação (nada de UASG/Pregão/Portal vazios no rascunho).
+  if (!isDraft) {
+    if (bid?.uasg) infoNodes.push({ key: "uasg", node: <HeaderInfo icon={Building2} label="UASG" value={bid.uasg} /> });
+    if (bid?.pregao) infoNodes.push({ key: "pregao", node: <HeaderInfo icon={Gavel} label="Pregão" value={bid.pregao} /> });
+    if (bid?.portal) infoNodes.push({ key: "portal", node: <HeaderInfo icon={Globe} label="Portal" value={<PortalName portal={bid.portal} className="max-w-[140px] text-xs" />} /> });
+    if (bid?.modalidade) infoNodes.push({ key: "mod", node: <HeaderInfo icon={Briefcase} label="Modalidade" value={bid.modalidade} /> });
+    if (bid?.data_disputa) infoNodes.push({ key: "data", node: <HeaderInfo icon={Calendar} label="Data" value={fmtDispDate(bid.data_disputa)} /> });
+    if (bid?.hora) infoNodes.push({ key: "hora", node: <HeaderInfo icon={Clock} label="Horário" value={bid.hora} /> });
+    infoNodes.push({ key: "files", node: <BidFilesButton bid={bid} /> });
+  }
 
   const vDivider = <span className="h-7 w-px shrink-0 bg-border" />;
+
+  // Bloco de ações do cabeçalho (indicador de salvamento + filtro de lote + reset + adicionar linha).
+  // Reutilizado nos dois modos; o botão de reset só aparece no rascunho.
+  const actionsBlock = (
+    <div className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
+      {!isDraft && vDivider}
+      <div data-testid="budget-save-state" className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        {saveState === "saving" && (<><Loader2 size={14} className="animate-spin" /> Salvando…</>)}
+        {saveState === "saved" && (<><CheckCircle2 size={14} className="text-emerald-600" /> Salvo</>)}
+        {saveState === "idle" && (<><Cloud size={14} /> Salvo na nuvem</>)}
+      </div>
+      {hiddenList.length > 0 && (
+        <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="budget-show-all" onClick={showAll}>
+          <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
+        </Button>
+      )}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="lote-filter-trigger">
+            <Filter size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount})` : ""}
+            <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-52 p-1" data-testid="lote-filter-menu">
+          <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Marcado = visível</p>
+          <div className="max-h-60 overflow-y-auto">
+            {lotesPresentes.length === 0 ? (
+              <p className="px-2 py-2 text-sm text-muted-foreground">Nenhum lote ainda.</p>
+            ) : (
+              lotesPresentes.map((l) => (
+                <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
+                  <Checkbox checked={!hiddenLotes.has(l)} className="pointer-events-none" />
+                  Lote {l}
+                </button>
+              ))
+            )}
+          </div>
+          {hiddenCount > 0 && (
+            <button type="button" data-testid="lote-filter-clear" onClick={showAllLotes}
+              className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
+              Mostrar todos os lotes
+            </button>
+          )}
+        </PopoverContent>
+      </Popover>
+      {isDraft && (
+        <Button
+          variant="outline" size="sm" data-testid="draft-reset" onClick={() => setResetOpen(true)}
+          className="h-8 shrink-0 border-alert text-alert hover:bg-alert/10 hover:text-alert"
+        >
+          <RotateCcw size={15} className="mr-1.5" /> Resetar rascunho
+        </Button>
+      )}
+      <Button
+        size="sm" data-testid="budget-add-row" onClick={addRow}
+        className="h-8 shrink-0 bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+      >
+        <Plus size={16} className="mr-1.5" /> Linha
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex h-screen flex-col">
@@ -656,64 +753,19 @@ export default function Budget() {
           <ArrowLeft size={18} />
         </Button>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
-          <h1 data-testid="budget-bid-title" title={bid?.objeto || undefined} className="truncate font-heading text-lg font-bold leading-none tracking-tight">{tituloObjeto}</h1>
+          <h1 data-testid="budget-bid-title" title={isDraft ? "Rascunho de Orçamento" : (bid?.objeto || undefined)} className="truncate font-heading text-lg font-bold leading-none tracking-tight">{tituloObjeto}</h1>
           <div data-testid="budget-bid-meta" className="scrollbar-hide flex items-center gap-2.5 overflow-x-auto">
-            {infoNodes.map((it, i) => (
-              <div key={it.key} className="flex shrink-0 items-center gap-2.5">
-                {i > 0 && vDivider}
-                {it.node}
-              </div>
-            ))}
-
-            <div className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
-              {vDivider}
-              <div data-testid="budget-save-state" className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                {saveState === "saving" && (<><Loader2 size={14} className="animate-spin" /> Salvando…</>)}
-                {saveState === "saved" && (<><CheckCircle2 size={14} className="text-emerald-600" /> Salvo</>)}
-                {saveState === "idle" && (<><Cloud size={14} /> Salvo na nuvem</>)}
-              </div>
-              {hiddenList.length > 0 && (
-                <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="budget-show-all" onClick={showAll}>
-                  <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
-                </Button>
-              )}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="lote-filter-trigger">
-                    <Filter size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount})` : ""}
-                    <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-52 p-1" data-testid="lote-filter-menu">
-                  <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Marcado = visível</p>
-                  <div className="max-h-60 overflow-y-auto">
-                    {lotesPresentes.length === 0 ? (
-                      <p className="px-2 py-2 text-sm text-muted-foreground">Nenhum lote ainda.</p>
-                    ) : (
-                      lotesPresentes.map((l) => (
-                        <button key={l} type="button" data-testid={`lote-filter-opt-${l}`} onClick={() => toggleLoteFilter(l)}
-                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent">
-                          <Checkbox checked={!hiddenLotes.has(l)} className="pointer-events-none" />
-                          Lote {l}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  {hiddenCount > 0 && (
-                    <button type="button" data-testid="lote-filter-clear" onClick={showAllLotes}
-                      className="mt-1 flex w-full items-center gap-1.5 rounded border-t border-border px-2 py-1.5 text-left text-sm text-brand hover:bg-accent">
-                      Mostrar todos os lotes
-                    </button>
-                  )}
-                </PopoverContent>
-              </Popover>
-              <Button
-                size="sm" data-testid="budget-add-row" onClick={addRow}
-                className="h-8 shrink-0 bg-foreground text-background hover:bg-foreground/90 hover:text-background"
-              >
-                <Plus size={16} className="mr-1.5" /> Linha
-              </Button>
-            </div>
+            {isDraft ? (
+              <span className="shrink-0 text-xs text-muted-foreground">Planilha independente — sem vínculo com licitação</span>
+            ) : (
+              infoNodes.map((it, i) => (
+                <div key={it.key} className="flex shrink-0 items-center gap-2.5">
+                  {i > 0 && vDivider}
+                  {it.node}
+                </div>
+              ))
+            )}
+            {actionsBlock}
           </div>
         </div>
       </header>
@@ -836,6 +888,24 @@ export default function Budget() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Confirmação de reset do rascunho (mesmo componente das exclusões) */}
+      {isDraft && (
+        <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+          <AlertDialogContent data-testid="draft-reset-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Resetar o rascunho?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem certeza que deseja apagar todas as linhas e lotes deste rascunho? Esta ação não poderá ser desfeita.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="draft-reset-cancel">Cancelar</AlertDialogCancel>
+              <AlertDialogAction data-testid="draft-reset-confirm" onClick={doReset} className="bg-alert text-white hover:bg-alert/90">Resetar</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }

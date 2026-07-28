@@ -474,7 +474,11 @@ async def _ensure_execution(bid: dict):
 
 async def _sync_execution(bid: dict):
     """Mantém a página de Execução/Pós-vendas em sincronia com o status da licitação.
-    - Status "Adjudicado": garante a execução correspondente (idempotente).
+    - Status "Adjudicado": garante a execução correspondente (idempotente) e
+      SINCRONIZA os campos espelhados da licitação (portal/objeto/modalidade/termo).
+      A sincronização é um $set apenas desses campos — não recria a execução nem
+      toca timeline, arquivos, financeiro (agregado do orçamento), prazos ou etapa.
+      Isso corrige a coluna Portal ficar defasada após editar a licitação.
     - Qualquer outro status: remove a execução da Execução/Pós-vendas. A licitação,
       o orçamento e os arquivos vinculados permanecem intactos — só o registro de
       execução é descartado.
@@ -484,6 +488,17 @@ async def _sync_execution(bid: dict):
     owner = bid.get("owner_id")
     if bid.get("status") == "Adjudicado":
         await _ensure_execution(bid)
+        # A licitação é a fonte de verdade destes campos: mantê-los espelhados
+        # evita inconsistência entre a licitação e a execução vinculada.
+        await db.executions.update_one(
+            {"bid_id": bid_id, "owner_id": owner},
+            {"$set": {
+                "objeto": bid.get("objeto", ""),
+                "portal": bid.get("portal", ""),
+                "modalidade": bid.get("modalidade", ""),
+                "termo_referencia": bid.get("termo_referencia"),
+            }},
+        )
     else:
         await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
 
@@ -652,6 +667,8 @@ class PreferencesInput(BaseModel):
     icms_padrao: Optional[float] = None
     pis_cofins_padrao: Optional[float] = None
     margem_padrao: Optional[float] = None
+    # Ordenação persistida por tabela: {"bids": {"field": ..., "dir": "asc|desc"}, "executions": {...}}
+    table_sorts: Optional[dict] = None
 
 
 @api.get("/preferences")
@@ -669,3 +686,56 @@ async def update_preferences(body: PreferencesInput, current=Depends(get_current
     await db.preferences.update_one({"owner_id": owner}, {"$set": {**updates, "owner_id": owner}}, upsert=True)
     doc = await db.preferences.find_one({"owner_id": owner})
     return _strip_meta(doc)
+
+
+# =================== DRAFT BUDGET (planilha de rascunho, sem licitação) ===================
+# Rascunho = planilha de orçamento independente, UMA por usuário, guardada na
+# coleção própria `drafts` (type="budget_draft"). Não toca em bids/budgets/
+# executions — logo NÃO contamina contagens, dashboard, listagens ou execução.
+# Tudo isolado por owner_id (o dono vem sempre do usuário autenticado, nunca do body).
+async def _draft_defaults(owner: str) -> dict:
+    """Mesmos padrões financeiros usados pelo orçamento de licitação (das preferências)."""
+    prefs = await db.preferences.find_one({"owner_id": owner}) or {}
+    return {
+        "icms": prefs.get("icms_padrao", 18),
+        "pis_cofins": prefs.get("pis_cofins_padrao", 9.25),
+        "margem": prefs.get("margem_padrao", 30),
+    }
+
+
+@api.get("/draft/budget")
+async def get_draft_budget(current=Depends(get_current_user)):
+    """Retorna o rascunho do usuário, criando-o vazio na primeira vez (idempotente)."""
+    owner = uid(current)
+    doc = await db.drafts.find_one({"owner_id": owner, "type": "budget_draft"})
+    if not doc:
+        doc = {"owner_id": owner, "type": "budget_draft", "rows": [], "summary": {}, "updated_at": now_iso()}
+        await db.drafts.insert_one(dict(doc))
+    return {"rows": doc.get("rows", []), "summary": doc.get("summary", {}), "defaults": await _draft_defaults(owner)}
+
+
+@api.put("/draft/budget")
+async def save_draft_budget(body: BudgetInput, current=Depends(get_current_user)):
+    """Salva o rascunho do usuário (mesmo formato de linhas/summary do orçamento)."""
+    owner = uid(current)
+    await db.drafts.update_one(
+        {"owner_id": owner, "type": "budget_draft"},
+        {"$set": {"rows": body.rows, "summary": body.summary, "owner_id": owner,
+                  "type": "budget_draft", "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"message": "Rascunho salvo", "summary": body.summary}
+
+
+@api.post("/draft/budget/reset")
+async def reset_draft_budget(current=Depends(get_current_user)):
+    """Apaga apenas o conteúdo do rascunho DESTE usuário (linhas/lotes/summary).
+    Não afeta licitações, orçamentos reais, execuções, arquivos nem preferências."""
+    owner = uid(current)
+    await db.drafts.update_one(
+        {"owner_id": owner, "type": "budget_draft"},
+        {"$set": {"rows": [], "summary": {}, "owner_id": owner,
+                  "type": "budget_draft", "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"message": "Rascunho resetado", "defaults": await _draft_defaults(owner)}

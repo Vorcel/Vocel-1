@@ -120,6 +120,21 @@ export function DataProvider({ children }) {
     setCompany(data);
     return data;
   };
+  // Ordenação persistida por tabela (por usuário, via /preferences -> owner_id).
+  // Aplica localmente na hora (sem F5) e persiste o objeto table_sorts completo.
+  const saveTableSort = useCallback(async (page, sort) => {
+    let nextSorts;
+    setPrefs((p) => {
+      nextSorts = { ...(p.table_sorts || {}), [page]: sort };
+      return { ...p, table_sorts: nextSorts };
+    });
+    try {
+      const { data } = await api.put("/preferences", { table_sorts: nextSorts });
+      setPrefs(data);
+    } catch {
+      /* mantém o estado otimista; próxima carga reconcilia */
+    }
+  }, []);
 
   // ---- Summary (computed client-side for reactivity) ----
   const now = new Date();
@@ -158,7 +173,7 @@ export function DataProvider({ children }) {
         bids, executions, lists, prefs, company, loading, summary,
         refreshBids, refreshExecutions, refreshLists,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, toggleProposta, deleteBid,
-        addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany,
+        addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort,
       }}
     >
       {children}

@@ -10,6 +10,7 @@ import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
 import { formatApiError, fileUrl } from "@/lib/api";
 import { smartTitleCase } from "@/lib/textcase";
+import { cn } from "@/lib/utils";
 import { X, FileText } from "lucide-react";
 
 const ITENS_REGEX = /^\d+(,\s*\d+)*$/;
@@ -110,19 +111,22 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
               onChange={(e) => set("objeto", e.target.value)}
               onBlur={() => { setTouched((t) => ({ ...t, objeto: true })); set("objeto", smartTitleCase(form.objeto)); }}
               placeholder="Ex: Aquisição de equipamentos de informática"
+              aria-invalid={!!err("objeto") || undefined}
+              aria-describedby={err("objeto") ? "err-objeto" : undefined}
+              className={cn(err("objeto") && "border-alert focus-visible:ring-alert")}
             />
-            {err("objeto") && <p className="text-xs text-alert">{errors.objeto}</p>}
+            {err("objeto") && <p id="err-objeto" className="text-xs text-alert">{errors.objeto}</p>}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Modalidade<Req /></Label>
-              <SelectWithAdd listType="modalidades" value={form.modalidade} onChange={(v) => set("modalidade", v)} placeholder="Selecione" testid="bid-modalidade" />
+              <SelectWithAdd listType="modalidades" value={form.modalidade} onChange={(v) => set("modalidade", v)} placeholder="Selecione" testid="bid-modalidade" invalid={!!err("modalidade")} />
               {err("modalidade") && <p className="text-xs text-alert">{errors.modalidade}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>Portal *</Label>
-              <SelectWithAdd listType="portais" value={form.portal} onChange={(v) => set("portal", v)} placeholder="Selecione" testid="bid-portal" />
+              <SelectWithAdd listType="portais" value={form.portal} onChange={(v) => set("portal", v)} placeholder="Selecione" testid="bid-portal" invalid={!!err("portal")} />
               {err("portal") && <p className="text-xs text-alert">{errors.portal}</p>}
             </div>
           </div>
@@ -135,8 +139,11 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
               onChange={(e) => set("itens", e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, itens: true }))}
               placeholder="Ex: 1, 2, 5, 8"
+              aria-invalid={!!err("itens") || undefined}
+              aria-describedby={err("itens") ? "err-itens" : undefined}
+              className={cn(err("itens") && "border-alert focus-visible:ring-alert")}
             />
-            {err("itens") && <p className="text-xs text-alert">{errors.itens}</p>}
+            {err("itens") && <p id="err-itens" className="text-xs text-alert">{errors.itens}</p>}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -149,8 +156,11 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
                 value={form.data_disputa}
                 onChange={(e) => set("data_disputa", e.target.value)}
                 onBlur={() => setTouched((t) => ({ ...t, data_disputa: true }))}
+                aria-invalid={!!err("data_disputa") || undefined}
+                aria-describedby={err("data_disputa") ? "err-data" : undefined}
+                className={cn(err("data_disputa") && "border-alert focus-visible:ring-alert")}
               />
-              {err("data_disputa") && <p className="text-xs text-alert">{errors.data_disputa}</p>}
+              {err("data_disputa") && <p id="err-data" className="text-xs text-alert">{errors.data_disputa}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>Hora<Req /></Label>
@@ -160,21 +170,28 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
                 value={form.hora}
                 onChange={(e) => set("hora", e.target.value)}
                 onBlur={() => setTouched((t) => ({ ...t, hora: true }))}
+                aria-invalid={!!err("hora") || undefined}
+                aria-describedby={err("hora") ? "err-hora" : undefined}
+                className={cn(err("hora") && "border-alert focus-visible:ring-alert")}
               />
-              {err("hora") && <p className="text-xs text-alert">{errors.hora}</p>}
+              {err("hora") && <p id="err-hora" className="text-xs text-alert">{errors.hora}</p>}
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Pregão<Req /></Label>
-              <Input data-testid="bid-pregao" value={form.pregao} onChange={(e) => set("pregao", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, pregao: true }))} placeholder="Ex: 90012/2026" />
-              {err("pregao") && <p className="text-xs text-alert">{errors.pregao}</p>}
+              <Input data-testid="bid-pregao" value={form.pregao} onChange={(e) => set("pregao", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, pregao: true }))} placeholder="Ex: 90012/2026"
+                aria-invalid={!!err("pregao") || undefined} aria-describedby={err("pregao") ? "err-pregao" : undefined}
+                className={cn(err("pregao") && "border-alert focus-visible:ring-alert")} />
+              {err("pregao") && <p id="err-pregao" className="text-xs text-alert">{errors.pregao}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>UASG<Req /></Label>
-              <Input data-testid="bid-uasg" value={form.uasg} onChange={(e) => set("uasg", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, uasg: true }))} placeholder="Ex: 160088" />
-              {err("uasg") && <p className="text-xs text-alert">{errors.uasg}</p>}
+              <Input data-testid="bid-uasg" value={form.uasg} onChange={(e) => set("uasg", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, uasg: true }))} placeholder="Ex: 160088"
+                aria-invalid={!!err("uasg") || undefined} aria-describedby={err("uasg") ? "err-uasg" : undefined}
+                className={cn(err("uasg") && "border-alert focus-visible:ring-alert")} />
+              {err("uasg") && <p id="err-uasg" className="text-xs text-alert">{errors.uasg}</p>}
             </div>
           </div>
 
@@ -194,8 +211,9 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
               value={form.termo_referencia}
               onUploaded={(f) => set("termo_referencia", f)}
               onRemove={() => set("termo_referencia", null)}
+              invalid={!!err("termo")}
             />
-            {err("termo") && <p className="text-xs text-alert">{errors.termo}</p>}
+            {err("termo") && <p id="err-termo" className="text-xs text-alert">{errors.termo}</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -224,11 +242,17 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="bid-cancel">Cancelar</Button>
-          <Button onClick={submit} disabled={!valid || saving} data-testid="bid-save" className="bg-brand hover:bg-brand-hover">
-            {saving ? "Salvando..." : "Salvar"}
-          </Button>
+        <DialogFooter className="items-center gap-2 sm:justify-between">
+          {submitAttempted && !valid ? (
+            <p role="alert" data-testid="bid-required-msg" className="text-sm font-medium text-alert">Preencha os campos obrigatórios</p>
+          ) : <span className="hidden sm:block" />}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="bid-cancel">Cancelar</Button>
+            {/* Botão sempre habilitado: a validação ocorre no clique (submit). */}
+            <Button onClick={submit} disabled={saving} data-testid="bid-save" className="bg-brand hover:bg-brand-hover">
+              {saving ? "Salvando..." : "Salvar"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

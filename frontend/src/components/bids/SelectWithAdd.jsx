@@ -4,10 +4,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { useData } from "@/context/DataContext";
 import { smartTitleCase } from "@/lib/textcase";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 // Select with an inline "+" to add a new option to a managed list (modalidades/portais).
-export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }) => {
+export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid, invalid = false }) => {
   const { lists, addListItem } = useData();
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
@@ -53,7 +54,7 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid }
   return (
     <div className="flex items-center gap-2">
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger data-testid={testid} className="flex-1">
+        <SelectTrigger data-testid={testid} aria-invalid={invalid || undefined} className={cn("flex-1", invalid && "border-alert focus:ring-alert")}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

@@ -1,11 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX, ChevronUp, ChevronDown } from "lucide-react";
+import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX } from "lucide-react";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
 import { PortalName } from "@/components/bids/PortalName";
 import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
+import { SortArrows } from "@/components/table/SortArrows";
+import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
+import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useData } from "@/context/DataContext";
 import { fileUrl } from "@/lib/api";
 import { hexToRgba, tagColorAt } from "@/lib/constants";
@@ -36,20 +39,6 @@ const COLS = [
   { label: "Orçamento", key: null, w: 96 },
   { label: "Ações", key: null, w: 96 },
 ];
-
-// Ordenação acionada EXCLUSIVAMENTE pelo clique nas setas (não no <th>/texto).
-const SortArrows = ({ active, dir, onClick }) => (
-  <button
-    type="button"
-    data-testid="sort-arrows"
-    onClick={(e) => { e.stopPropagation(); onClick(); }}
-    className="ml-1 inline-flex cursor-pointer flex-col leading-[0] align-middle"
-    title="Ordenar"
-  >
-    <ChevronUp size={11} className={cn(active && dir === "asc" ? "text-foreground" : "text-muted-foreground/40")} />
-    <ChevronDown size={11} className={cn("-mt-0.5", active && dir === "desc" ? "text-foreground" : "text-muted-foreground/40")} />
-  </button>
-);
 
 const FilesCell = ({ files }) => {
   if (files.length === 0) {
@@ -92,14 +81,11 @@ const FilesCell = ({ files }) => {
 export const BidsTable = ({ bids, onEdit, onDelete }) => {
   const { toggleFavorite, updateObservacoes, toggleProposta } = useData();
   const navigate = useNavigate();
+  const scrollRef = useRef(null);
   const { widths, startResize, total } = useColumnResize("bidstable_widths_v4", COLS.map((c) => c.w));
   // Padrão: data/hora da disputa decrescente (mais recente primeiro).
-  const [sort, setSort] = useState({ key: "data_disputa", dir: "desc" });
-
-  const toggleSort = (col) => {
-    if (!col.key) return;
-    setSort((s) => (s.key === col.key ? { key: col.key, dir: s.dir === "asc" ? "desc" : "asc" } : { key: col.key, dir: "asc" }));
-  };
+  // Persistido por usuário no backend (preferências) — ver usePersistentSort.
+  const [sort, toggleSort] = usePersistentSort("bids", { key: "data_disputa", dir: "desc" });
 
   const sorted = useMemo(() => {
     const col = COLS.find((c) => c.key === sort.key);
@@ -116,7 +102,8 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
   }, [bids, sort]);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <>
+    <div ref={scrollRef} className="overflow-x-auto rounded-xl border border-border bg-card">
       <table className="rt-fixed border-collapse text-sm" style={{ width: total }}>
         <colgroup>{widths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
         <thead>
@@ -125,7 +112,7 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
               <th key={col.label} data-testid={col.key ? `bid-th-${col.key}` : undefined} className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 <span className="inline-flex select-none items-center">
                   {col.label}
-                  {col.key && <SortArrows active={sort.key === col.key} dir={sort.dir} onClick={() => toggleSort(col)} />}
+                  {col.key && <SortArrows active={sort.key === col.key} dir={sort.dir} onClick={() => toggleSort(col.key)} />}
                 </span>
                 {i < COLS.length - 1 && <ColResizer onMouseDown={startResize(i)} />}
               </th>
@@ -225,5 +212,7 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
         </tbody>
       </table>
     </div>
+    <StickyHorizontalScrollbar targetRef={scrollRef} />
+    </>
   );
 };
