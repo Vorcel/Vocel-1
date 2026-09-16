@@ -5,6 +5,9 @@ import { FilterBar } from "@/components/bids/FilterBar";
 import { AdvancedFilterSidebar } from "@/components/bids/AdvancedFilterSidebar";
 import { BidsTable } from "@/components/bids/BidsTable";
 import { BidFormModal } from "@/components/bids/BidFormModal";
+import { PropostaUploadModal } from "@/components/bids/PropostaUploadModal";
+import { PropostaViewerModal } from "@/components/bids/PropostaViewerModal";
+import { hasProposta } from "@/components/bids/PropostaIcon";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useData } from "@/context/DataContext";
 import { toast } from "sonner";
@@ -22,6 +25,10 @@ export const BidsSection = () => {
   const [editing, setEditing] = useState(null);
   const [hiddenIds, setHiddenIds] = useState([]);
   const [pendingDelete, setPendingDelete] = useState(null); // licitação aguardando confirmação
+  // Proposta: `propostaBid` é o id da licitação em foco (o objeto vem sempre do
+  // `bids` do contexto, para o modal refletir a atualização sem F5).
+  const [propostaBidId, setPropostaBidId] = useState(null);
+  const [propostaModo, setPropostaModo] = useState(null); // "upload" | "viewer" | "substituir"
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const clearFilters = () => setFilters(EMPTY_FILTERS);
@@ -53,8 +60,11 @@ export const BidsSection = () => {
       if (filters.modalidade && b.modalidade !== filters.modalidade) return false;
       if (Array.isArray(filters.status) ? filters.status.length && !filters.status.includes(b.status) : filters.status && b.status !== filters.status) return false;
       if (filters.favoritos && !b.favorito) return false;
-      if (filters.proposta === "sent" && !b.proposta_enviada) return false;
-      if (filters.proposta === "notsent" && b.proposta_enviada) return false;
+      // O filtro segue o MESMO critério do ícone "P" da tabela: existe documento
+      // de proposta? Assim a listagem nunca discorda do que o ícone mostra —
+      // inclusive nas licitações marcadas à mão no modelo antigo, antes do upload.
+      if (filters.proposta === "sent" && !hasProposta(b)) return false;
+      if (filters.proposta === "notsent" && hasProposta(b)) return false;
       if (filters.itens && !(b.itens_list || []).includes(filters.itens.trim())) return false;
       return true;
     });
@@ -62,6 +72,14 @@ export const BidsSection = () => {
 
   const openNew = () => { setEditing(null); setModalOpen(true); };
   const openEdit = (bid) => { setEditing(bid); setModalOpen(true); };
+
+  // Clique no "P": sem proposta abre o upload; com proposta vai direto para a leitura.
+  const propostaBid = bids.find((b) => b.id === propostaBidId) || null;
+  const openProposta = (bid) => {
+    setPropostaBidId(bid.id);
+    setPropostaModo(hasProposta(bid) ? "viewer" : "upload");
+  };
+  const fecharProposta = (aberto) => { if (!aberto) setPropostaModo(null); };
 
   // Exclusão real (soft-delete otimista + undo de 7s). Chamada só após a
   // confirmação no modal — a lógica interna permanece inalterada.
@@ -99,10 +117,25 @@ export const BidsSection = () => {
         </div>
       </div>
 
-      <BidsTable bids={filtered} onEdit={openEdit} onDelete={setPendingDelete} />
+      <BidsTable bids={filtered} onEdit={openEdit} onDelete={setPendingDelete} onProposta={openProposta} />
 
       <AdvancedFilterSidebar open={advOpen} onOpenChange={setAdvOpen} filters={filters} setFilter={setFilter} onClear={clearFilters} />
       <BidFormModal open={modalOpen} onOpenChange={setModalOpen} editing={editing} />
+
+      <PropostaUploadModal
+        open={propostaModo === "upload" || propostaModo === "substituir"}
+        onOpenChange={fecharProposta}
+        bid={propostaBid}
+        modo={propostaModo === "substituir" ? "substituir" : "novo"}
+        // Salvou: já abre a leitura da proposta recém-enviada.
+        onSaved={() => setPropostaModo("viewer")}
+      />
+      <PropostaViewerModal
+        open={propostaModo === "viewer"}
+        onOpenChange={fecharProposta}
+        bid={propostaBid}
+        onSubstituir={() => setPropostaModo("substituir")}
+      />
 
       <ConfirmDialog
         open={!!pendingDelete}

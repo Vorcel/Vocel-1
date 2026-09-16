@@ -2,10 +2,15 @@ import { useRef, useState } from "react";
 import { UploadCloud, FileText, X, Loader2, Paperclip } from "lucide-react";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 
 // Drag-and-drop file uploader. Calls onUploaded({id, filename, url, content_type}).
-export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb = 10, testid = "file-upload", compact = false, invalid = false }) => {
+//
+// Modo `deferred`: em vez de enviar na hora, devolve o File cru por `onSelect` —
+// quem chama decide quando gravar (usado na proposta, onde o usuário confere
+// nome/tamanho e pode trocar o arquivo antes de salvar). Nesse modo `value` é o
+// próprio File. Sem a prop, o comportamento continua exatamente o mesmo de antes.
+export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb = 10, testid = "file-upload", compact = false, invalid = false, deferred = false, onSelect }) => {
   const inputRef = useRef(null);
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -14,6 +19,10 @@ export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb
     if (!file) return;
     if (file.size > maxMb * 1024 * 1024) {
       toast.error(`Arquivo excede ${maxMb}MB`);
+      return;
+    }
+    if (deferred) {
+      onSelect?.(file);
       return;
     }
     setBusy(true);
@@ -29,6 +38,26 @@ export const FileUpload = ({ value, onUploaded, onRemove, accept = ".pdf", maxMb
       setBusy(false);
     }
   };
+
+  // Arquivo escolhido mas ainda não enviado: nome, tamanho e opção de remover/trocar.
+  if (deferred && value) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-accent/50 px-3 py-2.5" data-testid={`${testid}-file`}>
+        <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+          <FileText size={18} className="shrink-0 text-brand" />
+          <span className="truncate" title={value.name}>{value.name}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="font-mono-num text-xs text-muted-foreground">{formatBytes(value.size)}</span>
+          {onRemove && (
+            <button type="button" onClick={onRemove} data-testid={`${testid}-remove`} title="Remover" className="text-muted-foreground hover:text-alert">
+              <X size={16} />
+            </button>
+          )}
+        </span>
+      </div>
+    );
+  }
 
   if (value && compact) {
     return (

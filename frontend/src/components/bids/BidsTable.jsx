@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX } from "lucide-react";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
+import { PropostaButton } from "@/components/bids/PropostaIcon";
 import { PortalName } from "@/components/bids/PortalName";
 import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -28,7 +29,6 @@ const FileTypeIcon = ({ name, size = 16 }) =>
 const COLS = [
   { label: "Data / Hora", key: "data_disputa", type: "date", w: 110 },
   { label: "★", key: null, w: 52 },
-  { label: "PROP.", key: null, w: 56 },
   { label: "Portal / Modalidade", key: "portal", type: "text", w: 170 },
   { label: "Itens", key: null, w: 130 },
   { label: "Objeto", key: "objeto", type: "text", w: 260 },
@@ -36,7 +36,7 @@ const COLS = [
   { label: "Pregão / UASG", key: "pregao", type: "text", w: 140 },
   { label: "Status", key: "status", type: "text", w: 160 },
   { label: "Arquivos", key: null, w: 80 },
-  { label: "Orçamento", key: null, w: 96 },
+  { label: "Orç. / Prop.", key: null, w: 128 },
   { label: "Ações", key: null, w: 96 },
 ];
 
@@ -78,11 +78,13 @@ const FilesCell = ({ files }) => {
   );
 };
 
-export const BidsTable = ({ bids, onEdit, onDelete }) => {
-  const { toggleFavorite, updateObservacoes, toggleProposta } = useData();
+export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
+  const { toggleFavorite, updateObservacoes } = useData();
   const navigate = useNavigate();
   const scrollRef = useRef(null);
-  const { widths, startResize, total } = useColumnResize("bidstable_widths_v4", COLS.map((c) => c.w));
+  // v5: a coluna "PROP." saiu e a proposta virou o ícone "P" ao lado da calculadora —
+  // a chave nova descarta as larguras salvas do layout antigo (senão desalinha).
+  const { widths, startResize, total } = useColumnResize("bidstable_widths_v5", COLS.map((c) => c.w));
   // Padrão: data/hora da disputa decrescente (mais recente primeiro).
   // Persistido por usuário no backend (preferências) — ver usePersistentSort.
   const [sort, toggleSort] = usePersistentSort("bids", { key: "data_disputa", dir: "desc" });
@@ -143,26 +145,12 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
                     <Star size={18} className={cn(b.favorito ? "fill-amber-400 text-amber-400" : "text-muted-foreground/50")} />
                   </button>
                 </td>
-                {/* 3. PROP. (proposta enviada) */}
-                <td className="px-3 py-3">
-                  <button
-                    data-testid={`bid-prop-${b.id}`}
-                    onClick={() => toggleProposta(b.id, !b.proposta_enviada)}
-                    title={b.proposta_enviada ? "Proposta enviada" : "Proposta não enviada"}
-                    className={cn(
-                      "flex h-7 w-7 items-center justify-center rounded-md text-sm font-bold transition-all",
-                      b.proposta_enviada ? "bg-brand/10 text-brand ring-1 ring-brand/40" : "text-muted-foreground/40 hover:bg-accent"
-                    )}
-                  >
-                    P
-                  </button>
-                </td>
-                {/* 4. Portal / Modalidade (portal em cima com cor do parâmetro, modalidade abaixo) */}
+                {/* 3. Portal / Modalidade (portal em cima com cor do parâmetro, modalidade abaixo) */}
                 <td className="px-3 py-3">
                   <PortalName portal={b.portal} />
                   <span className="block truncate text-xs text-muted-foreground" title={b.modalidade}>{b.modalidade}</span>
                 </td>
-                {/* 5. Itens (cores pastel alternadas, texto escuro) */}
+                {/* 4. Itens (cores pastel alternadas, texto escuro) */}
                 <td className="px-3 py-3">
                   <div className="flex max-w-[150px] flex-wrap gap-1">
                     {(b.itens_list || []).map((it, i) => (
@@ -172,30 +160,33 @@ export const BidsTable = ({ bids, onEdit, onDelete }) => {
                     ))}
                   </div>
                 </td>
-                {/* 7. Objeto */}
+                {/* 5. Objeto */}
                 <td className="px-3 py-3">
                   <span className="block max-w-[260px] truncate font-medium text-foreground">{b.objeto}</span>
                 </td>
-                {/* 8. Observação */}
+                {/* 6. Observação */}
                 <td className="px-3 py-3">
                   <ObservacaoTags testid={`bid-obs-${b.id}`} value={b.observacoes || []} onChange={(arr) => updateObservacoes(b.id, arr)} />
                 </td>
-                {/* 9. Pregão / UASG */}
+                {/* 7. Pregão / UASG */}
                 <td className="whitespace-nowrap px-3 py-3">
                   <div className="font-mono-num text-foreground">{b.pregao || "--"}</div>
                   <div className="font-mono-num text-xs text-muted-foreground">{b.uasg || "--"}</div>
                 </td>
-                {/* 10. Status */}
+                {/* 8. Status */}
                 <td className="px-3 py-3"><StatusDropdown bid={b} /></td>
-                {/* 11. Arquivos (multi com badge + popover) */}
+                {/* 9. Arquivos (multi com badge + popover) */}
                 <td className="px-3 py-3"><FilesCell files={files} /></td>
-                {/* 12. Orçamento */}
+                {/* 10. Orçamento + Proposta (o "P" acende quando existe documento) */}
                 <td className="px-3 py-3">
-                  <button data-testid={`bid-budget-${b.id}`} onClick={() => navigate(`/orcamento/${b.id}`)} className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento">
-                    <Calculator size={18} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button data-testid={`bid-budget-${b.id}`} onClick={() => navigate(`/orcamento/${b.id}`)} className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento">
+                      <Calculator size={18} />
+                    </button>
+                    <PropostaButton bid={b} onClick={() => onProposta(b)} />
+                  </div>
                 </td>
-                {/* 13. Ações */}
+                {/* 11. Ações */}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                     <button data-testid={`bid-edit-${b.id}`} onClick={() => onEdit(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar">

@@ -38,4 +38,12 @@ export function fileUrl(fileId) {
   return `${API}/files/${fileId}?auth=${token}`;
 }
 
+// Mesma ideia do fileUrl, para qualquer rota da API carregada por <iframe>/<a>
+// (preview e download da proposta), que não enviam o header Authorization.
+export function authedUrl(path) {
+  const token = localStorage.getItem("token");
+  const sep = path.includes("?") ? "&" : "?";
+  return `${API}${path}${sep}auth=${token}`;
+}
+
 export default api;

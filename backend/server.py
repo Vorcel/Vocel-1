@@ -10,6 +10,8 @@ from db import db
 from auth import auth_router, seed_admin
 from storage import files_router, init_storage
 from routes import api as core_router
+from propostas import propostas_router
+from gdrive import gdrive_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,6 +21,8 @@ app = FastAPI(title="Sistema de Licitações")
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(core_router)
+app.include_router(propostas_router)
+app.include_router(gdrive_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,6 +102,8 @@ async def startup():
         await db.params.create_index("owner_id")
         await db.company.create_index("owner_id")
         await db.preferences.create_index("owner_id")
+        # Integração Google: uma conta por usuário (ver gdrive.py).
+        await db.integrations.create_index([("owner_id", 1), ("provider", 1)], unique=True)
     except Exception as e:
         logger.warning(f"Index creation: {e}")
     await seed_admin()

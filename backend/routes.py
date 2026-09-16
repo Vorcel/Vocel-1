@@ -251,6 +251,9 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     doc = body.model_dump()
     doc["itens_list"] = _itens_list(body.itens)
+    # `proposta_enviada` é DERIVADO do documento da proposta (ver propostas.py): o
+    # formulário de edição da licitação não envia esse dado e não pode zerá-lo.
+    doc["proposta_enviada"] = bool((existing.get("proposta") or {}).get("file_id"))
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     await _sync_execution(bid)
@@ -305,6 +308,9 @@ class PropostaInput(BaseModel):
     proposta_enviada: bool
 
 
+# LEGADO: o marcador manual de "proposta enviada" foi substituído pelo documento
+# da proposta (ver propostas.py), que passa a derivar esse campo. A rota fica no
+# lugar para não quebrar um frontend antigo ainda em cache no navegador.
 @api.patch("/bids/{bid_id}/proposta")
 async def update_proposta(bid_id: str, body: PropostaInput, current=Depends(get_current_user)):
     owner = uid(current)

@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { User, Building2, Palette, Calculator, ListChecks, Save, Trash2, Plus, Moon, Sun, Loader2, GripVertical } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Trash2, Plus, Moon, Sun, Loader2, GripVertical } from "lucide-react";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
 } from "@dnd-kit/core";
@@ -16,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FileUpload } from "@/components/FileUpload";
+import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -288,19 +290,51 @@ function ListManager({ title, type, sortable = false }) {
   );
 }
 
+const TABS = [
+  { id: "perfil", label: "Meu Perfil e Segurança", icon: User },
+  { id: "empresa", label: "Dados da Empresa", icon: Building2 },
+  { id: "aparencia", label: "Preferências", icon: Palette },
+  { id: "orcamento", label: "Padrões de Orçamento", icon: Calculator },
+  { id: "integracoes", label: "Integrações", icon: Plug },
+  { id: "listas", label: "Listas e Parâmetros", icon: ListChecks },
+];
+
+// Motivos devolvidos pelo callback do Google (ver backend/gdrive.py).
+const ERROS_GOOGLE = {
+  acesso_negado: "Você cancelou a autorização no Google.",
+  sessao_invalida: "A sessão expirou durante a autorização. Tente conectar novamente.",
+  sem_refresh_token: "O Google não devolveu a credencial de acesso contínuo. Tente conectar novamente.",
+  unauthorized: "Não foi possível validar a autorização do Google.",
+};
+
 export default function Settings() {
-  const TABS = [
-    { id: "perfil", label: "Meu Perfil e Segurança", icon: User },
-    { id: "empresa", label: "Dados da Empresa", icon: Building2 },
-    { id: "aparencia", label: "Preferências", icon: Palette },
-    { id: "orcamento", label: "Padrões de Orçamento", icon: Calculator },
-    { id: "listas", label: "Listas e Parâmetros", icon: ListChecks },
-  ];
+  const [params, setParams] = useSearchParams();
+  const { refreshGoogle } = useData();
+  // A aba pode vir pela URL (?tab=integracoes) — usado pelo atalho "Configurar
+  // Google Drive" do visualizador de propostas e pelo retorno do OAuth.
+  const [aba, setAba] = useState(() => (TABS.some((t) => t.id === params.get("tab")) ? params.get("tab") : "perfil"));
+
+  // Retorno do consentimento do Google: avisa o resultado e limpa a URL.
+  useEffect(() => {
+    const google = params.get("google");
+    if (!google) return;
+    setAba("integracoes");
+    if (google === "ok") {
+      refreshGoogle();
+      toast.success("Google Drive conectado");
+    } else {
+      toast.error(ERROS_GOOGLE[params.get("motivo")] || "Não foi possível conectar ao Google Drive.");
+    }
+    const limpo = new URLSearchParams(params);
+    ["google", "motivo", "tab"].forEach((k) => limpo.delete(k));
+    setParams(limpo, { replace: true });
+  }, [params, setParams, refreshGoogle]);
+
   return (
     <>
       <Header title="Configurações" subtitle="Painel administrativo" />
       <main className="p-6">
-        <Tabs defaultValue="perfil" className="w-full">
+        <Tabs value={aba} onValueChange={setAba} className="w-full">
           <TabsList className="mb-6 flex h-auto flex-wrap justify-start gap-1 bg-transparent p-0">
             {TABS.map((t) => (
               <TabsTrigger key={t.id} value={t.id} data-testid={`tab-${t.id}`} className="gap-2 rounded-lg border border-border data-[state=active]:border-brand data-[state=active]:bg-brand data-[state=active]:text-white">
@@ -312,6 +346,7 @@ export default function Settings() {
           <TabsContent value="empresa"><CompanyTab /></TabsContent>
           <TabsContent value="aparencia"><AppearanceTab /></TabsContent>
           <TabsContent value="orcamento"><BudgetDefaultsTab /></TabsContent>
+          <TabsContent value="integracoes"><GoogleDriveCard /></TabsContent>
           <TabsContent value="listas" className="space-y-6">
             <ListManager title="Portais de Compra" type="portais" sortable />
             <ListManager title="Modalidades" type="modalidades" />

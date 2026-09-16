@@ -11,6 +11,9 @@ export function DataProvider({ children }) {
   const [lists, setLists] = useState({ modalidades: [], portais: [], statuses: [] });
   const [prefs, setPrefs] = useState({ theme: "light", icms_padrao: 18, pis_cofins_padrao: 9.25, margem_padrao: 30 });
   const [company, setCompany] = useState({});
+  // Integração Google do usuário logado. Nunca contém tokens — só o que o
+  // backend expõe publicamente (conectado, e-mail, pasta).
+  const [googleStatus, setGoogleStatus] = useState({ configured: false, connected: false });
   const [loading, setLoading] = useState(true);
 
   const refreshBids = useCallback(async () => {
@@ -38,12 +41,23 @@ export function DataProvider({ children }) {
     setCompany(data || {});
   }, []);
 
+  // A integração pode não estar configurada no servidor — falhar aqui não pode
+  // derrubar o carregamento do resto do app.
+  const refreshGoogle = useCallback(async () => {
+    try {
+      const { data } = await api.get("/integrations/google/status");
+      setGoogleStatus(data);
+    } catch {
+      setGoogleStatus({ configured: false, connected: false });
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     setLoading(true);
-    Promise.all([refreshBids(), refreshExecutions(), refreshLists(), refreshPrefs(), refreshCompany()])
+    Promise.all([refreshBids(), refreshExecutions(), refreshLists(), refreshPrefs(), refreshCompany(), refreshGoogle()])
       .finally(() => setLoading(false));
-  }, [user, refreshBids, refreshExecutions, refreshLists, refreshPrefs, refreshCompany]);
+  }, [user, refreshBids, refreshExecutions, refreshLists, refreshPrefs, refreshCompany, refreshGoogle]);
 
   // ---- Bid operations ----
   // A execução é sincronizada pelo status no backend (Adjudicado cria; outro status
@@ -73,10 +87,34 @@ export function DataProvider({ children }) {
     setBids((prev) => prev.map((b) => (b.id === id ? { ...b, observacoes } : b)));
     await api.patch(`/bids/${id}/observacoes`, { observacoes });
   };
-  const toggleProposta = async (id, proposta_enviada) => {
-    setBids((prev) => prev.map((b) => (b.id === id ? { ...b, proposta_enviada } : b)));
-    await api.patch(`/bids/${id}/proposta`, { proposta_enviada });
+
+  // ---- Proposta (documento .docx da licitação) ----
+  // O backend devolve a licitação inteira já atualizada; trocamos o item no array
+  // para o ícone "P" acender/apagar na hora, sem F5 e sem recarregar tudo.
+  const applyBid = (bid) => {
+    setBids((prev) => prev.map((b) => (b.id === bid.id ? bid : b)));
+    return bid;
   };
+  const sendProposta = async (method, id, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const { data } = await api[method](`/bids/${id}/proposta`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return applyBid(data);
+  };
+  const uploadProposta = (id, file) => sendProposta("post", id, file);
+  const replaceProposta = (id, file) => sendProposta("put", id, file);
+  const removeProposta = async (id) => {
+    const { data } = await api.delete(`/bids/${id}/proposta`);
+    return applyBid(data);
+  };
+  // Enviar/tentar de novo/recriar no Drive — o backend usa sempre o original do R2.
+  const syncProposta = async (id) => {
+    const { data } = await api.post(`/bids/${id}/proposta/sync`);
+    return applyBid(data);
+  };
+
   const deleteBid = async (id) => {
     await api.delete(`/bids/${id}`);
     await refreshBids();
@@ -136,6 +174,24 @@ export function DataProvider({ children }) {
     }
   }, []);
 
+  // ---- Integração Google Drive ----
+  // O consentimento acontece no Google, então é uma navegação de página inteira;
+  // o backend traz o usuário de volta para /configuracoes?google=ok.
+  const connectGoogle = async () => {
+    const { data } = await api.get("/integrations/google/auth-url");
+    window.location.href = data.url;
+  };
+  const createDriveFolder = async (name) => {
+    const { data } = await api.post("/integrations/google/folder", { name });
+    setGoogleStatus(data);
+    return data;
+  };
+  const disconnectGoogle = async () => {
+    const { data } = await api.post("/integrations/google/disconnect");
+    setGoogleStatus(data);
+    return data;
+  };
+
   // ---- Summary (computed client-side for reactivity) ----
   const now = new Date();
   const inMonth = (dateStr, year, month) => {
@@ -170,9 +226,11 @@ export function DataProvider({ children }) {
   return (
     <DataContext.Provider
       value={{
-        bids, executions, lists, prefs, company, loading, summary,
-        refreshBids, refreshExecutions, refreshLists,
-        createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, toggleProposta, deleteBid,
+        bids, executions, lists, prefs, company, googleStatus, loading, summary,
+        refreshBids, refreshExecutions, refreshLists, refreshGoogle,
+        connectGoogle, createDriveFolder, disconnectGoogle,
+        createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
+        uploadProposta, replaceProposta, removeProposta, syncProposta,
         addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort,
       }}
     >
