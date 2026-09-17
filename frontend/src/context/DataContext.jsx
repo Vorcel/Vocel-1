@@ -42,13 +42,18 @@ export function DataProvider({ children }) {
   }, []);
 
   // A integração pode não estar configurada no servidor — falhar aqui não pode
-  // derrubar o carregamento do resto do app.
+  // derrubar o carregamento do resto do app. Mas falha de REDE é diferente de
+  // "não configurado": sem o flag `unreachable` um 502 momentâneo (deploy ou
+  // cold start do Render) ficaria indistinguível de credencial ausente, e o
+  // card mentiria até o próximo F5.
   const refreshGoogle = useCallback(async () => {
     try {
       const { data } = await api.get("/integrations/google/status");
-      setGoogleStatus(data);
-    } catch {
-      setGoogleStatus({ configured: false, connected: false });
+      setGoogleStatus({ ...data, unreachable: false });
+      return data;
+    } catch (e) {
+      setGoogleStatus({ configured: false, connected: false, unreachable: true, httpStatus: e.response?.status });
+      return null;
     }
   }, []);
 

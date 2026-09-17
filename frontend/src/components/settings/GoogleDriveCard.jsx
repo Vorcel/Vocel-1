@@ -40,13 +40,13 @@ const Campo = ({ label, children }) => (
 );
 
 export function GoogleDriveCard() {
-  const { googleStatus, connectGoogle, createDriveFolder, disconnectGoogle } = useData();
-  const [ocupado, setOcupado] = useState(null); // "conectar" | "pasta" | "desconectar"
+  const { googleStatus, connectGoogle, createDriveFolder, disconnectGoogle, refreshGoogle } = useData();
+  const [ocupado, setOcupado] = useState(null); // "conectar" | "pasta" | "desconectar" | "verificar"
   const [pastaAberta, setPastaAberta] = useState(false);
   const [nomePasta, setNomePasta] = useState("Propostas");
   const [confirmarDesconexao, setConfirmarDesconexao] = useState(false);
 
-  const { configured, connected, email, folder_id, folder_name, folder_link, status } = googleStatus || {};
+  const { configured, connected, email, folder_id, folder_name, folder_link, status, unreachable, httpStatus } = googleStatus || {};
   const expirado = connected && status === "expired";
 
   const rodar = async (chave, fn, sucesso) => {
@@ -64,6 +64,15 @@ export function GoogleDriveCard() {
   };
 
   const conectar = () => rodar("conectar", connectGoogle);
+  // Reconsulta o servidor sem exigir F5 (o status só era buscado ao montar o app).
+  const verificar = async () => {
+    setOcupado("verificar");
+    const dados = await refreshGoogle();
+    setOcupado(null);
+    if (!dados) toast.error("Servidor não respondeu. Tente de novo em alguns segundos.");
+    else if (!dados.configured) toast.error("O servidor respondeu, mas as credenciais do Google não estão no ambiente.");
+    else toast.success("Integração configurada no servidor");
+  };
   const criarPasta = async () => {
     const ok = await rodar("pasta", () => createDriveFolder(nomePasta), "Pasta de propostas criada no seu Drive");
     if (ok) setPastaAberta(false);
@@ -93,7 +102,9 @@ export function GoogleDriveCard() {
               </p>
             </div>
           </div>
-          {!configured ? (
+          {unreachable ? (
+            <Selo variante="alerta" texto="Não verificado" />
+          ) : !configured ? (
             <Selo variante="off" texto="Não configurado" />
           ) : expirado ? (
             <Selo variante="alerta" texto="Conexão expirada" />
@@ -105,14 +116,39 @@ export function GoogleDriveCard() {
         </div>
 
         <div className="mt-5 border-t border-border pt-5">
-          {!configured && (
-            <p className="text-sm text-muted-foreground">
-              A integração com o Google ainda não foi configurada neste servidor. Assim que as credenciais
-              forem cadastradas, o botão de conexão aparece aqui.
-            </p>
+          {/* Não conseguimos falar com o servidor: é diferente de "não configurado",
+              e some sozinho quando o backend responde (deploy/cold start do Render). */}
+          {unreachable && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Não foi possível verificar a integração com o servidor
+                {httpStatus ? ` (erro ${httpStatus})` : ""}. Isso costuma acontecer logo após um deploy ou
+                quando o servidor está reiniciando.
+              </p>
+              <Button size="sm" variant="outline" onClick={verificar} disabled={ocupado === "verificar"} data-testid="google-retry">
+                {ocupado === "verificar" ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : <RefreshCw size={15} className="mr-1.5" />}
+                Tentar novamente
+              </Button>
+            </div>
           )}
 
-          {configured && !connected && (
+          {!unreachable && !configured && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                A integração com o Google ainda não foi configurada neste servidor. É preciso cadastrar
+                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">GOOGLE_CLIENT_ID</code>,
+                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">GOOGLE_CLIENT_SECRET</code> e
+                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">GOOGLE_REDIRECT_URI</code>
+                no ambiente do servidor. Assim que estiverem lá, o botão de conexão aparece aqui.
+              </p>
+              <Button size="sm" variant="outline" onClick={verificar} disabled={ocupado === "verificar"} data-testid="google-retry">
+                {ocupado === "verificar" ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : <RefreshCw size={15} className="mr-1.5" />}
+                Verificar novamente
+              </Button>
+            </div>
+          )}
+
+          {!unreachable && configured && !connected && (
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 data-testid="google-connect"
@@ -129,7 +165,7 @@ export function GoogleDriveCard() {
             </div>
           )}
 
-          {configured && connected && (
+          {!unreachable && configured && connected && (
             <div className="space-y-5">
               {expirado && (
                 <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
