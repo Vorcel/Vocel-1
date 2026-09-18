@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX } from "lucide-react";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
 import { PropostaButton } from "@/components/bids/PropostaIcon";
-import { PortalName } from "@/components/bids/PortalName";
+import { PortalModalidade } from "@/components/bids/PortalModalidade";
 import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
@@ -147,8 +147,7 @@ export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
                 </td>
                 {/* 3. Portal / Modalidade (portal em cima com cor do parâmetro, modalidade abaixo) */}
                 <td className="px-3 py-3">
-                  <PortalName portal={b.portal} />
-                  <span className="block truncate text-xs text-muted-foreground" title={b.modalidade}>{b.modalidade}</span>
+                  <PortalModalidade portal={b.portal} modalidade={b.modalidade} />
                 </td>
                 {/* 4. Itens (cores pastel alternadas, texto escuro) */}
                 <td className="px-3 py-3">

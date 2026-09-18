@@ -5,18 +5,47 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useData } from "@/context/DataContext";
-import { colorStyles, findColor } from "@/lib/constants";
+import { colorStyles, ATESTADO_OPTIONS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__";
 
-export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, onClear }) => {
+// Chip colorido (bolinha + nome) usado por Status e Atestado — mesmo visual.
+function ColorChip({ nome, cor, selected, onClick, testid }) {
+  return (
+    <button
+      type="button" data-testid={testid} onClick={onClick}
+      style={selected ? colorStyles(cor).badgeDark : undefined}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+        selected ? "ring-1 ring-foreground/20" : "border-border bg-card text-muted-foreground hover:border-foreground/40"
+      )}
+    >
+      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: cor }} />
+      {nome}
+    </button>
+  );
+}
+
+// Painel "Filtros Avançados" — compartilhado pela Página Inicial / Todas as
+// Licitações (padrão) e pela Execução & Pós-Venda. As props `show*` ligam ou
+// desligam blocos por contexto; `statusOptions` troca a lista de Status (na
+// Execução = fases da timeline, com as cores das fases). Estado único `filters`.
+export const AdvancedFilterSidebar = ({
+  open, onOpenChange, filters, setFilter, onClear,
+  description = "Refine os resultados da sua busca de licitações",
+  statusOptions,                 // [{nome, cor}] — padrão: lists.statuses
+  showItens = true, showProposta = true, showFavoritos = true,
+  showOrgao = false, showAtestado = false,
+}) => {
   const { lists } = useData();
+  const statusList = statusOptions || lists.statuses || [];
   const statusSel = Array.isArray(filters.status) ? filters.status : [];
 
   const toggleStatus = (nome) =>
     setFilter("status", statusSel.includes(nome) ? statusSel.filter((s) => s !== nome) : [...statusSel, nome]);
   const toggleModalidade = (m) => setFilter("modalidade", filters.modalidade === m ? "" : m);
+  const toggleAtestado = (a) => setFilter("atestado", filters.atestado === a ? "" : a);
   const setData = (k, v) => setFilter("data", { ...filters.data, [k]: v });
 
   const apply = () => onOpenChange(false);
@@ -28,7 +57,7 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
         {/* Header */}
         <SheetHeader className="space-y-0 border-b border-border px-6 py-5 text-left">
           <SheetTitle className="font-heading text-lg font-semibold tracking-tight">Filtros Avançados</SheetTitle>
-          <SheetDescription className="text-sm text-muted-foreground">Refine os resultados da sua busca de licitações</SheetDescription>
+          <SheetDescription className="text-sm text-muted-foreground">{description}</SheetDescription>
         </SheetHeader>
 
         {/* Body (scrollable) */}
@@ -48,6 +77,13 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
               <Input data-testid="adv-uasg" value={filters.uasg} onChange={(e) => setFilter("uasg", e.target.value)} placeholder="Nº UASG" />
             </div>
           </div>
+
+          {showOrgao && (
+            <div className="space-y-1.5">
+              <Label>Órgão</Label>
+              <Input data-testid="adv-orgao" value={filters.orgao || ""} onChange={(e) => setFilter("orgao", e.target.value)} placeholder="Busca parcial, ex: Belo Horizonte" />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Filtrar por Data</Label>
@@ -74,10 +110,12 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>Nº dos Itens</Label>
-              <Input data-testid="adv-itens" value={filters.itens} onChange={(e) => setFilter("itens", e.target.value)} placeholder="Ex: 3" />
-            </div>
+            {showItens && (
+              <div className="space-y-1.5">
+                <Label>Nº dos Itens</Label>
+                <Input data-testid="adv-itens" value={filters.itens} onChange={(e) => setFilter("itens", e.target.value)} placeholder="Ex: 3" />
+              </div>
+            )}
           </div>
 
           {/* Modalidade — toggle buttons */}
@@ -105,41 +143,55 @@ export const AdvancedFilterSidebar = ({ open, onOpenChange, filters, setFilter, 
           <div className="space-y-2">
             <Label>Status</Label>
             <div className="flex flex-wrap gap-2">
-              {(lists.statuses || []).map((s) => {
-                const sel = statusSel.includes(s.nome);
-                return (
-                  <button
-                    key={s.nome} type="button" data-testid={`adv-status-${s.nome}`} onClick={() => toggleStatus(s.nome)}
-                    style={sel ? colorStyles(s.cor).badgeDark : undefined}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                      sel ? "ring-1 ring-foreground/20" : "border-border bg-card text-muted-foreground hover:border-foreground/40"
-                    )}
-                  >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.cor }} />
-                    {s.nome}
-                  </button>
-                );
-              })}
+              {statusList.map((s) => (
+                <ColorChip key={s.nome} nome={s.nome} cor={s.cor} selected={statusSel.includes(s.nome)}
+                  onClick={() => toggleStatus(s.nome)} testid={`adv-status-${s.nome}`} />
+              ))}
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Status da Proposta</Label>
-            <Select value={filters.proposta || "all"} onValueChange={(v) => setFilter("proposta", v)}>
-              <SelectTrigger data-testid="adv-proposta"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="sent">Apenas Enviadas (P)</SelectItem>
-                <SelectItem value="notsent">Não Enviadas</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Atestado — seleção única, mesmas cores da coluna (independente da timeline) */}
+          {showAtestado && (
+            <div className="space-y-2">
+              <Label>Atestado</Label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button" data-testid="adv-atestado-all" onClick={() => setFilter("atestado", "")}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    !filters.atestado ? "border-foreground bg-foreground text-background" : "border-border bg-card text-muted-foreground hover:border-foreground/40"
+                  )}
+                >
+                  Todos
+                </button>
+                {ATESTADO_OPTIONS.map((a) => (
+                  <ColorChip key={a.nome} nome={a.nome} cor={a.cor} selected={filters.atestado === a.nome}
+                    onClick={() => toggleAtestado(a.nome)} testid={`adv-atestado-${a.nome}`} />
+                ))}
+              </div>
+            </div>
+          )}
 
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label htmlFor="fav-only" className="cursor-pointer">Somente favoritos</Label>
-            <Switch id="fav-only" data-testid="adv-favoritos" checked={filters.favoritos} onCheckedChange={(v) => setFilter("favoritos", v)} />
-          </div>
+          {showProposta && (
+            <div className="space-y-1.5">
+              <Label>Status da Proposta</Label>
+              <Select value={filters.proposta || "all"} onValueChange={(v) => setFilter("proposta", v)}>
+                <SelectTrigger data-testid="adv-proposta"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="sent">Apenas Enviadas (P)</SelectItem>
+                  <SelectItem value="notsent">Não Enviadas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {showFavoritos && (
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <Label htmlFor="fav-only" className="cursor-pointer">Somente favoritos</Label>
+              <Switch id="fav-only" data-testid="adv-favoritos" checked={filters.favoritos} onCheckedChange={(v) => setFilter("favoritos", v)} />
+            </div>
+          )}
         </div>
 
         {/* Footer (fixo) */}

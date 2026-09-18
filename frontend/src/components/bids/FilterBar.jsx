@@ -4,7 +4,13 @@ import { Button } from "@/components/ui/button";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { cn } from "@/lib/utils";
 
-export const FilterBar = ({ filters, setFilter, onOpenAdvanced, activeAdvanced }) => {
+// Barra de filtros rápidos — compartilhada pela Página Inicial / Todas as
+// Licitações (padrão: favorito + proposta) e pela Execução & Pós-Venda
+// (`showOrgao`, sem favorito/proposta). Mesmo estado `filters` do painel avançado.
+export const FilterBar = ({
+  filters, setFilter, onOpenAdvanced, activeAdvanced,
+  showFavorite = true, showProposal = true, showOrgao = false,
+}) => {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       <div className="relative flex-1">
@@ -31,36 +37,49 @@ export const FilterBar = ({ filters, setFilter, onOpenAdvanced, activeAdvanced }
         placeholder="UASG"
         className="sm:w-32"
       />
+      {showOrgao && (
+        <Input
+          data-testid="filter-orgao"
+          value={filters.orgao || ""}
+          onChange={(e) => setFilter("orgao", e.target.value)}
+          placeholder="Órgão"
+          className="sm:w-44"
+        />
+      )}
       <DateRangePicker
         value={filters.data}
         onChange={(r) => setFilter("data", r)}
         testid="filter-data"
         className="sm:w-60"
       />
-      <button
-        type="button"
-        data-testid="filter-fav-toggle"
-        onClick={() => setFilter("favoritos", !filters.favoritos)}
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors",
-          filters.favoritos ? "border-amber-400 bg-amber-50 text-amber-500" : "border-input text-muted-foreground hover:bg-accent"
-        )}
-        title="Somente favoritos"
-      >
-        <Star size={16} className={cn(filters.favoritos && "fill-amber-400")} />
-      </button>
-      <button
-        type="button"
-        data-testid="filter-proposta-toggle"
-        onClick={() => setFilter("proposta", filters.proposta === "sent" ? "all" : "sent")}
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-sm font-bold transition-colors",
-          filters.proposta === "sent" ? "border-brand bg-brand/10 text-brand" : "border-input text-muted-foreground hover:bg-accent"
-        )}
-        title="Somente com proposta enviada"
-      >
-        P
-      </button>
+      {showFavorite && (
+        <button
+          type="button"
+          data-testid="filter-fav-toggle"
+          onClick={() => setFilter("favoritos", !filters.favoritos)}
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition-colors",
+            filters.favoritos ? "border-amber-400 bg-amber-50 text-amber-500" : "border-input text-muted-foreground hover:bg-accent"
+          )}
+          title="Somente favoritos"
+        >
+          <Star size={16} className={cn(filters.favoritos && "fill-amber-400")} />
+        </button>
+      )}
+      {showProposal && (
+        <button
+          type="button"
+          data-testid="filter-proposta-toggle"
+          onClick={() => setFilter("proposta", filters.proposta === "sent" ? "all" : "sent")}
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-sm font-bold transition-colors",
+            filters.proposta === "sent" ? "border-brand bg-brand/10 text-brand" : "border-input text-muted-foreground hover:bg-accent"
+          )}
+          title="Somente com proposta enviada"
+        >
+          P
+        </button>
+      )}
       <Button
         variant="outline"
         onClick={onOpenAdvanced}

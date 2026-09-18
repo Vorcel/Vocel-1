@@ -32,6 +32,12 @@ let webpackConfig = {
       },
     },
   },
+  // Mesmo alias "@/" para o Jest (testes em src/**/__tests__ importam via "@/lib/...").
+  jest: {
+    configure: {
+      moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

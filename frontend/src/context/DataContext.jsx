@@ -126,6 +126,22 @@ export function DataProvider({ children }) {
     await refreshExecutions();
   };
 
+  // ---- Execution operations ----
+  // Campo inline da execução (ex.: atestado): aplica otimista na lista para a
+  // tabela refletir na hora, grava no backend e troca pelo doc devolvido
+  // (já enriquecido). Em erro, recarrega para desfazer o otimismo.
+  const updateExecution = async (bidId, patch) => {
+    setExecutions((prev) => prev.map((e) => (e.bid_id === bidId ? { ...e, ...patch } : e)));
+    try {
+      const { data } = await api.put(`/executions/${bidId}`, patch);
+      setExecutions((prev) => prev.map((e) => (e.bid_id === bidId ? data : e)));
+      return data;
+    } catch (err) {
+      await refreshExecutions();
+      throw err;
+    }
+  };
+
   // ---- Lists ----
   const addListItem = async (type, nome, cor) => {
     const { data } = await api.post(`/lists/${type}`, { nome, cor });
@@ -235,6 +251,7 @@ export function DataProvider({ children }) {
         refreshBids, refreshExecutions, refreshLists, refreshGoogle,
         connectGoogle, createDriveFolder, disconnectGoogle,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
+        updateExecution,
         uploadProposta, replaceProposta, removeProposta, syncProposta,
         addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort,
       }}

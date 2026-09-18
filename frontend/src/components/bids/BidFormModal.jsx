@@ -20,12 +20,14 @@ const Req = () => <span className="text-alert"> *</span>;
 
 const empty = {
   objeto: "", modalidade: "", itens: "", portal: "",
-  data_disputa: "", hora: "", pregao: "", uasg: "",
+  data_disputa: "", hora: "", pregao: "", uasg: "", orgao: "",
   observacao: "", observacoes: [], proposta_enviada: false,
   termo_referencia: null, anexos: [], status: "Disputar", favorito: false,
 };
 
-export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onCreated }) => {
+// `withOrgao`: exibe o campo opcional "Órgão" (usado pela Execução & Pós-Venda).
+// O valor já salvo é preservado mesmo quando o campo não é exibido (vem em `editing`).
+export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onCreated, withOrgao = false }) => {
   const { createBid, updateBid } = useData();
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
@@ -194,6 +196,16 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
               {err("uasg") && <p id="err-uasg" className="text-xs text-alert">{errors.uasg}</p>}
             </div>
           </div>
+
+          {withOrgao && (
+            <div className="space-y-1.5">
+              <Label>Órgão</Label>
+              <Input data-testid="bid-orgao" value={form.orgao || ""} onChange={(e) => set("orgao", e.target.value)}
+                onBlur={() => set("orgao", (form.orgao || "").trim())}
+                placeholder="Ex: Prefeitura Municipal de Belo Horizonte" />
+              <p className="text-xs text-muted-foreground">Órgão contratante (opcional). Aparece na tabela da Execução & Pós-Venda.</p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Observações</Label>

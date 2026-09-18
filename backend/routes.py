@@ -55,13 +55,19 @@ def _normalize_list(items, kind=None):
         elif isinstance(it, dict):
             out.append({"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)})
     return out
+# 10 etapas sequenciais — espelho de frontend/src/lib/constants.js (manter em sincronia).
+# "Solicitar Atestado" deixou de ser etapa: virou o campo independente `atestado`.
 TIMELINE_STEPS = [
     "Aguardando Empenho", "Empenho Recebido", "Comprar Mercadoria",
     "Aguardando Mercadoria", "Mercadoria Recebida", "Preparar para Transporte",
-    "Emitir NF", "Em Transporte", "Entregue", "Solicitar Atestado",
-    "Pagamento Recebido",
+    "Emitir NF", "Em Transporte", "Entregue", "Pagamento Recebido",
 ]
 STEP_PENDENTE = "Pendente"
+# Etapa legada (removida da timeline) — execuções antigas paradas nela são lidas como "Entregue".
+LEGACY_ATESTADO_STEP = "Solicitar Atestado"
+# Atestado de Capacidade Técnica: controle independente da timeline, por execução.
+ATESTADO_OPTIONS = ["Não solicitado", "Solicitado", "Recebido"]
+ATESTADO_DEFAULT = ATESTADO_OPTIONS[0]
 
 
 def ser(doc: dict) -> dict:
@@ -193,6 +199,7 @@ class BidInput(BaseModel):
     hora: str = ""
     pregao: str = ""
     uasg: str = ""
+    orgao: str = ""              # órgão contratante (opcional; editado pela Execução & Pós-Venda)
     observacao: str = ""
     observacoes: List[dict] = []
     proposta_enviada: bool = False
@@ -460,6 +467,7 @@ async def _ensure_execution(bid: dict):
         "objeto": bid.get("objeto", ""),
         "portal": bid.get("portal", ""),
         "modalidade": bid.get("modalidade", ""),
+        "orgao": bid.get("orgao", ""),
         "data_cadastro": bid.get("data_disputa", now_iso()[:10]),
         "termo_referencia": bid.get("termo_referencia"),
         "valor_empenho": s.get("valor_total", 0),
@@ -472,6 +480,7 @@ async def _ensure_execution(bid: dict):
         "timeline": [{"step": i, "name": name, "status": STEP_PENDENTE, "files": []} for i, name in enumerate(TIMELINE_STEPS)],
         "resumo_contrato": "",
         "pagamento_pendente": True,
+        "atestado": ATESTADO_DEFAULT,
         "created_at": now_iso(),
     }
     await db.executions.insert_one(doc)
@@ -481,7 +490,7 @@ async def _ensure_execution(bid: dict):
 async def _sync_execution(bid: dict):
     """Mantém a página de Execução/Pós-vendas em sincronia com o status da licitação.
     - Status "Adjudicado": garante a execução correspondente (idempotente) e
-      SINCRONIZA os campos espelhados da licitação (portal/objeto/modalidade/termo).
+      SINCRONIZA os campos espelhados da licitação (portal/objeto/modalidade/órgão/termo).
       A sincronização é um $set apenas desses campos — não recria a execução nem
       toca timeline, arquivos, financeiro (agregado do orçamento), prazos ou etapa.
       Isso corrige a coluna Portal ficar defasada após editar a licitação.
@@ -502,6 +511,7 @@ async def _sync_execution(bid: dict):
                 "objeto": bid.get("objeto", ""),
                 "portal": bid.get("portal", ""),
                 "modalidade": bid.get("modalidade", ""),
+                "orgao": bid.get("orgao", ""),
                 "termo_referencia": bid.get("termo_referencia"),
             }},
         )
@@ -533,6 +543,14 @@ async def _enrich_execution(doc: dict, owner: str) -> dict:
     doc["valor_empenho"] = t["valor_total"]
     doc["valor_compra"] = t["custo_global"]
     doc["lucro_previsto"] = t["lucro_global"]
+    # Retrocompatibilidade (só na leitura, sem gravar): execuções antigas sem o campo
+    # `atestado` valem "Não solicitado"; as paradas na etapa removida "Solicitar
+    # Atestado" passam a ser lidas como "Entregue" (etapa imediatamente anterior).
+    if doc.get("atestado") not in ATESTADO_OPTIONS:
+        doc["atestado"] = ATESTADO_DEFAULT
+    if doc.get("status_atual") == LEGACY_ATESTADO_STEP:
+        doc["status_atual"] = "Entregue"
+        doc["current_step"] = TIMELINE_STEPS.index("Entregue")
     return doc
 
 
@@ -577,6 +595,7 @@ class ExecutionUpdate(BaseModel):
     valor_empenho: Optional[float] = None
     valor_compra: Optional[float] = None
     lucro_previsto: Optional[float] = None
+    atestado: Optional[str] = None   # "Não solicitado" | "Solicitado" | "Recebido"
 
 
 @api.put("/executions/{bid_id}")
@@ -586,6 +605,8 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "atestado" in updates and updates["atestado"] not in ATESTADO_OPTIONS:
+        raise HTTPException(status_code=400, detail=f"Atestado inválido. Use: {', '.join(ATESTADO_OPTIONS)}")
     # keep current_step and status_atual in sync
     if "current_step" in updates and "status_atual" not in updates:
         idx = max(0, min(updates["current_step"], len(TIMELINE_STEPS) - 1))

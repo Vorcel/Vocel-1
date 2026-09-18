@@ -36,6 +36,8 @@ export function findColor(list, nome, fallback = "#64748B") {
   return item?.cor || fallback;
 }
 
+// 10 etapas sequenciais — espelho de backend/routes.py TIMELINE_STEPS (manter em sincronia).
+// "Solicitar Atestado" deixou de ser etapa: virou o campo independente `atestado`.
 export const TIMELINE_STEPS = [
   "Aguardando Empenho",
   "Empenho Recebido",
@@ -46,6 +48,14 @@ export const TIMELINE_STEPS = [
   "Emitir NF",
   "Em Transporte",
   "Entregue",
-  "Solicitar Atestado",
   "Pagamento Recebido",
 ];
+
+// Atestado de Capacidade Técnica — controle independente da timeline, por execução.
+// Ordem = sequência lógica (usada na ordenação da coluna). Cores da paleta do Vorcel.
+export const ATESTADO_OPTIONS = [
+  { nome: "Não solicitado", cor: "#DC2626" },
+  { nome: "Solicitado", cor: "#2563EB" },
+  { nome: "Recebido", cor: "#059669" },
+];
+export const ATESTADO_DEFAULT = ATESTADO_OPTIONS[0].nome;

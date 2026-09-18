@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Truck, TrendingUp, Activity, Filter, FileText, Calculator, Clock, Paperclip,
+  Truck, TrendingUp, Activity, FileText, Calculator, Clock, Paperclip,
   Plus, ShoppingCart, Package as PackageIcon, Receipt, Banknote, ClipboardCheck,
   ClipboardList, AlertTriangle, AlertCircle, Award, Hourglass, Boxes, CircleCheck,
   Pencil, Archive, ArrowLeft, ArrowUp, ArrowDown, Minus, ChevronLeft, ChevronRight, FileX,
@@ -11,14 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileUpload } from "@/components/FileUpload";
-import { DateRangePicker } from "@/components/DateRangePicker";
+import { FilterBar } from "@/components/bids/FilterBar";
+import { AdvancedFilterSidebar } from "@/components/bids/AdvancedFilterSidebar";
 import { DatePickerInput } from "@/components/DatePickerInput";
 import { BidFormModal } from "@/components/bids/BidFormModal";
-import { PortalName } from "@/components/bids/PortalName";
+import { PortalModalidade } from "@/components/bids/PortalModalidade";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AtestadoDropdown } from "@/components/execution/AtestadoDropdown";
 import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
@@ -28,21 +29,27 @@ import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
 import { TIMELINE_STEPS } from "@/lib/constants";
 import {
-  normalizeTimeline, progressOf, doneCount, currentStage, isPaid, isPaymentPending, needsAtestado, isLate, statusForIndex,
+  normalizeTimeline, progressOf, doneCount, currentStage, isPaid, isPaymentPending, isLate, statusForIndex,
+  atestadoOf, atestadoRank, isAtestadoPending,
   ACTION_STAGES, PHASE_GROUPS, phaseOfStage, STEP_PENDING, STEP_ACTIVE, STEP_DONE,
 } from "@/lib/execution";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const ALL = "__all__";
-const EMPTY_FILTERS = { q: "", modalidade: "", portal: "", status: "", from: "", to: "" };
-const STEP_ICONS = [FileText, ClipboardCheck, ShoppingCart, Hourglass, PackageIcon, Boxes, Receipt, Truck, CircleCheck, Award, Banknote];
+// Filtros: mesmo formato/estado da Página Inicial (FilterBar + AdvancedFilterSidebar).
+// `status` = fases da timeline (multi); `atestado` = campo independente; `data` = data da disputa.
+const EMPTY_FILTERS = {
+  objeto: "", pregao: "", uasg: "", orgao: "", data: { from: "", to: "" },
+  portal: "", modalidade: "", status: [], atestado: "",
+};
+// Um ícone por etapa da timeline (10) — mesma ordem de TIMELINE_STEPS.
+const STEP_ICONS = [FileText, ClipboardCheck, ShoppingCart, Hourglass, PackageIcon, Boxes, Receipt, Truck, CircleCheck, Banknote];
 
 // Colunas da tabela de execução — `sort` = chave ordenável; `num` ordena numérico.
 const EXEC_COLS = [
   { label: "Data", sort: "data", type: "text" },
-  { label: "Modalidade" },
-  { label: "Portal", sort: "portal", type: "text" },
+  { label: "Portal / Modalidade", sort: "portal", type: "text" },
+  { label: "Órgão", sort: "orgao", type: "text" },
   { label: "Objeto" },
   { label: "Entrega", sort: "entrega", type: "num" },
   { label: "Data Entrega", sort: "data_entrega", type: "text" },
@@ -51,6 +58,7 @@ const EXEC_COLS = [
   { label: "Lucro Previsto", sort: "lucro", type: "num" },
   { label: "Status", sort: "status", type: "num" },
   { label: "Progresso", sort: "progresso", type: "num" },
+  { label: "Atestado", sort: "atestado", type: "num" },
   { label: "Ações" },
 ];
 
@@ -86,7 +94,7 @@ function periodBounds(from, to) {
   const pT = new Date(n.getFullYear(), n.getMonth(), 0);
   return { cur: [iso(cF), iso(cT)], prev: [iso(pF), iso(pT)] };
 }
-const inWindow = (e, [a, b]) => { const d = e.data_cadastro || ""; return d >= a && d <= b; };
+const inWindow = (d, [a, b]) => d >= a && d <= b;
 
 const stageColor = (stage) => {
   const g = PHASE_GROUPS.find((p) => p.key === phaseOfStage(stage));
@@ -94,7 +102,7 @@ const stageColor = (stage) => {
 };
 
 export default function Execution() {
-  const { executions, bids, refreshExecutions, changeStatus, lists } = useData();
+  const { executions, bids, refreshExecutions, changeStatus, updateExecution } = useData();
   const navigate = useNavigate();
 
   const [selectedId, setSelectedId] = useState(null); // null => Componente A (dashboard)
@@ -114,26 +122,44 @@ export default function Execution() {
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
 
   const bidsById = useMemo(() => Object.fromEntries((bids || []).map((b) => [b.id, b])), [bids]);
+  // Órgão vem da licitação vinculada (fonte de verdade); a execução guarda um espelho.
+  const orgaoOf = (e) => (bidsById[e.bid_id]?.orgao ?? e.orgao ?? "").trim();
   const nodesById = useMemo(
     () => Object.fromEntries((executions || []).map((e) => [e.bid_id, normalizeTimeline(e)])),
     [executions]
   );
 
-  // Conjunto base: filtros não-temporais (busca/modalidade/portal/status).
-  const baseSet = useMemo(() => (executions || []).filter((e) => {
-    if (filters.q && !e.objeto?.toLowerCase().includes(filters.q.toLowerCase())) return false;
-    if (filters.modalidade && e.modalidade !== filters.modalidade) return false;
-    if (filters.portal && e.portal !== filters.portal) return false;
-    if (filters.status && currentStage(nodesById[e.bid_id] || []) !== filters.status) return false;
-    return true;
-  }), [executions, filters.q, filters.modalidade, filters.portal, filters.status, nodesById]);
+  // Dados da licitação vinculada (fonte atualizada); a execução guarda espelhos.
+  const bidField = (e, k) => String(bidsById[e.bid_id]?.[k] ?? e[k] ?? "");
+  const disputaOf = (e) => bidField(e, "data_disputa") || e.data_cadastro || "";
+  const has = (v, q) => v.toLowerCase().includes(q.toLowerCase());
 
-  // Conjunto atual exibido (aplica intervalo de datas, se houver).
-  const currentSet = useMemo(() => baseSet.filter((e) => {
-    if (filters.from && (e.data_cadastro || "") < filters.from) return false;
-    if (filters.to && (e.data_cadastro || "") > filters.to) return false;
+  // Conjunto base: filtros não-temporais (mesma semântica da Página Inicial —
+  // texto parcial sem diferenciar maiúsculas; status = fases da timeline, multi).
+  const baseSet = useMemo(() => (executions || []).filter((e) => {
+    if (filters.objeto && !has(bidField(e, "objeto"), filters.objeto)) return false;
+    if (filters.pregao && !has(bidField(e, "pregao"), filters.pregao)) return false;
+    if (filters.uasg && !has(bidField(e, "uasg"), filters.uasg)) return false;
+    if (filters.orgao && !has(orgaoOf(e), filters.orgao)) return false;
+    if (filters.portal && bidField(e, "portal") !== filters.portal) return false;
+    if (filters.modalidade && bidField(e, "modalidade") !== filters.modalidade) return false;
+    if (filters.status.length && !filters.status.includes(currentStage(nodesById[e.bid_id] || []))) return false;
+    if (filters.atestado && atestadoOf(e) !== filters.atestado) return false;
     return true;
-  }), [baseSet, filters.from, filters.to]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [executions, filters.objeto, filters.pregao, filters.uasg, filters.orgao, filters.portal, filters.modalidade, filters.status, filters.atestado, nodesById, bidsById]);
+
+  // Conjunto atual exibido (aplica o período — data da disputa da licitação, como na Página Inicial).
+  const currentSet = useMemo(() => baseSet.filter((e) => {
+    const { from, to } = filters.data || {};
+    if (!from && !to) return true;
+    const d = disputaOf(e);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [baseSet, filters.data, bidsById]);
 
   // Ordenação aplicada sobre o conjunto já filtrado (respeita busca/filtros/datas).
   // Datas/textos como string (vazios ao fim); numéricas comparadas como número.
@@ -143,6 +169,7 @@ export default function Execution() {
     switch (key) {
       case "data": return e.data_cadastro || "";
       case "portal": return (bid?.portal ?? e.portal ?? "").toLowerCase();
+      case "orgao": return orgaoOf(e).toLowerCase();
       case "entrega": return Number(e.tempo_entrega_dias || 0);
       case "data_entrega": return e.data_entrega || "";
       case "empenho": return Number(e.valor_empenho || 0);
@@ -150,6 +177,7 @@ export default function Execution() {
       case "lucro": return Number(e.lucro_previsto || 0);
       case "status": return TIMELINE_STEPS.indexOf(currentStage(nodes));
       case "progresso": return progressOf(nodes);
+      case "atestado": return atestadoRank(e);
       default: return "";
     }
   };
@@ -167,9 +195,11 @@ export default function Execution() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSet, sort, nodesById, bidsById]);
 
-  const bounds = useMemo(() => periodBounds(filters.from, filters.to), [filters.from, filters.to]);
-  const curWin = useMemo(() => baseSet.filter((e) => inWindow(e, bounds.cur)), [baseSet, bounds]);
-  const prevWin = useMemo(() => baseSet.filter((e) => inWindow(e, bounds.prev)), [baseSet, bounds]);
+  const bounds = useMemo(() => periodBounds(filters.data?.from, filters.data?.to), [filters.data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const curWin = useMemo(() => baseSet.filter((e) => inWindow(disputaOf(e), bounds.cur)), [baseSet, bounds, bidsById]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const prevWin = useMemo(() => baseSet.filter((e) => inWindow(disputaOf(e), bounds.prev)), [baseSet, bounds, bidsById]);
 
   const computeKpis = useMemo(() => (set) => {
     const today = todayIso();
@@ -185,7 +215,7 @@ export default function Execution() {
       if (e.data_entrega && e.data_entrega >= today && e.data_entrega <= in10) proximas += 1;
       progSum += progressOf(nodes);
       if (ACTION_STAGES.has(currentStage(nodes))) acao += 1;
-      if (needsAtestado(nodes)) atestados += 1;
+      if (isAtestadoPending(e, nodes)) atestados += 1;
     });
     return {
       total: set.length, valor, lucro, pagamentos, proximas,
@@ -216,7 +246,9 @@ export default function Execution() {
   const selected = selectedId ? executions.find((e) => e.bid_id === selectedId) || null : null;
   const selectedNodes = selected ? nodesById[selected.bid_id] || [] : [];
 
-  const activeFilters = ["modalidade", "portal", "status", "from", "to"].filter((k) => filters[k]).length;
+  const activeAdvanced = (filters.portal ? 1 : 0) + (filters.modalidade ? 1 : 0) + filters.status.length + (filters.atestado ? 1 : 0);
+  // Opções de Status do painel = fases da timeline (10), com as cores das fases.
+  const stageOptions = useMemo(() => TIMELINE_STEPS.map((name) => ({ nome: name, cor: stageColor(name) })), []);
 
   // Ao abrir a página, recarrega as execuções para refletir alterações feitas no
   // orçamento (Empenho/Compra/Lucro são agregados do orçamento no backend).
@@ -267,6 +299,12 @@ export default function Execution() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  // Atestado: salva na hora (autosave), independente da timeline — não move etapa.
+  const updateAtestado = async (bidId, atestado) => {
+    try { await updateExecution(bidId, { atestado }); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   // Encerrar execução: muda o status da licitação original para "Encerrado".
   // A lógica existente (_sync_execution) remove a execução da página; nada é apagado.
   const confirmEncerrar = async () => {
@@ -311,25 +349,18 @@ export default function Execution() {
 
         {/* ÁREA INFERIOR: TABELA (sempre visível) */}
         <section>
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="font-heading text-lg font-semibold">Licitações Ganhas</h2>
-              <p className="text-xs text-muted-foreground">Clique numa linha para ver os detalhes e acompanhar o andamento.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button data-testid="exec-add-won" onClick={() => setAddWonOpen(true)} className="bg-brand hover:bg-brand-hover">
-                <Plus size={16} className="mr-2" /> Adicionar Licitação Ganha
-              </Button>
-              <DateRangePicker
-                value={{ from: filters.from, to: filters.to }}
-                onChange={(r) => setFilters((f) => ({ ...f, from: r.from, to: r.to }))}
-                testid="exec-quick-date"
-                className="w-48 sm:w-56"
-              />
-              <Button variant="outline" onClick={() => setFilterOpen(true)} data-testid="exec-filter-open" className="relative">
-                <Filter size={16} className="mr-2" /> Filtros
-                {activeFilters > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white">{activeFilters}</span>}
-              </Button>
+          <div className="mb-3">
+            <h2 className="font-heading text-lg font-semibold">Licitações Ganhas</h2>
+            <p className="text-xs text-muted-foreground">Clique numa linha para ver os detalhes e acompanhar o andamento.</p>
+          </div>
+          {/* Filtros rápidos — mesmo padrão da Página Inicial (sem favorito/proposta, com Órgão) */}
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
+            <Button data-testid="exec-add-won" onClick={() => setAddWonOpen(true)} className="shrink-0 bg-brand hover:bg-brand-hover">
+              <Plus size={16} className="mr-2" /> Adicionar Licitação Ganha
+            </Button>
+            <div className="flex-1">
+              <FilterBar filters={filters} setFilter={setFilter} onOpenAdvanced={() => setFilterOpen(true)}
+                activeAdvanced={activeAdvanced} showFavorite={false} showProposal={false} showOrgao />
             </div>
           </div>
 
@@ -350,7 +381,7 @@ export default function Execution() {
                 </thead>
                 <tbody>
                   {currentSet.length === 0 && (
-                    <tr><td colSpan={12} className="px-4 py-16 text-center">
+                    <tr><td colSpan={EXEC_COLS.length} className="px-4 py-16 text-center">
                       <FileX size={40} className="mx-auto mb-3 text-muted-foreground/50" />
                       <p className="text-muted-foreground">Nenhuma licitação adjudicada ainda. Mude o status de uma licitação para <strong>Adjudicado</strong>.</p>
                     </td></tr>
@@ -360,14 +391,21 @@ export default function Execution() {
                     const stage = currentStage(nodes);
                     const progress = progressOf(nodes);
                     const bid = bidsById[e.bid_id];
+                    const orgao = orgaoOf(e);
                     const docs = baseDocs(e);
                     return (
                       <tr key={e.bid_id} data-testid={`exec-row-${e.bid_id}`}
                         onClick={() => setSelectedId(e.bid_id)}
                         className={cn("cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/40", selectedId === e.bid_id && "bg-brand/5")}>
                         <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_cadastro)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{bid?.modalidade ?? e.modalidade}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><PortalName portal={bid?.portal ?? e.portal} className="max-w-[140px]" /></td>
+                        {/* Portal / Modalidade — mesmo componente da Página Inicial */}
+                        <td className="px-3 py-3"><PortalModalidade portal={bid?.portal ?? e.portal} modalidade={bid?.modalidade ?? e.modalidade} className="max-w-[160px]" /></td>
+                        {/* Órgão — truncado com nome completo no tooltip; vazio = placeholder discreto */}
+                        <td className="px-3 py-3">
+                          {orgao
+                            ? <span className="block max-w-[180px] truncate text-foreground" title={orgao} data-testid={`exec-orgao-${e.bid_id}`}>{orgao}</span>
+                            : <span className="text-muted-foreground/50" data-testid={`exec-orgao-${e.bid_id}`}>—</span>}
+                        </td>
                         <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{bid?.objeto ?? e.objeto}</span></td>
                         <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                           <button data-testid={`exec-time-${e.bid_id}`} onClick={() => setTimeModal(e)} className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs hover:bg-brand/10 hover:text-brand">
@@ -389,6 +427,10 @@ export default function Execution() {
                             </div>
                             <span className="font-mono-num shrink-0 text-xs font-semibold" style={{ color: PROGRESS_BLUE }}>{progress}%</span>
                           </div>
+                        </td>
+                        {/* Atestado — campo independente da timeline (não altera o progresso) */}
+                        <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
+                          <AtestadoDropdown execution={e} onChange={(v) => updateAtestado(e.bid_id, v)} />
                         </td>
                         <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                           <div className="flex items-center gap-0.5">
@@ -437,27 +479,16 @@ export default function Execution() {
         </section>
       </main>
 
-      {/* Filtros */}
-      <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md" data-testid="exec-filter-sidebar">
-          <SheetHeader><SheetTitle className="font-heading">Filtros</SheetTitle></SheetHeader>
-          <div className="mt-6 space-y-5">
-            <div className="space-y-1.5"><Label>Buscar objeto</Label><Input data-testid="exec-f-q" value={filters.q} onChange={(e) => setFilter("q", e.target.value)} /></div>
-            <div className="space-y-1.5">
-              <Label>Período (Data de Cadastro)</Label>
-              <DateRangePicker value={{ from: filters.from, to: filters.to }} onChange={(r) => setFilters((f) => ({ ...f, from: r.from, to: r.to }))} testid="exec-f-date" className="w-full" />
-              <p className="text-[11px] text-muted-foreground">As tendências comparam este período com o período anterior de igual duração.</p>
-            </div>
-            <FilterSelect label="Modalidade" value={filters.modalidade} onChange={(v) => setFilter("modalidade", v)} options={lists.modalidades} testid="exec-f-mod" />
-            <FilterSelect label="Portal" value={filters.portal} onChange={(v) => setFilter("portal", v)} options={lists.portais} testid="exec-f-portal" />
-            <FilterSelect label="Fase atual" value={filters.status} onChange={(v) => setFilter("status", v)} options={TIMELINE_STEPS} testid="exec-f-status" />
-          </div>
-          <SheetFooter className="mt-6 flex-row gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setFilters(EMPTY_FILTERS)}>Limpar</Button>
-            <Button className="flex-1 bg-brand hover:bg-brand-hover" onClick={() => setFilterOpen(false)}>Aplicar</Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+      {/* Filtros Avançados — mesmo painel da Página Inicial, configurado para a Execução:
+          sem Nº dos Itens / Proposta / Favoritos; com Órgão e Atestado; Status = fases da timeline. */}
+      <AdvancedFilterSidebar
+        open={filterOpen} onOpenChange={setFilterOpen}
+        filters={filters} setFilter={setFilter} onClear={() => setFilters(EMPTY_FILTERS)}
+        description="Refine os resultados das execuções e contratos ganhos"
+        statusOptions={stageOptions}
+        showItens={false} showProposta={false} showFavoritos={false}
+        showOrgao showAtestado
+      />
 
       {/* Documentos base */}
       <Dialog open={!!docsTarget} onOpenChange={(o) => !o && setDocsTarget(null)}>
@@ -495,8 +526,8 @@ export default function Execution() {
       </Dialog>
 
       <DeliveryModal execution={timeModal} onClose={() => setTimeModal(null)} onSave={updateDelivery} />
-      <BidFormModal open={!!editBid} editing={editBid} onOpenChange={(o) => !o && setEditBid(null)} />
-      <BidFormModal open={addWonOpen} onOpenChange={setAddWonOpen} wonMode onCreated={(bid) => bid?.id && setSelectedId(bid.id)} />
+      <BidFormModal open={!!editBid} editing={editBid} onOpenChange={(o) => !o && setEditBid(null)} withOrgao />
+      <BidFormModal open={addWonOpen} onOpenChange={setAddWonOpen} wonMode withOrgao onCreated={(bid) => bid?.id && setSelectedId(bid.id)} />
     </>
   );
 }
@@ -615,7 +646,7 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
         </div>
       </div>
 
-      {/* Stepper 11 etapas — fluxo sequencial. Sem overflow para os círculos
+      {/* Stepper 10 etapas — fluxo sequencial. Sem overflow para os círculos
           (ring/anel) não serem cortados; flex-1 evita scroll horizontal. */}
       <div className="flex w-full items-start pt-2">
         {nodes.map((node, idx) => {
@@ -677,24 +708,6 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
 }
 
 /* ============================ AUXILIARES ============================ */
-function FilterSelect({ label, value, onChange, options, testid }) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <Select value={value || ALL} onValueChange={(v) => onChange(v === ALL ? "" : v)}>
-        <SelectTrigger data-testid={testid}><SelectValue placeholder="Todos" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>Todos</SelectItem>
-          {(options || []).map((o) => {
-            const v = typeof o === "string" ? o : o.nome;
-            return <SelectItem key={v} value={v}>{v}</SelectItem>;
-          })}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
 function InlineUpload({ step, onUploaded }) {
   const [open, setOpen] = useState(false);
   if (!open) {
