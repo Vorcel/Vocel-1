@@ -534,12 +534,22 @@ async def _budget_totals(bid_id: str, owner: str) -> dict:
     }
 
 
-async def _enrich_execution(doc: dict, owner: str) -> dict:
+def _totals_from_summary(s: dict) -> dict:
+    s = s or {}
+    return {
+        "valor_total": float(s.get("valor_total", 0) or 0),
+        "custo_global": float(s.get("custo_global", 0) or 0),
+        "lucro_global": float(s.get("lucro_global", 0) or 0),
+    }
+
+
+async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None) -> dict:
     """Injeta os valores reais agregados do orçamento na execução (tempo real).
     - valor_compra  = soma do custo de todos os lotes
     - lucro_previsto = soma do lucro de todos os lotes
-    - valor_empenho  = override manual (edição inline), se houver; senão o valor total agregado"""
-    t = await _budget_totals(doc.get("bid_id", ""), owner)
+    - valor_empenho  = override manual (edição inline), se houver; senão o valor total agregado
+    `totals` pode vir pré-calculado (listagem em lote) para evitar uma consulta por execução."""
+    t = totals if totals is not None else await _budget_totals(doc.get("bid_id", ""), owner)
     # Empenho, Compra e Lucro Previsto seguem a MESMA base: o orçamento vinculado
     # (soma de todos os lotes). Empenho = "Valor Total" do orçamento (card azul).
     doc["valor_empenho"] = t["valor_total"]
@@ -560,7 +570,12 @@ async def _enrich_execution(doc: dict, owner: str) -> dict:
 async def list_executions(current=Depends(get_current_user)):
     owner = uid(current)
     docs = await db.executions.find({"owner_id": owner}).sort("created_at", -1).to_list(2000)
-    return [await _enrich_execution(ser(d), owner) for d in docs]
+    # Uma única consulta aos orçamentos do usuário (em vez de uma por execução).
+    bids_ids = [d.get("bid_id", "") for d in docs]
+    summaries = {}
+    async for b in db.budgets.find({"owner_id": owner, "bid_id": {"$in": bids_ids}}, {"bid_id": 1, "summary": 1}):
+        summaries[b.get("bid_id")] = b.get("summary") or {}
+    return [await _enrich_execution(ser(d), owner, _totals_from_summary(summaries.get(d.get("bid_id")))) for d in docs]
 
 
 @api.get("/executions/kpis")

@@ -26,7 +26,7 @@ import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalSc
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { usePersistentPageSize, PAGE_SIZE_OPTIONS } from "@/hooks/usePersistentPageSize";
 import { useData } from "@/context/DataContext";
-import api, { fileUrl, formatApiError } from "@/lib/api";
+import { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
 import { TIMELINE_STEPS } from "@/lib/constants";
@@ -321,14 +321,16 @@ export default function Execution() {
     const nodes = TIMELINE_STEPS.map((name, i) => ({
       step: i, name, status: statusForIndex(i, clamped), files: filesByIdx[i] || [],
     }));
+    // Otimista: a timeline muda na hora; o PUT roda em seguida e a execução é
+    // substituída pela resposta do servidor (já enriquecida). Não recarrega a lista
+    // inteira — era isso (2 idas ao backend em série) que causava o atraso em produção.
     try {
-      await api.put(`/executions/${execution.bid_id}`, {
+      await updateExecution(execution.bid_id, {
         timeline: nodes,
         current_step: Math.min(clamped, TIMELINE_STEPS.length - 1),
         status_atual: TIMELINE_STEPS[Math.min(clamped, TIMELINE_STEPS.length - 1)],
         pagamento_pendente: clamped < TIMELINE_STEPS.length,
       });
-      await refreshExecutions();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
   // Clicar numa etapa reposiciona o fluxo até ela; clicar na etapa atual conclui e avança.
@@ -346,7 +348,7 @@ export default function Execution() {
   };
 
   const updateDelivery = async (bidId, patch) => {
-    try { await api.put(`/executions/${bidId}`, patch); await refreshExecutions(); }
+    try { await updateExecution(bidId, patch); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
