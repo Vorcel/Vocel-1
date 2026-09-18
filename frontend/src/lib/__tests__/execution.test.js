@@ -20,11 +20,12 @@ const legacy11 = (current, extra = {}) => ({
   })),
 });
 
-test("timeline oficial tem exatamente 10 etapas, sem Solicitar Atestado", () => {
-  expect(TIMELINE_STEPS).toHaveLength(10);
+test("timeline oficial tem exatamente 11 etapas, com Aguardando Pagamento e sem Solicitar Atestado", () => {
+  expect(TIMELINE_STEPS).toHaveLength(11);
   expect(TIMELINE_STEPS).not.toContain("Solicitar Atestado");
   expect(TIMELINE_STEPS[8]).toBe("Entregue");
-  expect(TIMELINE_STEPS[9]).toBe("Pagamento Recebido");
+  expect(TIMELINE_STEPS[9]).toBe("Aguardando Pagamento");
+  expect(TIMELINE_STEPS[10]).toBe("Pagamento Recebido");
 });
 
 test("nenhum agregado depende da etapa removida", () => {
@@ -32,35 +33,60 @@ test("nenhum agregado depende da etapa removida", () => {
   PHASE_GROUPS.forEach((g) => expect(g.steps).not.toContain("Solicitar Atestado"));
 });
 
-test("progresso usa 10 etapas: 5 concluídas = 50%", () => {
+test("progresso usa 11 etapas: 5 concluídas = 45%", () => {
   const nodes = normalizeTimeline(legacy11(5));
-  expect(nodes).toHaveLength(10);
+  expect(nodes).toHaveLength(11);
   expect(doneCount(nodes)).toBe(5);
-  expect(progressOf(nodes)).toBe(50);
+  expect(progressOf(nodes)).toBe(45);
   expect(currentStage(nodes)).toBe("Preparar para Transporte");
 });
 
-test("legado parado em Solicitar Atestado -> fica em Entregue (80%), arquivos migram", () => {
+test("Aguardando Pagamento: penúltima, < 100%, pagamento pendente; só Pagamento Recebido = 100%", () => {
+  const at = (cur) => normalizeTimeline({ timeline: TIMELINE_STEPS.map((name, i) => ({ step: i, name, status: i < cur ? STEP_DONE : i === cur ? STEP_ACTIVE : STEP_PENDING })) });
+  const ap = at(9);
+  expect(currentStage(ap)).toBe("Aguardando Pagamento");
+  expect(progressOf(ap)).toBe(82);
+  expect(isPaymentPending(ap)).toBe(true);
+  const pr = at(10);
+  expect(currentStage(pr)).toBe("Pagamento Recebido");
+  expect(progressOf(pr)).toBe(91);
+  const done = at(11);
+  expect(progressOf(done)).toBe(100);
+  expect(isPaymentPending(done)).toBe(false);
+});
+
+test("legado de 10 etapas (sem Aguardando Pagamento): em Entregue fica em Entregue; em Pagamento Recebido fica lá; 100% continua 100%", () => {
+  const OLD10 = TIMELINE_STEPS.filter((n) => n !== "Aguardando Pagamento");
+  const at = (cur) => normalizeTimeline({ timeline: OLD10.map((name, i) => ({ step: i, name, status: i < cur ? STEP_DONE : i === cur ? STEP_ACTIVE : STEP_PENDING })) });
+  expect(currentStage(at(8))).toBe("Entregue");
+  expect(progressOf(at(8))).toBe(73);
+  expect(currentStage(at(9))).toBe("Pagamento Recebido");   // não cai para Aguardando Pagamento
+  expect(progressOf(at(9))).toBe(91);
+  expect(progressOf(at(10))).toBe(100);
+});
+
+test("legado parado em Solicitar Atestado -> fica em Entregue (73%), arquivos migram", () => {
   const file = { id: "f1", filename: "atestado.pdf" };
   const nodes = normalizeTimeline(legacy11(9, { "Solicitar Atestado": { files: [file] } }));
-  expect(nodes).toHaveLength(10);
+  expect(nodes).toHaveLength(11);
   expect(currentStage(nodes)).toBe("Entregue");
   expect(nodes[8].status).toBe(STEP_ACTIVE);
   expect(nodes[9].status).toBe(STEP_PENDING);
+  expect(nodes[10].status).toBe(STEP_PENDING);
   expect(doneCount(nodes)).toBe(8);
-  expect(progressOf(nodes)).toBe(80);
+  expect(progressOf(nodes)).toBe(73);
   expect(nodes[8].files).toEqual([file]);
 });
 
-test("legado com Solicitar Atestado concluído e pagamento em andamento -> 90%", () => {
+test("legado com Solicitar Atestado concluído e pagamento em andamento -> Pagamento Recebido, 91%", () => {
   const nodes = normalizeTimeline(legacy11(10));
   expect(currentStage(nodes)).toBe("Pagamento Recebido");
-  expect(progressOf(nodes)).toBe(90);
+  expect(progressOf(nodes)).toBe(91);
 });
 
 test("legado 100% (tudo concluído, inclusive Solicitar Atestado) continua 100%", () => {
   const nodes = normalizeTimeline(legacy11(11));
-  expect(doneCount(nodes)).toBe(10);
+  expect(doneCount(nodes)).toBe(11);
   expect(progressOf(nodes)).toBe(100);
   expect(isPaymentPending(nodes)).toBe(false);
 });
@@ -69,7 +95,7 @@ test("timeline original (10 etapas antigas, sem status por nó) continua funcion
   const OLD_10 = ["Aguardando Empenho", "Empenho Recebido", "Pedido de Compra", "Aguardando Mercadoria",
     "Mercadoria Recebida", "Faturamento / NF", "Expedição", "Em Transporte", "Entregue", "Concluído"];
   const nodes = normalizeTimeline({ current_step: 3, timeline: OLD_10.map((name, i) => ({ step: i, name })) });
-  expect(nodes).toHaveLength(10);
+  expect(nodes).toHaveLength(11);
   expect(doneCount(nodes)).toBe(3);
   expect(currentStage(nodes)).toBe("Aguardando Mercadoria");
 });

@@ -36,8 +36,11 @@ export function findColor(list, nome, fallback = "#64748B") {
   return item?.cor || fallback;
 }
 
-// 10 etapas sequenciais — espelho de backend/routes.py TIMELINE_STEPS (manter em sincronia).
+// 11 etapas sequenciais — espelho de backend/routes.py TIMELINE_STEPS (manter em sincronia).
+// FONTE ÚNICA da ordem/nomes: timeline, progresso, status da tabela, filtros e
+// ícones (STEP_ICONS por nome em Execution.jsx) derivam daqui.
 // "Solicitar Atestado" deixou de ser etapa: virou o campo independente `atestado`.
+// "Aguardando Pagamento" (entre Entregue e Pagamento Recebido) adicionada em 2026-09-18.
 export const TIMELINE_STEPS = [
   "Aguardando Empenho",
   "Empenho Recebido",
@@ -48,6 +51,7 @@ export const TIMELINE_STEPS = [
   "Emitir NF",
   "Em Transporte",
   "Entregue",
+  "Aguardando Pagamento",
   "Pagamento Recebido",
 ];
 

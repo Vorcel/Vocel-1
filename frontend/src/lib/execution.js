@@ -1,7 +1,7 @@
-// Lógica de timeline da Execução & Pós-Venda (10 etapas, status por nó).
-// Normaliza execuções antigas (10 etapas originais sem status por nó, ou 11 etapas
-// com "Solicitar Atestado") para o formato atual SEM tocar no banco — a gravação
-// só acontece quando o usuário interage.
+// Lógica de timeline da Execução & Pós-Venda (11 etapas, status por nó).
+// Normaliza execuções antigas (10 etapas originais sem status por nó, 11 com
+// "Solicitar Atestado", ou 10 sem "Aguardando Pagamento") para o formato atual
+// SEM tocar no banco — a gravação só acontece quando o usuário interage.
 import { TIMELINE_STEPS, ATESTADO_OPTIONS, ATESTADO_DEFAULT } from "@/lib/constants";
 
 export const STEP_PENDING = "Pendente";
@@ -29,7 +29,7 @@ const LEGACY_MAP = {
 // estavam nela são tratadas como "Entregue" — etapa imediatamente anterior.
 const LEGACY_ATESTADO_STEP = "Solicitar Atestado";
 
-// Retorna sempre 10 nós: [{ step, name, status, files }] na ordem oficial.
+// Retorna sempre TIMELINE_STEPS.length nós: [{ step, name, status, files }] na ordem oficial.
 export function normalizeTimeline(execution) {
   const raw = Array.isArray(execution?.timeline) ? execution.timeline : [];
   const byName = {};
@@ -67,7 +67,15 @@ export function normalizeTimeline(execution) {
     byName["Pagamento Recebido"].status = STEP_PENDING;
   }
 
-  return TIMELINE_STEPS.map((name) => byName[name]);
+  // Invariante do fluxo sequencial: tudo ANTES da etapa mais avançada está concluído.
+  // Garante que etapas inseridas depois (ex.: "Aguardando Pagamento", ausente nos
+  // registros antigos) não "puxem" a etapa atual para trás: uma execução antiga em
+  // "Pagamento Recebido" continua em "Pagamento Recebido"; uma 100% continua 100%.
+  const nodes = TIMELINE_STEPS.map((name) => byName[name]);
+  let last = -1;
+  nodes.forEach((n, i) => { if (n.status !== STEP_PENDING) last = i; });
+  for (let i = 0; i < last; i++) nodes[i].status = STEP_DONE;
+  return nodes;
 }
 
 export function doneCount(nodes) {
@@ -102,7 +110,8 @@ export function isPaid(nodes) {
 // Card "Pagamentos Pendentes": conta a execução SOMENTE quando a etapa atual está
 // entre "Empenho Recebido" (inclusive) e antes de "Pagamento Recebido".
 // Usa a posição real da etapa atual na timeline (currentStage) — não texto solto.
-// Exclui "Aguardando Empenho" (índice 0) e "Pagamento Recebido" (última, índice 9).
+// Exclui "Aguardando Empenho" (índice 0) e "Pagamento Recebido" (última). "Aguardando
+// Pagamento" (penúltima) conta como pendente.
 export function isPaymentPending(nodes) {
   const idx = TIMELINE_STEPS.indexOf(currentStage(nodes));
   return idx >= 1 && idx < TIMELINE_STEPS.length - 1;
@@ -146,8 +155,18 @@ export const PHASE_GROUPS = [
   { key: "empenho", label: "Aguardando Empenho", color: "#F59E0B", steps: ["Aguardando Empenho", "Empenho Recebido"] },
   { key: "compra", label: "Comprar produtos", color: "#EF4444", steps: ["Comprar Mercadoria", "Aguardando Mercadoria", "Mercadoria Recebida"] },
   { key: "transporte", label: "Em Transporte", color: "#3B82F6", steps: ["Preparar para Transporte", "Emitir NF", "Em Transporte"] },
-  { key: "entregue", label: "Entregues (Mês)", color: "#10B981", steps: ["Entregue", "Pagamento Recebido"] },
+  { key: "entregue", label: "Entregues (Mês)", color: "#10B981", steps: ["Entregue", "Aguardando Pagamento", "Pagamento Recebido"] },
 ];
+
+// Cor do badge de Status por etapa. Padrão = cor da fase (PHASE_GROUPS); etapas de
+// espera podem ter cor própria (âmbar, a mesma de "Aguardando Empenho").
+// As etapas da timeline não são configuráveis em Configurações (só os status da licitação).
+const STAGE_COLOR_OVERRIDES = { "Aguardando Pagamento": "#F59E0B" };
+export function stageColor(stageName) {
+  if (STAGE_COLOR_OVERRIDES[stageName]) return STAGE_COLOR_OVERRIDES[stageName];
+  const g = PHASE_GROUPS.find((p) => p.key === phaseOfStage(stageName));
+  return g ? g.color : "#0C7B93";
+}
 
 const STAGE_TO_PHASE = {};
 PHASE_GROUPS.forEach((g) => g.steps.forEach((s) => { STAGE_TO_PHASE[s] = g.key; }));

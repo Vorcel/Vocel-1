@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Truck, TrendingUp, Activity, FileText, Calculator, Clock, Paperclip,
+  Truck, TrendingUp, Activity, FileText, Calculator, Clock, Paperclip, Wallet,
   Plus, ShoppingCart, Package as PackageIcon, Receipt, Banknote, ClipboardCheck,
   ClipboardList, AlertTriangle, AlertCircle, Award, Hourglass, Boxes, CircleCheck,
-  Pencil, Archive, ArrowLeft, ArrowUp, ArrowDown, Minus, ChevronLeft, ChevronRight, FileX,
+  Pencil, Archive, ArrowLeft, ArrowUp, ArrowDown, Minus, ChevronLeft, ChevronRight, ChevronDown, FileX,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,11 @@ import { BidFormModal } from "@/components/bids/BidFormModal";
 import { PortalModalidade } from "@/components/bids/PortalModalidade";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AtestadoDropdown } from "@/components/execution/AtestadoDropdown";
+import { TimelineProgressBar } from "@/components/execution/TimelineProgressBar";
 import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
+import { usePersistentPageSize, PAGE_SIZE_OPTIONS } from "@/hooks/usePersistentPageSize";
 import { useData } from "@/context/DataContext";
 import api, { fileUrl, formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
@@ -30,7 +32,7 @@ import { addDaysByType } from "@/lib/businessDays";
 import { TIMELINE_STEPS } from "@/lib/constants";
 import {
   normalizeTimeline, progressOf, doneCount, currentStage, isPaid, isPaymentPending, isLate, statusForIndex,
-  atestadoOf, atestadoRank, isAtestadoPending,
+  atestadoOf, atestadoRank, isAtestadoPending, stageColor,
   ACTION_STAGES, PHASE_GROUPS, phaseOfStage, STEP_PENDING, STEP_ACTIVE, STEP_DONE,
 } from "@/lib/execution";
 import { toast } from "sonner";
@@ -42,8 +44,15 @@ const EMPTY_FILTERS = {
   objeto: "", pregao: "", uasg: "", orgao: "", data: { from: "", to: "" },
   portal: "", modalidade: "", status: [], atestado: "",
 };
-// Um ícone por etapa da timeline (10) — mesma ordem de TIMELINE_STEPS.
-const STEP_ICONS = [FileText, ClipboardCheck, ShoppingCart, Hourglass, PackageIcon, Boxes, Receipt, Truck, CircleCheck, Banknote];
+// Ícone por NOME de etapa (a ordem vem só de TIMELINE_STEPS — nada posicional).
+const STEP_ICONS = {
+  "Aguardando Empenho": FileText, "Empenho Recebido": ClipboardCheck, "Comprar Mercadoria": ShoppingCart,
+  "Aguardando Mercadoria": Hourglass, "Mercadoria Recebida": PackageIcon, "Preparar para Transporte": Boxes,
+  "Emitir NF": Receipt, "Em Transporte": Truck, "Entregue": CircleCheck,
+  "Aguardando Pagamento": Wallet, "Pagamento Recebido": Banknote,
+};
+// Roxo da etapa ativa (ref 5).
+const ACTIVE_PURPLE = "#7C3AED";
 
 // Colunas da tabela de execução — `sort` = chave ordenável; `num` ordena numérico.
 const EXEC_COLS = [
@@ -61,6 +70,30 @@ const EXEC_COLS = [
   { label: "Atestado", sort: "atestado", type: "num" },
   { label: "Ações" },
 ];
+
+// Grupos da tabela (organização visual): separados pelo progresso REAL (progressOf),
+// mesma regra da coluna/barra. Atestado não entra. Padrão: Em andamento aberto, Concluídas recolhido.
+const GROUPS = [
+  { key: "andamento", label: "Em andamento", defaultOpen: true, test: (p) => p < 100 },
+  { key: "concluidas", label: "Concluídas", defaultOpen: false, test: (p) => p === 100 },
+];
+const FIRST_PAGES = { andamento: 1, concluidas: 1 };
+
+// Largura visível do container de rolagem — usada para fixar (sticky) a barra do
+// grupo e o rodapé de paginação na área visível quando a tabela é mais larga.
+function useVisibleWidth(ref) {
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setW(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return w;
+}
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -96,13 +129,8 @@ function periodBounds(from, to) {
 }
 const inWindow = (d, [a, b]) => d >= a && d <= b;
 
-const stageColor = (stage) => {
-  const g = PHASE_GROUPS.find((p) => p.key === phaseOfStage(stage));
-  return g ? g.color : "#0C7B93";
-};
-
 export default function Execution() {
-  const { executions, bids, refreshExecutions, changeStatus, updateExecution } = useData();
+  const { executions, bids, refreshExecutions, changeStatus, updateExecution, prefs, saveExecutionGroup } = useData();
   const navigate = useNavigate();
 
   const [selectedId, setSelectedId] = useState(null); // null => Componente A (dashboard)
@@ -113,9 +141,11 @@ export default function Execution() {
   const [encerrarTarget, setEncerrarTarget] = useState(null); // execução a encerrar (status -> Encerrado)
   const [docsTarget, setDocsTarget] = useState(null); // anexos base (ícone documento)
   const [timeModal, setTimeModal] = useState(null);   // editar prazo de entrega
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pages, setPages] = useState(FIRST_PAGES);   // página atual de cada grupo
+  // Registros por página persistidos por usuário (backend); padrão 10.
+  const [pageSize, setPageSize] = usePersistentPageSize("executions", 10);
   const tableScrollRef = useRef(null);
+  const visibleWidth = useVisibleWidth(tableScrollRef);
   // Ordenação persistida por usuário; padrão = ordem do backend (created_at desc).
   const [sort, toggleSort] = usePersistentSort("executions", { key: null, dir: "asc" });
 
@@ -181,17 +211,26 @@ export default function Execution() {
       default: return "";
     }
   };
-  const sortedSet = useMemo(() => {
-    if (!sort.key) return currentSet;
+  const sortRows = (list) => {
+    if (!sort.key) return list;
     const col = EXEC_COLS.find((c) => c.sort === sort.key);
     const dir = sort.dir === "asc" ? 1 : -1;
-    return [...currentSet].sort((a, b) => {
+    return [...list].sort((a, b) => {
       const va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
       if (col?.type === "num") return dir * (va - vb);
       const ea = !va, eb = !vb;
       if (ea || eb) return ea && eb ? 0 : ea ? 1 : -1;
       return dir * String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" });
     });
+  };
+  // 1) separa por progresso real  2) (já filtrado)  3) ordena DENTRO de cada grupo.
+  const grouped = useMemo(() => {
+    const out = { andamento: [], concluidas: [] };
+    currentSet.forEach((e) => {
+      const p = progressOf(nodesById[e.bid_id] || []);
+      (GROUPS.find((g) => g.test(p)) || GROUPS[0]).key === "concluidas" ? out.concluidas.push(e) : out.andamento.push(e);
+    });
+    return { andamento: sortRows(out.andamento), concluidas: sortRows(out.concluidas) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSet, sort, nodesById, bidsById]);
 
@@ -247,19 +286,31 @@ export default function Execution() {
   const selectedNodes = selected ? nodesById[selected.bid_id] || [] : [];
 
   const activeAdvanced = (filters.portal ? 1 : 0) + (filters.modalidade ? 1 : 0) + filters.status.length + (filters.atestado ? 1 : 0);
-  // Opções de Status do painel = fases da timeline (10), com as cores das fases.
+  // Opções de Status do painel = etapas da timeline (TIMELINE_STEPS), com as cores das fases.
   const stageOptions = useMemo(() => TIMELINE_STEPS.map((name) => ({ nome: name, cor: stageColor(name) })), []);
 
   // Ao abrir a página, recarrega as execuções para refletir alterações feitas no
   // orçamento (Empenho/Compra/Lucro são agregados do orçamento no backend).
   useEffect(() => { refreshExecutions(); }, [refreshExecutions]);
 
-  // Paginação
-  useEffect(() => { setPage(1); }, [filters, pageSize, sort]);
-  const totalPages = Math.max(1, Math.ceil(currentSet.length / pageSize));
-  const pageRows = sortedSet.slice((page - 1) * pageSize, page * pageSize);
-  const rangeStart = currentSet.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const rangeEnd = Math.min(page * pageSize, currentSet.length);
+  // Paginação — independente por grupo, com a MESMA preferência "Por página".
+  useEffect(() => { setPages(FIRST_PAGES); }, [filters, pageSize, sort]);
+  const pageInfo = (key) => {
+    const list = grouped[key];
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(pages[key] || 1, totalPages);   // nunca aponta para página inexistente
+    return {
+      total, totalPages, page,
+      rows: list.slice((page - 1) * pageSize, page * pageSize),
+      rangeStart: total === 0 ? 0 : (page - 1) * pageSize + 1,
+      rangeEnd: Math.min(page * pageSize, total),
+      setPage: (fn) => setPages((prev) => ({ ...prev, [key]: Math.max(1, Math.min(totalPages, typeof fn === "function" ? fn(page) : fn)) })),
+    };
+  };
+  // Aberto/recolhido por grupo — preferência do usuário (backend), com padrão por grupo.
+  const isGroupOpen = (g) => prefs?.execution_groups?.[g.key] ?? g.defaultOpen;
+  const toggleGroup = (g) => saveExecutionGroup(g.key, !isGroupOpen(g));
 
   // Grava a timeline de forma SEQUENCIAL (fluxo cronológico): a partir da etapa
   // atual, anteriores=Concluído, atual=Em Andamento, posteriores=Pendente.
@@ -325,6 +376,82 @@ export default function Execution() {
     return docs;
   };
 
+  // Cabeçalho e linha da tabela — usados pelos DOIS grupos (uma única EXEC_COLS).
+  const renderHeaderRow = () => (
+    <tr className="border-b border-border bg-muted/50">
+      {EXEC_COLS.map((col) => (
+        <th key={col.label} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="inline-flex select-none items-center">
+            {col.label}
+            {col.sort && <SortArrows active={sort.key === col.sort} dir={sort.dir} onClick={() => toggleSort(col.sort)} testid={`exec-sort-${col.sort}`} />}
+          </span>
+        </th>
+      ))}
+    </tr>
+  );
+  const renderRow = (e) => {
+      const nodes = nodesById[e.bid_id] || [];
+      const stage = currentStage(nodes);
+      const progress = progressOf(nodes);
+      const bid = bidsById[e.bid_id];
+      const orgao = orgaoOf(e);
+      const docs = baseDocs(e);
+      return (
+        <tr key={e.bid_id} data-testid={`exec-row-${e.bid_id}`}
+          onClick={() => setSelectedId(e.bid_id)}
+          className={cn("cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/40", selectedId === e.bid_id && "bg-brand/5")}>
+          <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_cadastro)}</td>
+          {/* Portal / Modalidade — mesmo componente da Página Inicial */}
+          <td className="px-3 py-3"><PortalModalidade portal={bid?.portal ?? e.portal} modalidade={bid?.modalidade ?? e.modalidade} className="max-w-[160px]" /></td>
+          {/* Órgão — truncado com nome completo no tooltip; vazio = placeholder discreto */}
+          <td className="px-3 py-3">
+            {orgao
+              ? <span className="block max-w-[180px] truncate text-foreground" title={orgao} data-testid={`exec-orgao-${e.bid_id}`}>{orgao}</span>
+              : <span className="text-muted-foreground/50" data-testid={`exec-orgao-${e.bid_id}`}>—</span>}
+          </td>
+          <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{bid?.objeto ?? e.objeto}</span></td>
+          <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
+            <button data-testid={`exec-time-${e.bid_id}`} onClick={() => setTimeModal(e)} className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs hover:bg-brand/10 hover:text-brand">
+              <Clock size={13} /> {e.tempo_entrega_dias || 0}d
+            </button>
+          </td>
+          <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_entrega)}</td>
+          <td className="font-mono-num whitespace-nowrap px-3 py-3">{brl(e.valor_empenho)}</td>
+          <td className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(e.valor_compra)}</td>
+          <td className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600">{brl(e.lucro_previsto)}</td>
+          <td className="px-3 py-3">
+            <StatusBadge color={stageColor(stage)}>{stage}</StatusBadge>
+          </td>
+          {/* Progresso — mesma regra da barra principal (progressOf) */}
+          <td className="px-3 py-3">
+            <div className="flex w-28 items-center gap-2" data-testid={`exec-progress-${e.bid_id}`}>
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, backgroundColor: PROGRESS_BLUE }} />
+              </div>
+              <span className="font-mono-num shrink-0 text-xs font-semibold" style={{ color: PROGRESS_BLUE }}>{progress}%</span>
+            </div>
+          </td>
+          {/* Atestado — campo independente da timeline (não altera o progresso) */}
+          <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
+            <AtestadoDropdown execution={e} onChange={(v) => updateAtestado(e.bid_id, v)} />
+          </td>
+          <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
+            <div className="flex items-center gap-0.5">
+              <button data-testid={`exec-docs-${e.bid_id}`} onClick={() => setDocsTarget(e)}
+                className={cn("flex h-8 w-8 items-center justify-center rounded-md", docs.length ? "text-brand hover:bg-brand/10" : "text-muted-foreground/30")}
+                title="Documentos base (Termo de Referência / Edital)"><FileText size={16} /></button>
+              <button data-testid={`exec-budget-${e.bid_id}`} onClick={() => navigate(`/orcamento/${e.bid_id}`)}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento"><Calculator size={16} /></button>
+              <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
+                className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
+              <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" title="Encerrar execução"><Archive size={15} /></button>
+            </div>
+          </td>
+        </tr>
+      );
+  };
+
   return (
     <>
       <Header title="Execução & Pós-Venda" subtitle="Acompanhamento e lucratividade dos contratos ganhos" />
@@ -367,113 +494,78 @@ export default function Execution() {
           <div className="overflow-hidden rounded-xl border border-border bg-card">
             <div ref={tableScrollRef} className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    {EXEC_COLS.map((col) => (
-                      <th key={col.label} className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        <span className="inline-flex select-none items-center">
-                          {col.label}
-                          {col.sort && <SortArrows active={sort.key === col.sort} dir={sort.dir} onClick={() => toggleSort(col.sort)} testid={`exec-sort-${col.sort}`} />}
-                        </span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentSet.length === 0 && (
+                {(executions || []).length === 0 ? (
+                  <tbody>
                     <tr><td colSpan={EXEC_COLS.length} className="px-4 py-16 text-center">
                       <FileX size={40} className="mx-auto mb-3 text-muted-foreground/50" />
                       <p className="text-muted-foreground">Nenhuma licitação adjudicada ainda. Mude o status de uma licitação para <strong>Adjudicado</strong>.</p>
                     </td></tr>
-                  )}
-                  {pageRows.map((e) => {
-                    const nodes = nodesById[e.bid_id] || [];
-                    const stage = currentStage(nodes);
-                    const progress = progressOf(nodes);
-                    const bid = bidsById[e.bid_id];
-                    const orgao = orgaoOf(e);
-                    const docs = baseDocs(e);
-                    return (
-                      <tr key={e.bid_id} data-testid={`exec-row-${e.bid_id}`}
-                        onClick={() => setSelectedId(e.bid_id)}
-                        className={cn("cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/40", selectedId === e.bid_id && "bg-brand/5")}>
-                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_cadastro)}</td>
-                        {/* Portal / Modalidade — mesmo componente da Página Inicial */}
-                        <td className="px-3 py-3"><PortalModalidade portal={bid?.portal ?? e.portal} modalidade={bid?.modalidade ?? e.modalidade} className="max-w-[160px]" /></td>
-                        {/* Órgão — truncado com nome completo no tooltip; vazio = placeholder discreto */}
-                        <td className="px-3 py-3">
-                          {orgao
-                            ? <span className="block max-w-[180px] truncate text-foreground" title={orgao} data-testid={`exec-orgao-${e.bid_id}`}>{orgao}</span>
-                            : <span className="text-muted-foreground/50" data-testid={`exec-orgao-${e.bid_id}`}>—</span>}
-                        </td>
-                        <td className="px-3 py-3"><span className="block max-w-[220px] truncate font-medium text-foreground">{bid?.objeto ?? e.objeto}</span></td>
-                        <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
-                          <button data-testid={`exec-time-${e.bid_id}`} onClick={() => setTimeModal(e)} className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs hover:bg-brand/10 hover:text-brand">
-                            <Clock size={13} /> {e.tempo_entrega_dias || 0}d
-                          </button>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(e.data_entrega)}</td>
-                        <td className="font-mono-num whitespace-nowrap px-3 py-3">{brl(e.valor_empenho)}</td>
-                        <td className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(e.valor_compra)}</td>
-                        <td className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600">{brl(e.lucro_previsto)}</td>
-                        <td className="px-3 py-3">
-                          <StatusBadge color={stageColor(stage)}>{stage}</StatusBadge>
-                        </td>
-                        {/* Progresso — mesma regra da barra principal (progressOf) */}
-                        <td className="px-3 py-3">
-                          <div className="flex w-28 items-center gap-2" data-testid={`exec-progress-${e.bid_id}`}>
-                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, backgroundColor: PROGRESS_BLUE }} />
-                            </div>
-                            <span className="font-mono-num shrink-0 text-xs font-semibold" style={{ color: PROGRESS_BLUE }}>{progress}%</span>
-                          </div>
-                        </td>
-                        {/* Atestado — campo independente da timeline (não altera o progresso) */}
-                        <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
-                          <AtestadoDropdown execution={e} onChange={(v) => updateAtestado(e.bid_id, v)} />
-                        </td>
-                        <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
-                          <div className="flex items-center gap-0.5">
-                            <button data-testid={`exec-docs-${e.bid_id}`} onClick={() => setDocsTarget(e)}
-                              className={cn("flex h-8 w-8 items-center justify-center rounded-md", docs.length ? "text-brand hover:bg-brand/10" : "text-muted-foreground/30")}
-                              title="Documentos base (Termo de Referência / Edital)"><FileText size={16} /></button>
-                            <button data-testid={`exec-budget-${e.bid_id}`} onClick={() => navigate(`/orcamento/${e.bid_id}`)}
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento"><Calculator size={16} /></button>
-                            <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
-                              className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
-                            <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" title="Encerrar execução"><Archive size={15} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
+                  </tbody>
+                ) : GROUPS.map((g) => {
+                  const open = isGroupOpen(g);
+                  const info = pageInfo(g.key);
+                  const sticky = { position: "sticky", left: 0, width: visibleWidth || undefined };
+                  return (
+                    <Fragment key={g.key}>
+                      {/* Barra do grupo — linha inteira azul (mesmo azul da barra de progresso),
+                          clicável, com contador do resultado filtrado */}
+                      <tbody>
+                        <tr className="border-b border-border" style={{ backgroundColor: PROGRESS_BLUE }}>
+                          <td colSpan={EXEC_COLS.length} className="p-0">
+                            <button type="button" data-testid={`exec-group-${g.key}`} aria-expanded={open} onClick={() => toggleGroup(g)}
+                              style={sticky}
+                              className="flex items-center gap-2 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-white/10">
+                              {open ? <ChevronDown size={14} className="text-white/80" /> : <ChevronRight size={14} className="text-white/80" />}
+                              {g.label}
+                              <span className="font-semibold text-white/80" data-testid={`exec-group-count-${g.key}`}>({info.total})</span>
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                      {open && (
+                        <>
+                          {/* Cabeçalho completo repetido em cada grupo (mesma EXEC_COLS) */}
+                          <tbody>{renderHeaderRow()}</tbody>
+                          <tbody data-testid={`exec-group-rows-${g.key}`}>
+                            {info.total === 0 && (
+                              <tr><td colSpan={EXEC_COLS.length} className="px-4 py-6 text-center text-xs text-muted-foreground">Nenhuma execução neste grupo.</td></tr>
+                            )}
+                            {info.rows.map(renderRow)}
+                          </tbody>
+                          {info.total > 0 && (
+                            <tbody>
+                              <tr className="border-b border-border">
+                                <td colSpan={EXEC_COLS.length} className="p-0">
+                                  <div style={sticky} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5 text-xs text-muted-foreground">
+                                    <span>{info.rangeStart}-{info.rangeEnd} de {info.total} registros</span>
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex items-center gap-1.5">
+                                        <span>Por página</span>
+                                        <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                                          <SelectTrigger className="h-7 w-16" data-testid={`exec-page-size-${g.key}`}><SelectValue /></SelectTrigger>
+                                          <SelectContent>{PAGE_SIZE_OPTIONS.map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <button data-testid={`exec-page-prev-${g.key}`} disabled={info.page <= 1} onClick={() => info.setPage((p) => p - 1)}
+                                          className="flex h-7 w-7 items-center justify-center rounded-md border border-border disabled:opacity-40 hover:bg-accent"><ChevronLeft size={15} /></button>
+                                        <span className="px-1 font-medium text-foreground">{info.page} / {info.totalPages}</span>
+                                        <button data-testid={`exec-page-next-${g.key}`} disabled={info.page >= info.totalPages} onClick={() => info.setPage((p) => p + 1)}
+                                          className="flex h-7 w-7 items-center justify-center rounded-md border border-border disabled:opacity-40 hover:bg-accent"><ChevronRight size={15} /></button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            </tbody>
+                          )}
+                        </>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </table>
             </div>
-
-            {/* Paginação */}
-            {currentSet.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5 text-xs text-muted-foreground">
-                <span>{rangeStart}-{rangeEnd} de {currentSet.length} registros</span>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    <span>Por página</span>
-                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
-                      <SelectTrigger className="h-7 w-16" data-testid="exec-page-size"><SelectValue /></SelectTrigger>
-                      <SelectContent>{[5, 10, 25, 50].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button data-testid="exec-page-prev" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border border-border disabled:opacity-40 hover:bg-accent"><ChevronLeft size={15} /></button>
-                    <span className="px-1 font-medium text-foreground">{page} / {totalPages}</span>
-                    <button data-testid="exec-page-next" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border border-border disabled:opacity-40 hover:bg-accent"><ChevronRight size={15} /></button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
           <StickyHorizontalScrollbar targetRef={tableScrollRef} />
         </section>
@@ -646,34 +738,45 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
         </div>
       </div>
 
-      {/* Stepper 10 etapas — fluxo sequencial. Sem overflow para os círculos
-          (ring/anel) não serem cortados; flex-1 evita scroll horizontal. */}
+      {/* Stepper — TODAS as etapas de TIMELINE_STEPS numa única linha (flex-1 por
+          etapa, sem larguras fixas e sem overflow-x). Visual ref 5: concluídas verdes,
+          atual roxa (anel + glow via box-shadow, sem ocupar espaço), futuras cinza. */}
       <div className="flex w-full items-start pt-2">
         {nodes.map((node, idx) => {
-          const Icon = STEP_ICONS[idx] || CircleCheck;
+          const Icon = STEP_ICONS[node.name] || CircleCheck;
           const st = statusForIndex(idx, currentStep);   // status derivado da etapa atual
-          const prevDone = idx <= currentStep && idx > 0; // trecho à esquerda concluído
-          const thisDone = idx < currentStep;             // trecho à direita concluído
+          const isActive = st === STEP_ACTIVE;
+          // Conector: trechos concluídos verdes; o trecho que CHEGA à etapa atual é roxo
+          // (saída do nó anterior em degradê verde→roxo); o restante cinza.
+          const leftClass = idx === currentStep ? "bg-[#7C3AED]" : idx < currentStep ? "bg-emerald-500" : "bg-border";
+          const rightStyle = idx === currentStep - 1 ? { background: "linear-gradient(90deg, #10B981, #7C3AED)" } : undefined;
+          const rightClass = idx < currentStep - 1 ? "bg-emerald-500" : idx >= currentStep ? "bg-border" : "";
           return (
             <div key={idx} className="flex min-w-0 flex-1 flex-col items-center px-0.5">
               <div className="relative flex h-12 w-full items-center justify-center">
-                {idx > 0 && <span className={cn("absolute left-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", prevDone ? "bg-emerald-500" : "bg-border")} />}
-                {idx < nodes.length - 1 && <span className={cn("absolute right-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", thisDone ? "bg-emerald-500" : "bg-border")} />}
+                {idx > 0 && <span className={cn("absolute left-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", leftClass)} />}
+                {idx < nodes.length - 1 && <span className={cn("absolute right-0 top-1/2 h-0.5 w-1/2 -translate-y-1/2", rightClass)} style={rightStyle} />}
                 <button
                   data-testid={`timeline-step-${idx}`}
+                  data-state={st}
                   onClick={() => onMove(idx)}
                   title={`${node.name} — ${st} (clique para mover o fluxo até aqui)`}
                   className={cn(
                     "relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110",
                     st === STEP_DONE ? "bg-emerald-500 text-white"
-                      : st === STEP_ACTIVE ? "bg-card text-brand ring-2 ring-brand ring-offset-2 ring-offset-card"
+                      : isActive ? "text-white"
                         : "bg-muted text-muted-foreground/50"
                   )}
+                  style={isActive ? {
+                    backgroundColor: ACTIVE_PURPLE,
+                    // anel branco + contorno roxo + glow lilás — só sombra, não empurra os vizinhos
+                    boxShadow: "0 0 0 3px #fff, 0 0 0 5px #7C3AED, 0 0 0 10px rgba(124,58,237,0.12), 0 0 18px 4px rgba(124,58,237,0.35)",
+                  } : undefined}
                 ><Icon size={16} /></button>
               </div>
-              <span className={cn("mt-1.5 text-center text-[10px] font-semibold leading-tight", st === STEP_PENDING ? "text-muted-foreground" : "text-foreground")}>{node.name}</span>
+              <span className={cn("mt-1.5 max-w-full text-balance text-center text-[10px] font-semibold leading-tight", st === STEP_PENDING ? "text-muted-foreground" : "text-foreground")}>{node.name}</span>
               <span className={cn("mt-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
-                st === STEP_DONE ? "bg-emerald-100 text-emerald-700" : st === STEP_ACTIVE ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground")}>
+                st === STEP_DONE ? "bg-emerald-100 text-emerald-700" : isActive ? "bg-[#EDE9FE] text-[#6D28D9]" : "bg-muted text-muted-foreground")}>
                 {st}
               </span>
               <div className="mt-1.5 flex w-full flex-col items-center gap-1">
@@ -691,18 +794,9 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
         })}
       </div>
 
-      {/* Barra de progresso (modelo 2): larga, azul, % à direita, sem título */}
-      <div className="mt-6">
-        <div className="mb-1.5 flex justify-end">
-          <span className="text-xs text-muted-foreground">{Math.min(currentStep, nodes.length)} de {nodes.length} etapas concluídas</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
-            <div data-testid="exec-progress-bar" className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, backgroundColor: PROGRESS_BLUE }} />
-          </div>
-          <span className="font-heading text-base font-bold" style={{ color: PROGRESS_BLUE }}>{progress}%</span>
-        </div>
-      </div>
+      {/* Barra de progresso principal (ref 1): ~70% da largura, centralizada, degradê +
+          marcador. Consome o MESMO `progress` calculado acima — nada de lógica nova. */}
+      <TimelineProgressBar className="mt-6" progress={progress} done={Math.min(currentStep, nodes.length)} total={nodes.length} />
     </section>
   );
 }

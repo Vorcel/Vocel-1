@@ -55,12 +55,14 @@ def _normalize_list(items, kind=None):
         elif isinstance(it, dict):
             out.append({"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)})
     return out
-# 10 etapas sequenciais — espelho de frontend/src/lib/constants.js (manter em sincronia).
+# 11 etapas sequenciais — espelho de frontend/src/lib/constants.js (manter em sincronia).
 # "Solicitar Atestado" deixou de ser etapa: virou o campo independente `atestado`.
+# "Aguardando Pagamento" (entre Entregue e Pagamento Recebido) adicionada em 2026-09-18.
 TIMELINE_STEPS = [
     "Aguardando Empenho", "Empenho Recebido", "Comprar Mercadoria",
     "Aguardando Mercadoria", "Mercadoria Recebida", "Preparar para Transporte",
-    "Emitir NF", "Em Transporte", "Entregue", "Pagamento Recebido",
+    "Emitir NF", "Em Transporte", "Entregue", "Aguardando Pagamento",
+    "Pagamento Recebido",
 ]
 STEP_PENDENTE = "Pendente"
 # Etapa legada (removida da timeline) — execuções antigas paradas nela são lidas como "Entregue".
@@ -696,6 +698,10 @@ class PreferencesInput(BaseModel):
     margem_padrao: Optional[float] = None
     # Ordenação persistida por tabela: {"bids": {"field": ..., "dir": "asc|desc"}, "executions": {...}}
     table_sorts: Optional[dict] = None
+    # Registros por página persistidos por tabela: {"executions": 25, ...}
+    table_page_sizes: Optional[dict] = None
+    # Grupos da Execução & Pós-Venda abertos/recolhidos: {"andamento": true, "concluidas": false}
+    execution_groups: Optional[dict] = None
 
 
 @api.get("/preferences")

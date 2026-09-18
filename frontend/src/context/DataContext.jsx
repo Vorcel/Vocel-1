@@ -180,20 +180,24 @@ export function DataProvider({ children }) {
     return data;
   };
   // Ordenação persistida por tabela (por usuário, via /preferences -> owner_id).
-  // Aplica localmente na hora (sem F5) e persiste o objeto table_sorts completo.
-  const saveTableSort = useCallback(async (page, sort) => {
-    let nextSorts;
+  // Preferências por tabela (ordenação, registros por página): aplica localmente
+  // na hora (sem F5) e persiste o mapa completo do campo em /preferences.
+  const saveTableMap = useCallback(async (field, page, value) => {
+    let next;
     setPrefs((p) => {
-      nextSorts = { ...(p.table_sorts || {}), [page]: sort };
-      return { ...p, table_sorts: nextSorts };
+      next = { ...(p[field] || {}), [page]: value };
+      return { ...p, [field]: next };
     });
     try {
-      const { data } = await api.put("/preferences", { table_sorts: nextSorts });
+      const { data } = await api.put("/preferences", { [field]: next });
       setPrefs(data);
     } catch {
       /* mantém o estado otimista; próxima carga reconcilia */
     }
   }, []);
+  const saveTableSort = useCallback((page, sort) => saveTableMap("table_sorts", page, sort), [saveTableMap]);
+  const saveTablePageSize = useCallback((page, size) => saveTableMap("table_page_sizes", page, size), [saveTableMap]);
+  const saveExecutionGroup = useCallback((key, open) => saveTableMap("execution_groups", key, open), [saveTableMap]);
 
   // ---- Integração Google Drive ----
   // O consentimento acontece no Google, então é uma navegação de página inteira;
@@ -253,7 +257,7 @@ export function DataProvider({ children }) {
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
         updateExecution,
         uploadProposta, replaceProposta, removeProposta, syncProposta,
-        addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort,
+        addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort, saveTablePageSize, saveExecutionGroup,
       }}
     >
       {children}
