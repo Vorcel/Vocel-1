@@ -24,6 +24,7 @@ import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/cal
 import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { normalizeUrl, safeHref, displayUrl } from "@/lib/url";
 
 let _rid = 0;
 const newRow = (defaults) => ({
@@ -242,46 +243,57 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
   );
 }
 
-// Dynamic, editable URL cell: clickable link (view) <-> input (edit via pencil).
+// Célula de URL: link clicável (visualização) <-> input (edição via lápis).
+// Salva sozinha, no MESMO padrão do EditableCell: commit no blur / Enter / Tab
+// -> onSave -> updateRow -> autosave debounced ("Salvo na nuvem"). Sem botão de
+// confirmação. Exibe sem "https://" (só visual); o valor salvo é a URL completa.
 function SiteCell({ value, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || "");
 
-  const save = () => {
-    let v = draft.trim();
-    if (v && !/^https?:\/\//i.test(v)) v = "https://" + v;
-    onSave(v);
+  // Mantém o rascunho alinhado ao valor salvo quando não está editando.
+  useEffect(() => { if (!editing) setDraft(value || ""); }, [value, editing]);
+
+  // Commit: normaliza (acrescenta https:// se faltar) e só grava se mudou —
+  // evita marcar o orçamento como "sujo" a cada blur sem alteração.
+  const commit = () => {
+    const v = normalizeUrl(draft);
+    if (v !== (value || "")) onSave(v);
     setEditing(false);
   };
+  const cancel = () => { setDraft(value || ""); setEditing(false); };
 
   if (!value || editing) {
     return (
-      <div className="flex items-center gap-1 px-1">
-        <input
-          type="url" autoFocus={editing} value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); save(); }
-            if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
-          }}
-          placeholder="https://..." data-testid="site-input"
-          className="w-full bg-transparent py-2 text-sm outline-none focus:bg-accent/50"
-        />
-        <button type="button" onClick={save} title="Salvar link" data-testid="site-save"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40">
-          <Check size={14} />
-        </button>
-      </div>
+      <input
+        type="text" autoFocus={editing} value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        }}
+        placeholder="https://..." data-testid="site-input"
+        className="w-full bg-transparent px-2 py-2 text-sm outline-none focus:bg-accent/50"
+      />
     );
   }
 
+  const href = safeHref(value);
+  const text = displayUrl(value);
+  const linkClass = "min-w-0 flex-1 truncate text-sm font-medium";
   return (
-    <div className="group/site flex items-center gap-1 px-2">
-      <a href={value} target="_blank" rel="noopener noreferrer" data-testid="site-link" title={value}
-        style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}
-        className="truncate text-sm font-medium text-[#0000EE] hover:underline dark:text-blue-400">
-        {value}
-      </a>
+    <div className="group/site flex min-w-0 items-center gap-1 px-2">
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer" data-testid="site-link" title={value}
+          style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}
+          className={cn(linkClass, "cursor-pointer text-[#0000EE] hover:underline dark:text-blue-400")}>
+          {text}
+        </a>
+      ) : (
+        // Esquema não permitido (ex.: javascript:) — mostra como texto, nunca como link.
+        <span data-testid="site-text" title={value} className={cn(linkClass, "text-muted-foreground")}>{text}</span>
+      )}
       <button type="button" onClick={() => { setDraft(value || ""); setEditing(true); }} title="Editar link" data-testid="site-edit"
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover/site:opacity-100">
         <Pencil size={13} />
