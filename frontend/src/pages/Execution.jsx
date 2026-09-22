@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Truck, TrendingUp, Activity, FileText, Calculator, Clock, Paperclip, Wallet,
+  Truck, TrendingUp, Activity, FileText, Clock, Wallet,
   Plus, ShoppingCart, Package as PackageIcon, Receipt, Banknote, ClipboardCheck,
   ClipboardList, AlertTriangle, AlertCircle, Award, Hourglass, Boxes, CircleCheck,
   Pencil, Archive, ArrowLeft, ArrowUp, ArrowDown, Minus, ChevronLeft, ChevronRight, ChevronDown, FileX,
@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileUpload } from "@/components/FileUpload";
 import { FilterBar } from "@/components/bids/FilterBar";
 import { AdvancedFilterSidebar } from "@/components/bids/AdvancedFilterSidebar";
 import { DatePickerInput } from "@/components/DatePickerInput";
@@ -21,12 +20,14 @@ import { PortalModalidade } from "@/components/bids/PortalModalidade";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AtestadoDropdown } from "@/components/execution/AtestadoDropdown";
 import { TimelineProgressBar } from "@/components/execution/TimelineProgressBar";
+import { DocumentHub } from "@/components/execution/DocumentHub";
+import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { usePersistentPageSize, PAGE_SIZE_OPTIONS } from "@/hooks/usePersistentPageSize";
 import { useData } from "@/context/DataContext";
-import { fileUrl, formatApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
 import { TIMELINE_STEPS } from "@/lib/constants";
@@ -130,8 +131,12 @@ function periodBounds(from, to) {
 const inWindow = (d, [a, b]) => d >= a && d <= b;
 
 export default function Execution() {
-  const { executions, bids, refreshExecutions, changeStatus, updateExecution, prefs, saveExecutionGroup } = useData();
+  const { executions, bids, refreshExecutions, changeStatus, updateExecution, prefs, saveExecutionGroup,
+    addExecutionDoc, removeExecutionDoc, addBidAnexo, removeBidAnexo } = useData();
   const navigate = useNavigate();
+  // Proposta: o MESMO fluxo (upload / leitura rápida / substituição) de Todas
+  // as Licitações, sobre o mesmo documento da licitação.
+  const { abrirProposta, propostaModals } = usePropostaFlow();
 
   const [selectedId, setSelectedId] = useState(null); // null => Componente A (dashboard)
   const [filterOpen, setFilterOpen] = useState(false);
@@ -139,7 +144,6 @@ export default function Execution() {
   const [addWonOpen, setAddWonOpen] = useState(false);
   const [editBid, setEditBid] = useState(null);     // bid em edição rápida (lápis)
   const [encerrarTarget, setEncerrarTarget] = useState(null); // execução a encerrar (status -> Encerrado)
-  const [docsTarget, setDocsTarget] = useState(null); // anexos base (ícone documento)
   const [timeModal, setTimeModal] = useState(null);   // editar prazo de entrega
   const [pages, setPages] = useState(FIRST_PAGES);   // página atual de cada grupo
   // Registros por página persistidos por usuário (backend); padrão 10.
@@ -338,10 +342,8 @@ export default function Execution() {
     const cs = doneCount(nodesById[execution.bid_id] || []);
     persistStep(execution, idx === cs ? idx + 1 : idx, filesOf(execution));
   };
-  const addNodeFile = (execution, idx, file) => {
-    const cs = doneCount(nodesById[execution.bid_id] || []);
-    persistStep(execution, cs, filesOf(execution).map((arr, i) => (i === idx ? [...arr, file] : arr)));
-  };
+  // Anexos antigos (enviados no modelo por etapa): continuam exatamente onde
+  // estão — a única operação que sobrou é removê-los pela lista de "Outros".
   const removeNodeFile = (execution, idx, fileId) => {
     const cs = doneCount(nodesById[execution.bid_id] || []);
     persistStep(execution, cs, filesOf(execution).map((arr, i) => (i === idx ? arr.filter((f) => f.id !== fileId) : arr)));
@@ -370,14 +372,6 @@ export default function Execution() {
     setEncerrarTarget(null);
   };
 
-  const baseDocs = (e) => {
-    const bid = bidsById[e.bid_id];
-    const docs = [];
-    if (bid?.termo_referencia) docs.push({ ...bid.termo_referencia, tipo: "Termo de Referência" });
-    (bid?.anexos || []).forEach((a) => docs.push({ ...a, tipo: "Anexo / Edital" }));
-    return docs;
-  };
-
   // Cabeçalho e linha da tabela — usados pelos DOIS grupos (uma única EXEC_COLS).
   const renderHeaderRow = () => (
     <tr className="border-b border-border bg-muted/50">
@@ -397,7 +391,6 @@ export default function Execution() {
       const progress = progressOf(nodes);
       const bid = bidsById[e.bid_id];
       const orgao = orgaoOf(e);
-      const docs = baseDocs(e);
       return (
         <tr key={e.bid_id} data-testid={`exec-row-${e.bid_id}`}
           onClick={() => setSelectedId(e.bid_id)}
@@ -439,11 +432,6 @@ export default function Execution() {
           </td>
           <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
             <div className="flex items-center gap-0.5">
-              <button data-testid={`exec-docs-${e.bid_id}`} onClick={() => setDocsTarget(e)}
-                className={cn("flex h-8 w-8 items-center justify-center rounded-md", docs.length ? "text-brand hover:bg-brand/10" : "text-muted-foreground/30")}
-                title="Documentos base (Termo de Referência / Edital)"><FileText size={16} /></button>
-              <button data-testid={`exec-budget-${e.bid_id}`} onClick={() => navigate(`/orcamento/${e.bid_id}`)}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento"><Calculator size={16} /></button>
               <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
                 className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
               <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
@@ -466,8 +454,13 @@ export default function Execution() {
             nodes={selectedNodes}
             onBack={() => setSelectedId(null)}
             onMove={(idx) => moveTo(selected, idx)}
-            onAddFile={(idx, file) => addNodeFile(selected, idx, file)}
-            onRemoveFile={(idx, fileId) => removeNodeFile(selected, idx, fileId)}
+            // Hub de documentos — cada porta usa a fonte de verdade já existente.
+            onUploadDoc={(categoria, file) => addExecutionDoc(selected.bid_id, categoria, file)}
+            onRemoveDoc={(categoria, fileId) => removeExecutionDoc(selected.bid_id, categoria, fileId)}
+            onAddEdital={(file) => addBidAnexo(selected.bid_id, file)}
+            onRemoveEdital={(fileId) => removeBidAnexo(selected.bid_id, fileId)}
+            onRemoveLegacyFile={(idx, fileId) => removeNodeFile(selected, idx, fileId)}
+            onProposta={abrirProposta}
           />
         ) : (
           <Dashboard
@@ -584,25 +577,6 @@ export default function Execution() {
         showOrgao showAtestado
       />
 
-      {/* Documentos base */}
-      <Dialog open={!!docsTarget} onOpenChange={(o) => !o && setDocsTarget(null)}>
-        <DialogContent data-testid="exec-docs-modal">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Documentos da Licitação</DialogTitle>
-            <DialogDescription>Anexos cadastrados na abertura (Termo de Referência e Edital).</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            {docsTarget && baseDocs(docsTarget).length === 0 && <p className="text-sm text-muted-foreground">Nenhum documento base anexado.</p>}
-            {docsTarget && baseDocs(docsTarget).map((d, i) => (
-              <a key={d.id || i} href={fileUrl(d.id)} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg border border-border p-3 hover:bg-accent">
-                <FileText size={18} className="shrink-0 text-brand" />
-                <div className="min-w-0"><p className="truncate text-sm font-medium">{d.filename}</p><p className="truncate text-xs text-muted-foreground">{d.tipo}</p></div>
-              </a>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* Encerrar execução com confirmação (não exclui nada) */}
       <Dialog open={!!encerrarTarget} onOpenChange={(o) => !o && setEncerrarTarget(null)}>
         <DialogContent data-testid="exec-encerrar-modal">
@@ -622,6 +596,7 @@ export default function Execution() {
       <DeliveryModal execution={timeModal} onClose={() => setTimeModal(null)} onSave={updateDelivery} />
       <BidFormModal open={!!editBid} editing={editBid} onOpenChange={(o) => !o && setEditBid(null)} withOrgao />
       <BidFormModal open={addWonOpen} onOpenChange={setAddWonOpen} wonMode withOrgao onCreated={(bid) => bid?.id && setSelectedId(bid.id)} />
+      {propostaModals}
     </>
   );
 }
@@ -710,7 +685,7 @@ function KpiCard({ icon: Icon, label, value, accent, trend, invert, sub, key: _k
 
 /* ============================ COMPONENTE B ============================ */
 const PROGRESS_BLUE = "#2563EB";
-function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemoveFile }) {
+function DetailPanel({ execution, bid, nodes, onBack, onMove, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
   // Fluxo cronológico: uma única referência (etapa atual) deriva todos os status.
   const currentStep = doneCount(nodes);                 // nº de etapas concluídas
   const stage = currentStage(nodes);
@@ -781,20 +756,23 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
                 st === STEP_DONE ? "bg-emerald-100 text-emerald-700" : isActive ? "bg-[#EDE9FE] text-[#6D28D9]" : "bg-muted text-muted-foreground")}>
                 {st}
               </span>
-              <div className="mt-1.5 flex w-full flex-col items-center gap-1">
-                {(node.files || []).map((f) => (
-                  <span key={f.id} className="flex w-full max-w-full items-center gap-1 rounded-md bg-accent px-1 py-0.5 text-[9px]">
-                    <Paperclip size={9} className="shrink-0 text-brand" />
-                    <a href={fileUrl(f.id)} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:underline">{f.filename}</a>
-                    <button onClick={() => onRemoveFile(idx, f.id)} className="shrink-0 text-muted-foreground hover:text-alert">×</button>
-                  </span>
-                ))}
-                <InlineUpload step={idx} onUploaded={(file) => onAddFile(idx, file)} />
-              </div>
             </div>
           );
         })}
       </div>
+
+      {/* Hub central de documentos (ref 2) — entre a timeline e a barra. Os
+          documentos deixam de ser vinculados a etapas e passam a ser por TIPO. */}
+      <DocumentHub
+        execution={execution}
+        bid={bid}
+        onUploadDoc={onUploadDoc}
+        onRemoveDoc={onRemoveDoc}
+        onAddEdital={onAddEdital}
+        onRemoveEdital={onRemoveEdital}
+        onRemoveLegacyFile={onRemoveLegacyFile}
+        onProposta={onProposta}
+      />
 
       {/* Barra de progresso principal (ref 1): ~70% da largura, centralizada, degradê +
           marcador. Consome o MESMO `progress` calculado acima — nada de lógica nova. */}
@@ -804,17 +782,6 @@ function DetailPanel({ execution, bid, nodes, onBack, onMove, onAddFile, onRemov
 }
 
 /* ============================ AUXILIARES ============================ */
-function InlineUpload({ step, onUploaded }) {
-  const [open, setOpen] = useState(false);
-  if (!open) {
-    return <button data-testid={`timeline-add-${step}`} onClick={() => setOpen(true)} className="text-[10px] font-medium text-brand hover:underline">+ Adicionar arquivo</button>;
-  }
-  return (
-    <FileUpload testid={`timeline-upload-${step}`} accept=".pdf,image/*,.docx,.xlsx" value={null} compact
-      onUploaded={(f) => { onUploaded(f); setOpen(false); }} />
-  );
-}
-
 function DeliveryModal({ execution, onClose, onSave }) {
   const [dias, setDias] = useState(30);
   const [tipo, setTipo] = useState("corridos");

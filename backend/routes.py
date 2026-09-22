@@ -399,6 +399,50 @@ async def update_proposta(bid_id: str, body: PropostaInput, current=Depends(get_
     return ser(bid)
 
 
+class BidAnexoInput(BaseModel):
+    file: dict   # {id, filename, url} — já enviado por POST /api/upload (R2)
+
+
+# Anexos da licitação (Edital / documentos): MESMA fonte de verdade do formulário
+# da licitação (`bid.anexos`) e da coluna Arquivos. Estas rotas só acrescentam ou
+# retiram um item do array — nunca tocam `termo_referencia` nem os demais campos,
+# para o hub de documentos da Execução não precisar reenviar a licitação inteira.
+@api.post("/bids/{bid_id}/anexos")
+async def add_bid_anexo(bid_id: str, body: BidAnexoInput, current=Depends(get_current_user)):
+    owner = uid(current)
+    bid = await _owned_bid(bid_id, owner)
+    if not bid:
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    # O Edital É o Termo de Referência da licitação: se a licitação ainda não tem
+    # um, o primeiro arquivo enviado pelo hub preenche esse campo (é o mesmo que
+    # aparece no formulário da licitação). Os seguintes entram como anexos.
+    if not bid.get("termo_referencia"):
+        updates = {"termo_referencia": body.file}
+    else:
+        updates = {"anexos": list(bid.get("anexos") or []) + [body.file]}
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": updates})
+    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    return ser(bid)
+
+
+@api.delete("/bids/{bid_id}/anexos/{file_id}")
+async def remove_bid_anexo(bid_id: str, file_id: str, current=Depends(get_current_user)):
+    """Desvincula um anexo da licitação. O objeto no R2 e o registro em `files`
+    permanecem intactos (mesma regra das demais telas)."""
+    owner = uid(current)
+    bid = await _owned_bid(bid_id, owner)
+    if not bid:
+        raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    updates = {"anexos": [a for a in (bid.get("anexos") or []) if a.get("id") != file_id]}
+    # O Termo de Referência também pode ser desvinculado por aqui (é o mesmo campo
+    # do formulário da licitação, que continua sendo a tela para trocá-lo).
+    if (bid.get("termo_referencia") or {}).get("id") == file_id:
+        updates["termo_referencia"] = None
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": updates})
+    bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    return ser(bid)
+
+
 @api.delete("/bids/{bid_id}")
 async def delete_bid(bid_id: str, current=Depends(get_current_user)):
     owner = uid(current)
@@ -736,6 +780,54 @@ async def remove_timeline_file(bid_id: str, step: int, file_id: str, current=Dep
     await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": {"timeline": timeline}})
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return ser(doc)
+
+
+# ---- Documentos da execução (hub central: Nota de Empenho / Nota Fiscal / Outros) ----
+# Edital e Proposta NÃO entram aqui: continuam vindo da licitação (`anexos` /
+# `termo_referencia` e `proposta`), fonte única já existente.
+DOC_CATEGORIES = ("nota_empenho", "nota_fiscal", "outros")
+
+
+class ExecutionDocInput(BaseModel):
+    file: dict   # {id, filename, url} — já enviado por POST /api/upload (R2)
+
+
+def _check_categoria(categoria: str) -> str:
+    if categoria not in DOC_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Categoria inválida. Use: {', '.join(DOC_CATEGORIES)}")
+    return categoria
+
+
+@api.post("/executions/{bid_id}/documentos/{categoria}")
+async def add_execution_doc(bid_id: str, categoria: str, body: ExecutionDocInput, current=Depends(get_current_user)):
+    _check_categoria(categoria)
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+    documentos = dict(doc.get("documentos") or {})
+    arr = list(documentos.get(categoria) or [])
+    arr.append({**body.file, "uploaded_at": now_iso()})
+    documentos[categoria] = arr
+    await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": {"documentos": documentos}})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+    return await _enrich_execution(ser(doc), owner)
+
+
+@api.delete("/executions/{bid_id}/documentos/{categoria}/{file_id}")
+async def remove_execution_doc(bid_id: str, categoria: str, file_id: str, current=Depends(get_current_user)):
+    """Desvincula o documento da categoria. Como nas demais telas, o objeto no R2
+    e o registro em `files` continuam existindo."""
+    _check_categoria(categoria)
+    owner = uid(current)
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+    documentos = dict(doc.get("documentos") or {})
+    documentos[categoria] = [f for f in (documentos.get(categoria) or []) if f.get("id") != file_id]
+    await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": {"documentos": documentos}})
+    doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+    return await _enrich_execution(ser(doc), owner)
 
 
 # =================== COMPANY & PREFERENCES (Tela 3) ===================

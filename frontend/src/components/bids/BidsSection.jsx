@@ -5,8 +5,7 @@ import { FilterBar } from "@/components/bids/FilterBar";
 import { AdvancedFilterSidebar } from "@/components/bids/AdvancedFilterSidebar";
 import { BidsTable } from "@/components/bids/BidsTable";
 import { BidFormModal } from "@/components/bids/BidFormModal";
-import { PropostaUploadModal } from "@/components/bids/PropostaUploadModal";
-import { PropostaViewerModal } from "@/components/bids/PropostaViewerModal";
+import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { hasProposta } from "@/components/bids/PropostaIcon";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useData } from "@/context/DataContext";
@@ -25,10 +24,9 @@ export const BidsSection = () => {
   const [editing, setEditing] = useState(null);
   const [hiddenIds, setHiddenIds] = useState([]);
   const [pendingDelete, setPendingDelete] = useState(null); // licitação aguardando confirmação
-  // Proposta: `propostaBid` é o id da licitação em foco (o objeto vem sempre do
-  // `bids` do contexto, para o modal refletir a atualização sem F5).
-  const [propostaBidId, setPropostaBidId] = useState(null);
-  const [propostaModo, setPropostaModo] = useState(null); // "upload" | "viewer" | "substituir"
+  // Proposta: fluxo compartilhado (upload / leitura / substituição) — o mesmo
+  // usado pelo hub de documentos da Execução & Pós-Venda.
+  const { abrirProposta, propostaModals } = usePropostaFlow();
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
   const clearFilters = () => setFilters(EMPTY_FILTERS);
@@ -73,14 +71,6 @@ export const BidsSection = () => {
   const openNew = () => { setEditing(null); setModalOpen(true); };
   const openEdit = (bid) => { setEditing(bid); setModalOpen(true); };
 
-  // Clique no "P": sem proposta abre o upload; com proposta vai direto para a leitura.
-  const propostaBid = bids.find((b) => b.id === propostaBidId) || null;
-  const openProposta = (bid) => {
-    setPropostaBidId(bid.id);
-    setPropostaModo(hasProposta(bid) ? "viewer" : "upload");
-  };
-  const fecharProposta = (aberto) => { if (!aberto) setPropostaModo(null); };
-
   // Exclusão real (soft-delete otimista + undo de 7s). Chamada só após a
   // confirmação no modal — a lógica interna permanece inalterada.
   const performDelete = (bid) => {
@@ -117,25 +107,12 @@ export const BidsSection = () => {
         </div>
       </div>
 
-      <BidsTable bids={filtered} onEdit={openEdit} onDelete={setPendingDelete} onProposta={openProposta} />
+      <BidsTable bids={filtered} onEdit={openEdit} onDelete={setPendingDelete} onProposta={abrirProposta} />
 
       <AdvancedFilterSidebar open={advOpen} onOpenChange={setAdvOpen} filters={filters} setFilter={setFilter} onClear={clearFilters} />
       <BidFormModal open={modalOpen} onOpenChange={setModalOpen} editing={editing} />
 
-      <PropostaUploadModal
-        open={propostaModo === "upload" || propostaModo === "substituir"}
-        onOpenChange={fecharProposta}
-        bid={propostaBid}
-        modo={propostaModo === "substituir" ? "substituir" : "novo"}
-        // Salvou: já abre a leitura da proposta recém-enviada.
-        onSaved={() => setPropostaModo("viewer")}
-      />
-      <PropostaViewerModal
-        open={propostaModo === "viewer"}
-        onOpenChange={fecharProposta}
-        bid={propostaBid}
-        onSubstituir={() => setPropostaModo("substituir")}
-      />
+      {propostaModals}
 
       <ConfirmDialog
         open={!!pendingDelete}

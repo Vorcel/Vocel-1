@@ -120,6 +120,19 @@ export function DataProvider({ children }) {
     return applyBid(data);
   };
 
+  // ---- Anexos da licitação (Edital) ----
+  // Mesma fonte de verdade do formulário da licitação (`anexos`): o backend
+  // devolve a licitação inteira e trocamos o item no array, então o hub de
+  // documentos e a coluna Arquivos acendem na hora, sem F5.
+  const addBidAnexo = async (id, file) => {
+    const { data } = await api.post(`/bids/${id}/anexos`, { file });
+    return applyBid(data);
+  };
+  const removeBidAnexo = async (id, fileId) => {
+    const { data } = await api.delete(`/bids/${id}/anexos/${fileId}`);
+    return applyBid(data);
+  };
+
   const deleteBid = async (id) => {
     await api.delete(`/bids/${id}`);
     await refreshBids();
@@ -140,6 +153,22 @@ export function DataProvider({ children }) {
       await refreshExecutions();
       throw err;
     }
+  };
+
+  // ---- Documentos da execução (Nota de Empenho / Nota Fiscal / Outros) ----
+  // O backend devolve a execução já enriquecida; trocamos o item na lista para o
+  // ícone/badge do hub refletir na hora (mesma estratégia do updateExecution).
+  const applyExecution = (exec) => {
+    setExecutions((prev) => prev.map((e) => (e.bid_id === exec.bid_id ? exec : e)));
+    return exec;
+  };
+  const addExecutionDoc = async (bidId, categoria, file) => {
+    const { data } = await api.post(`/executions/${bidId}/documentos/${categoria}`, { file });
+    return applyExecution(data);
+  };
+  const removeExecutionDoc = async (bidId, categoria, fileId) => {
+    const { data } = await api.delete(`/executions/${bidId}/documentos/${categoria}/${fileId}`);
+    return applyExecution(data);
   };
 
   // ---- Lists ----
@@ -264,7 +293,8 @@ export function DataProvider({ children }) {
         refreshBids, refreshExecutions, refreshLists, refreshGoogle,
         connectGoogle, createDriveFolder, disconnectGoogle,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
-        updateExecution,
+        updateExecution, addExecutionDoc, removeExecutionDoc,
+        addBidAnexo, removeBidAnexo,
         uploadProposta, replaceProposta, removeProposta, syncProposta,
         addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort, saveTablePageSize, saveExecutionGroup,
       }}
