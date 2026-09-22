@@ -3,6 +3,7 @@
 Todos os registros são isolados por usuário via `owner_id` (multi-tenant no mesmo banco).
 Cada consulta/edição filtra pelo usuário autenticado; acesso a registros de outro
 usuário retorna 404 (não revela existência)."""
+import unicodedata
 from datetime import datetime, timezone
 from typing import Optional, List, Any
 
@@ -44,16 +45,65 @@ DEFAULT_STATUSES = [
 ]
 _DEFAULT_STATUS_COLORS = {s["nome"]: s["cor"] for s in DEFAULT_STATUSES}
 
+# ---- Regras compartilhadas com a camada analítica (analytics.py) ----
+ADJUDICATED_STATUS = "Adjudicado"
+# Participação é por EXCEÇÃO: todo status conta como participação, menos estes.
+# Status criados depois passam a contar automaticamente (sem lista de válidos).
+NON_PARTICIPATION_STATUSES = {"adiado", "cancelado", "perdido"}
+
+# Categoria Analítica de cada status (configurável em Configurações > Listas).
+ANALYTIC_CATEGORIES = [
+    "Preparação", "Em Julgamento", "Vencidas", "Desclassificado",
+    "Disputadas", "Fracassadas", "Outros",
+]
+DEFAULT_ANALYTIC_CATEGORY = "Outros"
+# Mapeamento inicial (backfill e fallback de leitura), por nome normalizado.
+# Depois do backfill a classificação vive no próprio registro do status, então
+# renomear o status em Configurações NÃO muda a categoria.
+_STATUS_CATEGORY_SEED = {
+    "orcando": "Preparação", "cadastrar": "Preparação", "cadastro": "Preparação",
+    "ganho": "Em Julgamento", "disputar": "Em Julgamento", "julgamento": "Em Julgamento",
+    "adjudicado": "Vencidas",
+    "desclassificado": "Desclassificado",
+    "encerrado": "Disputadas",
+    "adiado": "Fracassadas", "cancelado": "Fracassadas", "perdido": "Fracassadas",
+}
+
+
+def _slug(nome: str) -> str:
+    base = unicodedata.normalize("NFKD", (nome or "").strip().lower())
+    return "".join(c for c in base if not unicodedata.combining(c))
+
+
+def seed_category_for(nome: str) -> str:
+    """Categoria Analítica inicial de um status pelo nome; desconhecido -> Outros."""
+    return _STATUS_CATEGORY_SEED.get(_slug(nome), DEFAULT_ANALYTIC_CATEGORY)
+
 
 def _normalize_list(items, kind=None):
-    """Migrate legacy string lists to [{nome, cor}] objects."""
+    """Migrate legacy string lists to [{nome, cor}] objects.
+    Para `statuses`, carrega também a `categoria` (Categoria Analítica): registros
+    antigos recebem a categoria semente do nome — leitura retrocompatível, sem
+    depender da migração ter rodado."""
     out = []
     for it in items or []:
         if isinstance(it, str):
             cor = _DEFAULT_STATUS_COLORS.get(it, DEFAULT_COLOR) if kind == "statuses" else DEFAULT_COLOR
-            out.append({"nome": it, "cor": cor})
+            item = {"nome": it, "cor": cor}
         elif isinstance(it, dict):
-            out.append({"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)})
+            item = {"nome": it.get("nome", ""), "cor": it.get("cor", DEFAULT_COLOR)}
+        else:
+            continue
+        # `ativo` vale para qualquer lista: item inativo continua existindo
+        # (histórico preservado), só deixa de ser oferecido em novas seleções.
+        item["ativo"] = bool(it.get("ativo", True)) if isinstance(it, dict) else True
+        if kind == "statuses":
+            cat = it.get("categoria") if isinstance(it, dict) else None
+            item["categoria"] = cat if cat in ANALYTIC_CATEGORIES else seed_category_for(item["nome"])
+            # `grafico`: participa da distribuição por Categoria Analítica na
+            # página Análises. Vale True em registros antigos.
+            item["grafico"] = bool(it.get("grafico", True)) if isinstance(it, dict) else True
+        out.append(item)
     return out
 # 11 etapas sequenciais — espelho de frontend/src/lib/constants.js (manter em sincronia).
 # "Solicitar Atestado" deixou de ser etapa: virou o campo independente `atestado`.
@@ -90,12 +140,18 @@ def uid(current: dict) -> str:
 class ListItemInput(BaseModel):
     nome: str
     cor: str = DEFAULT_COLOR
+    categoria: Optional[str] = None   # Categoria Analítica (só para `statuses`)
+    ativo: Optional[bool] = None      # status inativo não é oferecido em novas seleções
+    grafico: Optional[bool] = None    # participa do gráfico de status (página Análises)
 
 
 class ListItemUpdate(BaseModel):
     old_nome: str
     nome: str
     cor: str = DEFAULT_COLOR
+    categoria: Optional[str] = None   # Categoria Analítica (só para `statuses`)
+    ativo: Optional[bool] = None
+    grafico: Optional[bool] = None
 
 
 async def _get_params(owner_id: str) -> dict:
@@ -134,7 +190,13 @@ async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get
     items = _normalize_list(p.get(list_type, []), list_type)
     nome = body.nome.strip()
     if nome and not any(i["nome"].lower() == nome.lower() for i in items):
-        items.append({"nome": nome, "cor": body.cor})
+        novo = {"nome": nome, "cor": body.cor, "ativo": True if body.ativo is None else bool(body.ativo)}
+        if list_type == "statuses":
+            # Sem categoria escolhida, o status novo entra em "Outros" — nenhuma
+            # licitação some do donut da página Análises.
+            novo["categoria"] = body.categoria if body.categoria in ANALYTIC_CATEGORIES else DEFAULT_ANALYTIC_CATEGORY
+            novo["grafico"] = True if body.grafico is None else bool(body.grafico)
+        items.append(novo)
     await db.params.update_one({"owner_id": owner}, {"$set": {list_type: items}})
     return await get_lists(current)
 
@@ -151,6 +213,13 @@ async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends
         if i["nome"] == body.old_nome:
             i["nome"] = new_nome
             i["cor"] = body.cor
+            if body.ativo is not None:
+                i["ativo"] = bool(body.ativo)
+            if list_type == "statuses":
+                if body.categoria in ANALYTIC_CATEGORIES:
+                    i["categoria"] = body.categoria
+                if body.grafico is not None:
+                    i["grafico"] = bool(body.grafico)
     await db.params.update_one({"owner_id": owner}, {"$set": {list_type: items}})
     # Retroactive rename propagation to this user's bids only
     if new_nome and new_nome != body.old_nome:

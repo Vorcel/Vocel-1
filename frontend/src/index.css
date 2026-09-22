@@ -181,3 +181,118 @@ body {
 input.no-spin[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input.no-spin[type="number"]::-webkit-outer-spin-button,
 input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ============================================================
+   Tokens visuais da página Análises de Licitações (ref. Ref 1.png).
+   Escopados em .an-scope: não vazam para o resto do app. No tema
+   escuro remapeiam para as variáveis globais, então a página
+   acompanha o tema sem duplicar regra de cor em cada componente.
+   ============================================================ */
+.an-scope {
+    --an-bg: #F4F8FC;
+    --an-surface: #FFFFFF;
+    --an-border: #E2ECF5;
+    --an-border-soft: #E8EFF6;
+    --an-text: #071B72;
+    --an-muted: #6076A1;
+    --an-label: #4D6591;
+    --an-micro: #6880AA;
+    --an-head-bg: #EFF5FB;
+    --an-head-text: #234476;
+    --an-row-text: #183872;
+    --an-track: #E4EEF7;
+    --an-radius: 10px;
+    --an-shadow: 0 1px 2px rgba(30, 70, 120, 0.03), 0 2px 6px rgba(30, 70, 120, 0.025);
+    --an-shadow-hover: 0 1px 3px rgba(25, 60, 100, 0.07), 0 4px 10px rgba(25, 60, 100, 0.05);
+    /* Séries — idênticas nos dois temas (identidade dos gráficos) */
+    --an-blue: #2B91F7;
+    --an-orange: #F5A623;
+    --an-purple: #9858EE;
+    --an-green: #2FCB8D;
+    --an-bar: #3D98F5;
+    --an-profit: #079A50;
+}
+.dark .an-scope {
+    --an-bg: hsl(var(--background));
+    --an-surface: hsl(var(--card));
+    --an-border: hsl(var(--border));
+    --an-border-soft: hsl(var(--border));
+    --an-text: hsl(var(--foreground));
+    --an-muted: hsl(var(--muted-foreground));
+    --an-label: hsl(var(--muted-foreground));
+    --an-micro: hsl(var(--muted-foreground));
+    --an-head-bg: hsl(var(--muted));
+    --an-head-text: hsl(var(--foreground));
+    --an-row-text: hsl(var(--foreground));
+    --an-track: hsl(var(--muted));
+    --an-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --an-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --an-profit: #34D399;
+}
+
+/* Cartão base da página (KPIs, painéis, insights). */
+.an-card {
+    background: var(--an-surface);
+    border: 1px solid var(--an-border);
+    border-radius: var(--an-radius);
+    box-shadow: var(--an-shadow);
+    transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+.an-card:hover { box-shadow: var(--an-shadow-hover); }
+
+/* Tabelas compactas: colunas fixas + elipse, para nunca empurrar a largura. */
+.an-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.an-table th {
+    background: var(--an-head-bg);
+    color: var(--an-head-text);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    text-align: left;
+    line-height: 1.15;
+    white-space: normal;   /* cabeçalho pode quebrar em 2 linhas: nunca colide nem alarga */
+    vertical-align: bottom;
+}
+.an-table td {
+    font-size: 10px;
+    color: var(--an-row-text);
+    padding: 4px 8px;
+    height: 26px;
+    border-bottom: 1px solid var(--an-border-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.an-table tbody tr:last-child td { border-bottom: 0; }
+.an-table tbody tr { transition: background-color 150ms ease; }
+.an-table tbody tr:hover td { background: var(--an-head-bg); }
+
+/* Tooltip dos gráficos (Recharts recebe só o conteúdo; a moldura é esta). */
+.an-tooltip {
+    background: var(--an-surface);
+    border: 1px solid var(--an-border);
+    border-radius: 7px;
+    box-shadow: 0 4px 12px rgba(25, 60, 100, 0.08);
+    padding: 8px 10px;
+    font-size: 10px;
+    color: var(--an-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .an-card, .an-table tbody tr { transition: none; }
+}
+
+/* Tema escuro: a grade/eixos dos gráficos são atributos SVG (Recharts) com as
+   cores claras da Ref 1 — o CSS vence o atributo e os adapta ao tema sem
+   duplicar lógica de cor no JS. As cores das SÉRIES não mudam (identidade). */
+.dark .an-scope .recharts-cartesian-grid line,
+.dark .an-scope .recharts-cartesian-axis-line,
+.dark .an-scope .recharts-cartesian-axis-tick-line {
+    stroke: hsl(var(--border));
+}
+.dark .an-scope .recharts-cartesian-axis-tick-value,
+.dark .an-scope .recharts-label {
+    fill: hsl(var(--muted-foreground));
+}

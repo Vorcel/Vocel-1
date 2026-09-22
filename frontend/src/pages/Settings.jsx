@@ -1,23 +1,15 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Trash2, Plus, Moon, Sun, Loader2, GripVertical } from "lucide-react";
-import {
-  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext, rectSortingStrategy, useSortable, sortableKeyboardCoordinates, arrayMove,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Moon, Sun } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { colorStyles } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
+import { ListSection } from "@/components/settings/ListSection";
 import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -183,113 +175,6 @@ function BudgetDefaultsTab() {
   );
 }
 
-// Chip de item de lista. Quando `sortable`, ganha alça de arrastar (drag-and-drop).
-function ListTag({ item, type, sortable, onEdit, onRemove }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: item.nome, disabled: !sortable });
-  return (
-    <span
-      ref={setNodeRef}
-      data-testid={`list-${type}-tag-${item.nome}`}
-      style={{ ...colorStyles(item.cor).badge, transform: CSS.Transform.toString(transform), transition }}
-      className={cn("flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium", isDragging && "relative z-10 opacity-80 shadow-lg")}
-    >
-      {sortable && (
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          data-testid={`list-${type}-drag-${item.nome}`}
-          className="-ml-1.5 cursor-grab touch-none opacity-50 hover:opacity-100 active:cursor-grabbing"
-          title="Arrastar para reordenar"
-        >
-          <GripVertical size={13} />
-        </button>
-      )}
-      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.cor }} />
-      <button onClick={onEdit} data-testid={`list-${type}-edit-${item.nome}`} className="hover:underline" title="Editar">{item.nome}</button>
-      <button data-testid={`list-${type}-remove-${item.nome}`} onClick={onRemove} className="opacity-60 transition-opacity hover:opacity-100"><Trash2 size={13} /></button>
-    </span>
-  );
-}
-
-function ListManager({ title, type, sortable = false }) {
-  const { lists, addListItem, removeListItem, updateListItem, reorderList } = useData();
-  const [text, setText] = useState("");
-  const [cor, setCor] = useState("#0C7B93");
-  const [editing, setEditing] = useState(null);
-  const [editName, setEditName] = useState("");
-  const [editCor, setEditCor] = useState("#0C7B93");
-
-  const items = lists[type] || [];
-  // Distância mínima evita que o clique em editar/remover vire arraste.
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-  const onDragEnd = ({ active, over }) => {
-    if (!over || active.id === over.id) return;
-    const names = items.map((i) => i.nome);
-    reorderList(type, arrayMove(names, names.indexOf(active.id), names.indexOf(over.id)));
-  };
-
-  const add = async () => {
-    if (!text.trim()) return;
-    await addListItem(type, smartTitleCase(text.trim()), cor);
-    setText("");
-    toast.success("Item adicionado");
-  };
-  const startEdit = (item) => { setEditing(item.nome); setEditName(item.nome); setEditCor(item.cor); };
-  const saveEdit = async () => {
-    if (!editName.trim()) return;
-    await updateListItem(type, editing, smartTitleCase(editName.trim()), editCor);
-    setEditing(null);
-    toast.success("Item atualizado");
-  };
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-6">
-      <h3 className="mb-4 font-heading text-base font-semibold">{title}</h3>
-      <div className="mb-4 flex gap-2">
-        <Input data-testid={`list-${type}-input`} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={`Novo item em ${title}`} />
-        <input type="color" value={cor} onChange={(e) => setCor(e.target.value)} data-testid={`list-${type}-color`} className="h-10 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" title="Cor" />
-        <Button data-testid={`list-${type}-add`} onClick={add} className="bg-brand hover:bg-brand-hover"><Plus size={16} /></Button>
-      </div>
-      {sortable && <p className="mb-2 text-xs text-muted-foreground">Arraste pela alça para definir a ordem exibida nos menus, filtros e formulários. A ordem é salva automaticamente.</p>}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={items.map((i) => i.nome)} strategy={rectSortingStrategy}>
-          <div className="flex flex-wrap gap-2">
-            {items.map((item) => (
-              <ListTag
-                key={item.nome}
-                item={item}
-                type={type}
-                sortable={sortable}
-                onEdit={() => startEdit(item)}
-                onRemove={() => removeListItem(type, item.nome)}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
-
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent data-testid={`list-${type}-edit-modal`}>
-          <DialogHeader><DialogTitle className="font-heading">Editar item</DialogTitle></DialogHeader>
-          <div className="flex items-center gap-2 py-2">
-            <Input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveEdit()} data-testid={`list-${type}-edit-name`} />
-            <input type="color" value={editCor} onChange={(e) => setEditCor(e.target.value)} data-testid={`list-${type}-edit-color`} className="h-10 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-            <Button data-testid={`list-${type}-edit-save`} onClick={saveEdit} className="bg-brand hover:bg-brand-hover">Salvar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
 const TABS = [
   { id: "perfil", label: "Meu Perfil e Segurança", icon: User },
   { id: "empresa", label: "Dados da Empresa", icon: Building2 },
@@ -348,9 +233,9 @@ export default function Settings() {
           <TabsContent value="orcamento"><BudgetDefaultsTab /></TabsContent>
           <TabsContent value="integracoes"><GoogleDriveCard /></TabsContent>
           <TabsContent value="listas" className="space-y-6">
-            <ListManager title="Portais de Compra" type="portais" sortable />
-            <ListManager title="Modalidades" type="modalidades" />
-            <ListManager title="Status Personalizados" type="statuses" sortable />
+            <ListSection tipo="portais" />
+            <ListSection tipo="modalidades" />
+            <ListSection tipo="statuses" />
           </TabsContent>
         </Tabs>
       </main>

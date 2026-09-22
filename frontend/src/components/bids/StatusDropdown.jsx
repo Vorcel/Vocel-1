@@ -11,6 +11,9 @@ import { findColor } from "@/lib/constants";
 // aparece como badge na sua própria cor.
 export const StatusDropdown = ({ bid }) => {
   const { lists, changeStatus } = useData();
+  // Status inativo não é oferecido para novas seleções (Configurações → Status),
+  // mas continua listado se for o status atual da licitação (registro antigo).
+  const opcoes = (lists.statuses || []).filter((st) => st.ativo !== false || st.nome === bid.status);
 
   return (
     <DropdownMenu>
@@ -26,7 +29,7 @@ export const StatusDropdown = ({ bid }) => {
         </StatusBadge>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
-        {(lists.statuses || []).map((st) => (
+        {opcoes.map((st) => (
           <DropdownMenuItem
             key={st.nome}
             data-testid={`status-option-${bid.id}-${st.nome}`}

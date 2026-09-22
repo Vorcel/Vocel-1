@@ -8,6 +8,7 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import AllBids from "@/pages/AllBids";
 import Execution from "@/pages/Execution";
+import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
 import Budget from "@/pages/Budget";
 
@@ -30,6 +31,7 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/licitacoes" element={<AllBids />} />
               <Route path="/execucao" element={<Execution />} />
+              <Route path="/analises" element={<Analytics />} />
               <Route path="/configuracoes" element={<Settings />} />
               <Route path="/orcamento/:bidId" element={<Budget />} />
               <Route path="/rascunho" element={<Budget mode="draft" />} />

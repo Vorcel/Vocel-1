@@ -143,18 +143,26 @@ export function DataProvider({ children }) {
   };
 
   // ---- Lists ----
-  const addListItem = async (type, nome, cor) => {
-    const { data } = await api.post(`/lists/${type}`, { nome, cor });
+  // `extras` = campos extras do item (só `statuses` usa): `categoria`
+  // (Categoria Analítica), `ativo` e `grafico`. O backend ignora nas demais
+  // listas e aplica os padrões quando não vêm.
+  const addListItem = async (type, nome, cor, extras = {}) => {
+    const { data } = await api.post(`/lists/${type}`, { nome, cor, ...extras });
     setLists(data);
+    return data;
   };
-  const updateListItem = async (type, oldNome, nome, cor) => {
-    const { data } = await api.put(`/lists/${type}`, { old_nome: oldNome, nome, cor });
+  const updateListItem = async (type, oldNome, nome, cor, extras = {}) => {
+    const { data } = await api.put(`/lists/${type}`, { old_nome: oldNome, nome, cor, ...extras });
     setLists(data);
-    await refreshBids();
+    // Renomear propaga para as licitações no backend — recarrega para a tabela
+    // refletir o novo nome sem F5.
+    if (nome !== oldNome) await refreshBids();
+    return data;
   };
   const removeListItem = async (type, nome) => {
     const { data } = await api.delete(`/lists/${type}/${encodeURIComponent(nome)}`);
     setLists(data);
+    return data;
   };
   // Ordem manual (drag-and-drop): aplica localmente na hora (sem F5) e persiste.
   const reorderList = async (type, names) => {
@@ -166,6 +174,7 @@ export function DataProvider({ children }) {
     });
     const { data } = await api.put(`/lists/${type}/reorder`, { names });
     setLists(data);
+    return data;
   };
 
   // ---- Settings ----

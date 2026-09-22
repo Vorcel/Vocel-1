@@ -13,7 +13,9 @@ export const SelectWithAdd = ({ listType, value, onChange, placeholder, testid, 
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
   const [cor, setCor] = useState("#0C7B93");
-  const options = lists[listType] || [];
+  // Item inativo (Configurações → Listas) não é oferecido em novas seleções,
+  // mas continua visível quando já é o valor do registro.
+  const options = (lists[listType] || []).filter((o) => o.ativo !== false || o.nome === value);
 
   const confirm = async () => {
     const v = smartTitleCase(text.trim());
