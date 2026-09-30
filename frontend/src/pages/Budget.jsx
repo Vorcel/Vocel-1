@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock, RotateCcw } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CloudOff, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -25,10 +25,11 @@ import { smartTitleCase } from "@/lib/textcase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { normalizeUrl, safeHref, displayUrl } from "@/lib/url";
+import { useBudgetSync, hydrateRows, newRowId } from "@/hooks/useBudgetSync";
 
-let _rid = 0;
+// _id estável e único entre sessões: identifica a linha nas operações granulares.
 const newRow = (defaults) => ({
-  _id: `r${Date.now()}_${_rid++}`,
+  _id: newRowId(),
   selecionado: true, lote: "1", item: "", produto: "", marca: "", fornecedor: "", site: "",
   valor_compra: "", qtd: "1", valor_venda: "", margem: String(defaults.margem ?? 30),
   icms: String(defaults.icms ?? 18), pis_cofins: String(defaults.pis_cofins ?? 9.25),
@@ -183,15 +184,30 @@ function LoteCell({ value, options, onChange, onAddOption }) {
   );
 }
 
+// Salvamento durante a digitação (modo colaborativo): debounce curto, sem fechar o input.
+const LIVE_SAVE_MS = 700;
+
 // Excel-style editable cell: read-only formatted view that turns into an input
 // on click. Commits on Enter/Tab (and advances) or Blur. Cancels on Escape.
-function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid, shouldFocus, onAdvance }) {
+// O rascunho do input é local: atualizações remotas do mesmo campo não mexem no
+// que está sendo digitado. Só grava se o usuário digitou algo (`touched`) — sair
+// sem digitar nunca regrava um valor antigo por cima de uma alteração remota.
+// `liveSave`: também grava LIVE_SAVE_MS após a última tecla (bruto; o blur/Enter
+// aplica o Smart Title Case e grava de novo só se mudou).
+function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid, shouldFocus, onAdvance, liveSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const ref = useRef(null);
+  const touched = useRef(false);
+  const sent = useRef(null);
+  const liveTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(liveTimer.current), []);
+
+  const open = () => { touched.current = false; sent.current = null; setDraft(value ?? ""); setEditing(true); };
 
   useEffect(() => {
-    if (shouldFocus && !readOnly) { setDraft(value ?? ""); setEditing(true); }
+    if (shouldFocus && !readOnly) open();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldFocus]);
 
@@ -199,9 +215,27 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
     if (editing && ref.current) { ref.current.focus(); ref.current.select(); }
   }, [editing]);
 
-  const start = () => { if (readOnly) return; setDraft(value ?? ""); setEditing(true); };
+  const start = () => { if (readOnly) return; open(); };
+  const send = (v) => { sent.current = v; onCommit(v); };
+  const onChange = (v) => {
+    setDraft(v);
+    touched.current = true;
+    if (!liveSave) return;
+    clearTimeout(liveTimer.current);
+    liveTimer.current = setTimeout(() => { if (v !== sent.current) send(v); }, LIVE_SAVE_MS);
+  };
   // Texto livre recebe Smart Title Case; tipos técnicos (currency/percent/number) ficam intactos.
-  const commit = (advance) => { setEditing(false); onCommit(type === "text" ? smartTitleCase(draft) : draft); if (advance && onAdvance) onAdvance(); };
+  const commit = (advance) => {
+    clearTimeout(liveTimer.current);
+    setEditing(false);
+    const v = type === "text" ? smartTitleCase(draft) : draft;
+    if (touched.current && v !== sent.current) send(v);
+    if (advance && onAdvance) onAdvance();
+  };
+  const cancel = () => {
+    clearTimeout(liveTimer.current);
+    setEditing(false);
+  };
 
   const right = align === "right";
 
@@ -213,11 +247,11 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
         type={type === "text" ? "text" : "number"}
         step="0.01"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onBlur={() => commit(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); commit(true); }
-          else if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+          else if (e.key === "Escape") { e.preventDefault(); cancel(); }
         }}
         placeholder={placeholder}
         className={cn("no-spin w-full bg-transparent px-2 py-2 text-sm outline-none ring-2 ring-inset ring-brand/50",
@@ -249,26 +283,31 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
 // confirmação. Exibe sem "https://" (só visual); o valor salvo é a URL completa.
 function SiteCell({ value, onSave }) {
   const [editing, setEditing] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState(value || "");
+  const touched = useRef(false);
 
-  // Mantém o rascunho alinhado ao valor salvo quando não está editando.
-  useEffect(() => { if (!editing) setDraft(value || ""); }, [value, editing]);
+  // Mantém o rascunho alinhado ao valor salvo quando não está editando/digitando
+  // (valor remoto não atropela o que o usuário está digitando).
+  useEffect(() => { if (!editing && !focused) setDraft(value || ""); }, [value, editing, focused]);
 
-  // Commit: normaliza (acrescenta https:// se faltar) e só grava se mudou —
-  // evita marcar o orçamento como "sujo" a cada blur sem alteração.
+  // Commit: normaliza (acrescenta https:// se faltar) e só grava se o usuário
+  // digitou e o valor mudou — sair sem digitar não regrava valor antigo.
   const commit = () => {
     const v = normalizeUrl(draft);
-    if (v !== (value || "")) onSave(v);
+    if (touched.current && v !== (value || "")) onSave(v);
+    touched.current = false;
     setEditing(false);
   };
-  const cancel = () => { setDraft(value || ""); setEditing(false); };
+  const cancel = () => { touched.current = false; setDraft(value || ""); setEditing(false); };
 
   if (!value || editing) {
     return (
       <input
         type="text" autoFocus={editing} value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onChange={(e) => { touched.current = true; setDraft(e.target.value); }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => { setFocused(false); commit(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); commit(); }
           else if (e.key === "Escape") { e.preventDefault(); cancel(); }
@@ -397,7 +436,7 @@ export default function Budget({ mode = "bid" }) {
   const [rows, setRows] = useState([]);
   const [defaults, setDefaults] = useState({ icms: 18, pis_cofins: 9.25, margem: 30 });
   const [loading, setLoading] = useState(true);
-  const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
+  const [draftSaveState, setDraftSaveState] = useState("idle"); // idle | saving | saved (só rascunho)
 
   const [hidden, setHidden] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("erp_hidden") || "[]")); } catch { return new Set(); }
@@ -415,6 +454,10 @@ export default function Budget({ mode = "bid" }) {
 
   const dirtyRef = useRef(false);
   const timerRef = useRef(null);
+  // Orçamento de licitação: edição simultânea (operações granulares + WebSocket).
+  // O Rascunho continua com o salvamento da planilha inteira (1 por usuário).
+  const sync = useBudgetSync({ bidId, enabled: !isDraft, rows, setRows });
+  const saveState = isDraft ? draftSaveState : sync.saveState;
   const dragStartVis = useRef(null);
   const draggingRef = useRef(false);
 
@@ -426,7 +469,7 @@ export default function Budget({ mode = "bid" }) {
           const { data } = await api.get("/draft/budget");
           setBid(null);
           setDefaults(data.defaults);
-          const loaded = (data.rows || []).map((r, i) => ({ _id: `s${i}`, mode: r.valor_venda ? "venda" : "margem", ...r }));
+          const loaded = hydrateRows(data.rows);
           // Começar imediatamente: se vazio, semeia UMA linha com os padrões do usuário.
           if (loaded.length === 0) { loaded.push(newRow(data.defaults)); dirtyRef.current = true; }
           setRows(loaded);
@@ -434,7 +477,8 @@ export default function Budget({ mode = "bid" }) {
           const { data } = await api.get(`/bids/${bidId}/budget`);
           setBid(data.bid);
           setDefaults(data.defaults);
-          setRows((data.rows || []).map((r, i) => ({ _id: `s${i}`, mode: r.valor_venda ? "venda" : "margem", ...r })));
+          setRows(hydrateRows(data.rows));
+          sync.start(data);
         }
       } catch (e) {
         toast.error(formatApiError(e.response?.data?.detail));
@@ -468,10 +512,11 @@ export default function Budget({ mode = "bid" }) {
   // os cards/resumos superiores (via visibleLotes), nunca as linhas da tabela.
   const displayRows = rows;
 
-  // Auto-save (debounced full-budget) — fires only after user edits.
+  // Auto-save do RASCUNHO (debounced, planilha inteira) — só após edições do usuário.
+  // O orçamento de licitação salva por operação granular (useBudgetSync).
   useEffect(() => {
-    if (loading || !dirtyRef.current) return;
-    setSaveState("saving");
+    if (!isDraft || loading || !dirtyRef.current) return;
+    setDraftSaveState("saving");
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       try {
@@ -479,11 +524,11 @@ export default function Budget({ mode = "bid" }) {
           rows: rows.map((r) => ({ ...r, ...computeRow(r) })),
           summary: computeTotals(rows),
         };
-        await api.put(isDraft ? "/draft/budget" : `/bids/${bidId}/budget`, payload);
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1600);
+        await api.put("/draft/budget", payload);
+        setDraftSaveState("saved");
+        setTimeout(() => setDraftSaveState("idle"), 1600);
       } catch (e) {
-        setSaveState("idle");
+        setDraftSaveState("idle");
         toast.error(formatApiError(e.response?.data?.detail));
       }
     }, 1000);
@@ -496,11 +541,20 @@ export default function Budget({ mode = "bid" }) {
   }, [hiddenLotes, scopeKey]);
 
   const markDirty = () => { dirtyRef.current = true; };
-  const updateRow = (id, patch) => { markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r))); };
+  const updateRow = (id, patch) => {
+    if (!isDraft) { sync.patchRow(id, patch); return; }
+    markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
+  };
   const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" });
   const onMargem = (id, v) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" });
-  const addRow = () => { markDirty(); setRows((p) => [...p, newRow(defaults)]); };
-  const removeRow = (id) => { markDirty(); setRows((p) => p.filter((r) => r._id !== id)); };
+  const addRow = () => {
+    if (!isDraft) { sync.addRow(newRow(defaults)); return; }
+    markDirty(); setRows((p) => [...p, newRow(defaults)]);
+  };
+  const removeRow = (id) => {
+    if (!isDraft) { sync.deleteRow(id); return; }
+    markDirty(); setRows((p) => p.filter((r) => r._id !== id));
+  };
   const addLoteOption = (n) => setLoteOptions((p) => (p.includes(n) ? p : [...p, n]));
   const toggleLoteFilter = (l) => setHiddenLotes((prev) => { const n = new Set(prev); n.has(l) ? n.delete(l) : n.add(l); return n; });
   const showAllLotes = () => setHiddenLotes(new Set());
@@ -530,13 +584,13 @@ export default function Budget({ mode = "bid" }) {
   );
   const onDragEnd = ({ active, over }) => {
     if (!over || active.id === over.id) return;
-    markDirty();
-    setRows((prev) => {
-      const from = prev.findIndex((r) => r._id === active.id);
-      const to = prev.findIndex((r) => r._id === over.id);
-      if (from === -1 || to === -1) return prev;
-      return arrayMove(prev, from, to);
-    });
+    const from = rows.findIndex((r) => r._id === active.id);
+    const to = rows.findIndex((r) => r._id === over.id);
+    if (from === -1 || to === -1) return;
+    const next = arrayMove(rows, from, to);
+    if (isDraft) markDirty();
+    else sync.reorder(next.map((r) => r._id));
+    setRows(next);
   };
 
   // Keyboard nav: advance focus to next editable cell (right; wraps to next row).
@@ -646,17 +700,17 @@ export default function Budget({ mode = "bid" }) {
       case "site":
         return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
       case "text":
-        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "number":
-        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "currency":
-        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "percent":
-        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "venda":
-        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "margem":
-        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} />;
+        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "calc_pct":
         return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-emerald-700 dark:text-emerald-300">{pct(c[col.key])}</div>;
       case "calc_currency": {
@@ -702,6 +756,7 @@ export default function Budget({ mode = "bid" }) {
         {saveState === "saving" && (<><Loader2 size={14} className="animate-spin" /> Salvando…</>)}
         {saveState === "saved" && (<><CheckCircle2 size={14} className="text-emerald-600" /> Salvo</>)}
         {saveState === "idle" && (<><Cloud size={14} /> Salvo na nuvem</>)}
+        {saveState === "error" && (<span className="flex items-center gap-1.5 text-alert" title="As alterações ficam na tela e serão gravadas assim que a conexão voltar."><CloudOff size={14} /> Sem conexão — tentando salvar…</span>)}
       </div>
       {hiddenList.length > 0 && (
         <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="budget-show-all" onClick={showAll}>

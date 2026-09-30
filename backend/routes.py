@@ -507,62 +507,7 @@ class BudgetInput(BaseModel):
     summary: dict = Field(default_factory=dict)
 
 
-@api.get("/bids/{bid_id}/budget")
-async def get_budget(bid_id: str, current=Depends(get_current_user)):
-    owner = uid(current)
-    bid = await _owned_bid(bid_id, owner)
-    if not bid:
-        raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    bud = await db.budgets.find_one({"bid_id": bid_id, "owner_id": owner})
-    prefs = await db.preferences.find_one({"owner_id": owner}) or {}
-    if not bud:
-        return {
-            "bid_id": bid_id,
-            "bid": ser(bid),
-            "rows": [],
-            "summary": {},
-            "defaults": {
-                "icms": prefs.get("icms_padrao", 18),
-                "pis_cofins": prefs.get("pis_cofins_padrao", 9.25),
-                "margem": prefs.get("margem_padrao", 30),
-            },
-        }
-    return {
-        "bid_id": bid_id,
-        "bid": ser(bid),
-        "rows": bud.get("rows", []),
-        "summary": bud.get("summary", {}),
-        "defaults": {
-            "icms": prefs.get("icms_padrao", 18),
-            "pis_cofins": prefs.get("pis_cofins_padrao", 9.25),
-            "margem": prefs.get("margem_padrao", 30),
-        },
-    }
-
-
-@api.put("/bids/{bid_id}/budget")
-async def save_budget(bid_id: str, body: BudgetInput, current=Depends(get_current_user)):
-    owner = uid(current)
-    if not await _owned_bid(bid_id, owner):
-        raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    await db.budgets.update_one(
-        {"bid_id": bid_id, "owner_id": owner},
-        {"$set": {"rows": body.rows, "summary": body.summary, "owner_id": owner, "updated_at": now_iso()}},
-        upsert=True,
-    )
-    # Propagate financials to execution if it exists
-    exec_doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
-    if exec_doc:
-        s = body.summary or {}
-        await db.executions.update_one(
-            {"bid_id": bid_id, "owner_id": owner},
-            {"$set": {
-                "valor_empenho": s.get("valor_total", 0),
-                "valor_compra": s.get("custo_global", 0),
-                "lucro_previsto": s.get("lucro_global", 0),
-            }},
-        )
-    return {"message": "Orçamento salvo", "summary": body.summary}
+# GET/PUT do orçamento + operações granulares e WebSocket: ver budget_sync.py
 
 
 # =================== EXECUTION / POST-SALE (Tela 4) ===================

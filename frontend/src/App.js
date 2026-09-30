@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { DataProvider } from "@/context/DataContext";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
@@ -11,6 +11,12 @@ import Execution from "@/pages/Execution";
 import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
 import Budget from "@/pages/Budget";
+
+// Uma instância por licitação: trocar de orçamento reinicia estado/sincronização.
+function BidBudget() {
+  const { bidId } = useParams();
+  return <Budget key={bidId} />;
+}
 
 function App() {
   return (
@@ -33,7 +39,7 @@ function App() {
               <Route path="/execucao" element={<Execution />} />
               <Route path="/analises" element={<Analytics />} />
               <Route path="/configuracoes" element={<Settings />} />
-              <Route path="/orcamento/:bidId" element={<Budget />} />
+              <Route path="/orcamento/:bidId" element={<BidBudget />} />
               <Route path="/rascunho" element={<Budget mode="draft" />} />
             </Route>
             {/* Cadastro público desativado: qualquer rota antiga/desconhecida (ex: /register, /cadastro) volta ao login */}

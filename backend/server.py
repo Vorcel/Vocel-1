@@ -13,6 +13,7 @@ from routes import api as core_router
 from propostas import propostas_router
 from gdrive import gdrive_router
 from analytics import analytics_router
+from budget_sync import budget_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ app.include_router(core_router)
 app.include_router(propostas_router)
 app.include_router(gdrive_router)
 app.include_router(analytics_router)
+app.include_router(budget_router)
 
 app.add_middleware(
     CORSMiddleware,
