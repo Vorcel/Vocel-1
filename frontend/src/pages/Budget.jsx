@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { normalizeUrl, safeHref, displayUrl } from "@/lib/url";
 import { useBudgetSync, hydrateRows, newRowId } from "@/hooks/useBudgetSync";
 import { useUndoHistory } from "@/hooks/useUndoHistory";
+import { hasRemessas } from "@/lib/remessas";
 
 // _id estável e único entre sessões: identifica a linha nas operações granulares.
 const newRow = (defaults) => ({
@@ -438,12 +439,16 @@ function SortableRow({ r, c, visible, renderCell, selectedCols, onRequestDelete 
 }
 
 export default function Budget({ mode = "bid" }) {
-  const { bidId } = useParams();
+  const { bidId, remessaId } = useParams();
   const isDraft = mode === "draft";
+  // Orçamento de uma REMESSA da execução (/orcamento/:bidId/remessa/:remessaId):
+  // cópia independente — o orçamento original da licitação não é alterado.
+  const isRemessa = !isDraft && !!remessaId;
   // Escopo para chaves de localStorage (filtro de lote): "draft" no rascunho.
-  const scopeKey = isDraft ? "draft" : bidId;
+  const scopeKey = isDraft ? "draft" : isRemessa ? `${bidId}:${remessaId}` : bidId;
   const navigate = useNavigate();
   const [bid, setBid] = useState(null);
+  const [remessaInfo, setRemessaInfo] = useState(null); // { id, numero, nome } no modo remessa
   const [rows, setRows] = useState([]);
   const [defaults, setDefaults] = useState({ icms: 18, pis_cofins: 9.25, margem: 30 });
   const [loading, setLoading] = useState(true);
@@ -467,7 +472,7 @@ export default function Budget({ mode = "bid" }) {
   const timerRef = useRef(null);
   // Orçamento de licitação: edição simultânea (operações granulares + WebSocket).
   // O Rascunho continua com o salvamento da planilha inteira (1 por usuário).
-  const sync = useBudgetSync({ bidId, enabled: !isDraft, rows, setRows });
+  const sync = useBudgetSync({ bidId, remessaId: isRemessa ? remessaId : null, enabled: !isDraft, rows, setRows });
   // Desfazer/Refazer: só as edições desta sessão (ver useUndoHistory).
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -493,8 +498,9 @@ export default function Budget({ mode = "bid" }) {
           if (loaded.length === 0) { loaded.push(newRow(data.defaults)); dirtyRef.current = true; }
           setRows(loaded);
         } else {
-          const { data } = await api.get(`/bids/${bidId}/budget`);
+          const { data } = await api.get(isRemessa ? `/bids/${bidId}/remessas/${remessaId}/budget` : `/bids/${bidId}/budget`);
           setBid(data.bid);
+          setRemessaInfo(data.remessa || null);
           setDefaults(data.defaults);
           setRows(hydrateRows(data.rows));
           sync.start(data);
@@ -504,7 +510,7 @@ export default function Budget({ mode = "bid" }) {
       } finally { setLoading(false); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bidId, isDraft]);
+  }, [bidId, remessaId, isDraft]);
 
   const { widths: ew, startResize: eResize } = useColumnResize("erp_widths_v4", DEFAULT_WIDTHS);
 
@@ -798,12 +804,14 @@ export default function Budget({ mode = "bid" }) {
     // Arquivos (ícone vermelho) + atalhos para os documentos da Execução & Pós-Venda.
     // A licitação do contexto é a versão viva (proposta adicionada aparece na hora).
     const bidVivo = ctxBids.find((b) => b.id === bidId) || bid;
+    const execVivo = executions.find((e) => e.bid_id === bidId);
+    const remessaViva = isRemessa ? (execVivo?.remessas || []).find((r) => r.id === remessaId) : null;
     infoNodes.push({
       key: "files",
       node: (
         <div className="flex shrink-0 items-center gap-1">
           <BidFilesButton bid={bid} />
-          <DocShortcuts bid={bidVivo} execution={executions.find((e) => e.bid_id === bidId)} onProposta={abrirProposta} />
+          <DocShortcuts bid={bidVivo} execution={execVivo} remessa={remessaViva} onProposta={abrirProposta} />
         </div>
       ),
     });
@@ -901,7 +909,23 @@ export default function Budget({ mode = "bid" }) {
           <ArrowLeft size={20} />
         </Button>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5">
-          <h1 data-testid="budget-bid-title" title={isDraft ? "Rascunho de Orçamento" : (bid?.objeto || undefined)} className="truncate font-heading text-xl font-bold leading-none tracking-tight">{tituloObjeto}</h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 data-testid="budget-bid-title" title={isDraft ? "Rascunho de Orçamento" : (bid?.objeto || undefined)} className="truncate font-heading text-xl font-bold leading-none tracking-tight">{tituloObjeto}</h1>
+            {/* Qual planilha está aberta: a da remessa (operacional) ou o original
+                (referência do adjudicado), quando a licitação já tem remessas. */}
+            {isRemessa && remessaInfo && (
+              <span data-testid="budget-remessa-badge" title="Orçamento operacional desta remessa — o orçamento original da licitação não é alterado"
+                className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                {remessaInfo.nome}
+              </span>
+            )}
+            {!isDraft && !isRemessa && hasRemessas(executions.find((e) => e.bid_id === bidId)) && (
+              <span data-testid="budget-original-badge" title="Orçamento original da licitação (valor adjudicado). As remessas têm orçamentos próprios."
+                className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
+                Orçamento original
+              </span>
+            )}
+          </div>
           <div data-testid="budget-bid-meta" className="scrollbar-hide flex items-center gap-2.5 overflow-x-auto">
             {isDraft ? (
               <span className="shrink-0 text-sm text-foreground">Planilha independente — sem vínculo com licitação</span>

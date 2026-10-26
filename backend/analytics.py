@@ -10,7 +10,14 @@ Isolamento: toda consulta filtra `owner_id` do usuário autenticado (nunca do
 body/query) — ver multi-tenant em `routes.py`.
 
 Sem banco analítico duplicado: tudo é derivado das coleções reais
-(`bids`, `executions`, `budgets`, `params`) a cada requisição.
+(`bids`, `executions`, `budgets`, `remessa_budgets`, `params`) a cada requisição.
+
+Remessas (ver remessas.py): uma licitação com várias remessas continua contando
+UMA vez em Participadas/Adjudicadas. Total Adjudicado = orçamento ORIGINAL da
+licitação; Valor Empenhado = soma dos empenhos das remessas, cada um na data de
+referência da própria remessa; Lucro Estimado = soma do lucro das remessas (o
+lucro original fica em `estimated_profit_original`). Original e remessas nunca
+são somados entre si.
 """
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -241,13 +248,27 @@ async def get_analytics(
     bids = await db.bids.find(
         {"owner_id": owner, "data_disputa": {"$gte": lo, "$lte": hi}}
     ).to_list(20000)
-    # Valor Empenhado é posicionado pela Data de referência do prazo de entrega;
-    # o filtro de range já exclui execuções sem essa data (condição 2 da regra).
+    # Valor Empenhado é posicionado pela Data de referência do prazo de entrega
+    # (da execução ou, com remessas, de cada remessa); o filtro de range já exclui
+    # execuções sem essa data (condição 2 da regra).
+    rng = {"$gte": lo, "$lte": hi}
     execs = await db.executions.find(
-        {"owner_id": owner, "data_referencia_entrega": {"$gte": lo, "$lte": hi}}
+        {"owner_id": owner, "$or": [{"data_referencia_entrega": rng}, {"remessas.data_referencia_entrega": rng}]}
     ).to_list(20000)
+    # Execuções com remessas das licitações do período: lucro operacional = soma
+    # das remessas (independe da data de referência).
+    bid_ids_periodo = [str(b["_id"]) for b in bids]
+    remessas_de = {}
+    async for e in db.executions.find(
+        {"owner_id": owner, "bid_id": {"$in": bid_ids_periodo}, "remessas.0": {"$exists": True}},
+        {"bid_id": 1, "remessas.id": 1},
+    ):
+        remessas_de[e.get("bid_id")] = [r.get("id") for r in e.get("remessas") or []]
+    for e in execs:
+        if e.get("remessas"):
+            remessas_de[e.get("bid_id")] = [r.get("id") for r in e["remessas"]]
 
-    bid_ids = {str(b["_id"]) for b in bids} | {e.get("bid_id", "") for e in execs}
+    bid_ids = set(bid_ids_periodo) | {e.get("bid_id", "") for e in execs}
     bid_ids.discard("")
     summaries = {}
     if bid_ids:
@@ -255,6 +276,16 @@ async def get_analytics(
             {"owner_id": owner, "bid_id": {"$in": list(bid_ids)}}, {"bid_id": 1, "summary": 1}
         ):
             summaries[doc.get("bid_id")] = doc.get("summary") or {}
+    remessa_summaries = {}
+    if remessas_de:
+        async for doc in db.remessa_budgets.find(
+            {"owner_id": owner, "bid_id": {"$in": list(remessas_de)}}, {"remessa_id": 1, "summary": 1}
+        ):
+            remessa_summaries[doc.get("remessa_id")] = doc.get("summary") or {}
+
+    def valores_remessa(remessa_id: str) -> tuple:
+        s = remessa_summaries.get(remessa_id) or {}
+        return _money(s.get("valor_total")), _money(s.get("lucro_global"))
 
     # Configuração dos status (Configurações → Status) é a FONTE da classificação
     # do donut: categoria + o toggle "Exibir no gráfico de indicadores".
@@ -281,6 +312,14 @@ async def get_analytics(
     for b in bids:
         bid_id = str(b["_id"])
         empenho, lucro = valores(bid_id)
+        lucro_original = lucro
+        rids = remessas_de.get(bid_id)
+        remessas_empenho = None
+        if rids:
+            # Execução real: soma das remessas. `empenho` (Total Adjudicado) continua
+            # sendo o valor original da licitação.
+            remessas_empenho = sum(valores_remessa(r)[0] for r in rids)
+            lucro = sum(valores_remessa(r)[1] for r in rids)
         lic.append({
             "id": bid_id,
             "data": (b.get("data_disputa") or "")[:10],
@@ -292,27 +331,37 @@ async def get_analytics(
             "uasg": b.get("uasg") or "",
             "empenho": empenho,
             "lucro": lucro,
+            "lucro_original": lucro_original,
+            "remessas_empenho": remessas_empenho,
             "participou": is_participation(b.get("status")),
             "adjudicada": is_adjudicated(b.get("status")),
         })
 
     # Valor Empenhado reconhecido: timeline >= "Empenho Recebido" E Data de
     # referência preenchida (garantida pela query). Uma execução = uma licitação.
+    # Com remessas, cada remessa é um empenho próprio (sua etapa, sua data, seu valor).
     empenhos = []
     for e in execs:
-        if step_index(e) < EMPENHO_STEP_INDEX:
-            continue
         bid_id = e.get("bid_id", "")
-        valor, _lucro = valores(bid_id)
-        empenhos.append({
+        base = {
             "bid_id": bid_id,
-            "data": (e.get("data_referencia_entrega") or "")[:10],
-            "valor": valor,
             "orgao": (e.get("orgao") or "").strip(),
             "objeto": e.get("objeto") or "",
             "portal": (e.get("portal") or "").strip() or SEM_PORTAL,
-            "etapa": stage_name(e),
-        })
+        }
+        if e.get("remessas"):
+            for r in e["remessas"]:
+                if step_index(r) < EMPENHO_STEP_INDEX or not r.get("data_referencia_entrega"):
+                    continue
+                valor, _lucro = valores_remessa(r.get("id"))
+                empenhos.append({**base, "data": r["data_referencia_entrega"][:10], "valor": valor,
+                                 "etapa": stage_name(r), "remessa": r.get("nome") or ""})
+            continue
+        if step_index(e) < EMPENHO_STEP_INDEX or not e.get("data_referencia_entrega"):
+            continue
+        valor, _lucro = valores(bid_id)
+        empenhos.append({**base, "data": e["data_referencia_entrega"][:10], "valor": valor,
+                         "etapa": stage_name(e), "remessa": ""})
 
     def in_range(iso: str, s: date, t: date) -> bool:
         return bool(iso) and s.isoformat() <= iso <= t.isoformat()
@@ -322,12 +371,19 @@ async def get_analytics(
         participadas = [r for r in janela if r["participou"]]
         adjudicadas = [r for r in janela if r["adjudicada"]]
         empenhado = sum(r["valor"] for r in empenhos if in_range(r["data"], s, t))
+        com_remessas = [r for r in adjudicadas if r["remessas_empenho"] is not None]
         return {
             "participated": len(participadas),
             "adjudicated": len(adjudicadas),
             "total_adjudicated": _r(sum(r["empenho"] for r in adjudicadas)),
             "committed_value": _r(empenhado),
             "estimated_profit": _r(sum(r["lucro"] for r in adjudicadas)),
+            "estimated_profit_original": _r(sum(r["lucro_original"] for r in adjudicadas)),
+            # Licitações adjudicadas com remessas: valor original x soma das remessas
+            # (base do "Saldo restante" / "Excedente" — informação de apoio).
+            "remessas_bids": len(com_remessas),
+            "remessas_original": _r(sum(r["empenho"] for r in com_remessas)),
+            "remessas_executed": _r(sum(r["remessas_empenho"] for r in com_remessas)),
             "success_rate": success_rate(len(adjudicadas), len(participadas)),
         }
 
@@ -390,7 +446,8 @@ async def get_analytics(
         top_bids.append({
             "bid_id": r["bid_id"],
             "orgao": r["orgao"] or b.get("orgao") or SEM_ORGAO,
-            "objeto": r["objeto"] or b.get("objeto") or "",
+            "objeto": (r["objeto"] or b.get("objeto") or "") + (f" — {r['remessa']}" if r["remessa"] else ""),
+            "remessa": r["remessa"],
             "pregao": b.get("pregao", ""),
             "uasg": b.get("uasg", ""),
             "portal": r["portal"],

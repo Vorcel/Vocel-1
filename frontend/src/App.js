@@ -14,8 +14,8 @@ import Budget from "@/pages/Budget";
 
 // Uma instância por licitação: trocar de orçamento reinicia estado/sincronização.
 function BidBudget() {
-  const { bidId } = useParams();
-  return <Budget key={bidId} />;
+  const { bidId, remessaId } = useParams();
+  return <Budget key={remessaId ? `${bidId}:${remessaId}` : bidId} />;
 }
 
 function App() {
@@ -40,6 +40,7 @@ function App() {
               <Route path="/analises" element={<Analytics />} />
               <Route path="/configuracoes" element={<Settings />} />
               <Route path="/orcamento/:bidId" element={<BidBudget />} />
+              <Route path="/orcamento/:bidId/remessa/:remessaId" element={<BidBudget />} />
               <Route path="/rascunho" element={<Budget mode="draft" />} />
             </Route>
             {/* Cadastro público desativado: qualquer rota antiga/desconhecida (ex: /register, /cadastro) volta ao login */}

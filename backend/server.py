@@ -14,6 +14,7 @@ from propostas import propostas_router
 from gdrive import gdrive_router
 from analytics import analytics_router
 from budget_sync import budget_router
+from remessas import remessas_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ app.include_router(propostas_router)
 app.include_router(gdrive_router)
 app.include_router(analytics_router)
 app.include_router(budget_router)
+app.include_router(remessas_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -136,6 +138,10 @@ async def startup():
         await db.executions.create_index([("owner_id", 1), ("data_referencia_entrega", 1)])
         await db.executions.create_index([("owner_id", 1), ("bid_id", 1)])
         await db.budgets.create_index([("owner_id", 1), ("bid_id", 1)])
+        # Remessas: orçamento próprio por remessa + execução guardada ao encerrar.
+        await db.remessa_budgets.create_index([("owner_id", 1), ("bid_id", 1), ("remessa_id", 1)])
+        await db.executions_archive.create_index([("owner_id", 1), ("bid_id", 1)])
+        await db.executions.create_index([("owner_id", 1), ("remessas.data_referencia_entrega", 1)])
         await db.files.create_index("owner_id")
         await db.params.create_index("owner_id")
         await db.company.create_index("owner_id")

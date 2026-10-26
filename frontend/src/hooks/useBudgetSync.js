@@ -38,7 +38,9 @@ const PING_EVERY = 25000;
 const isRetryable = (e) => !e.response || e.response.status >= 500 || [408, 409, 429].includes(e.response.status);
 const isRowGone = (e) => e.response?.status === 404 && e.response?.data?.detail?.code === "row_not_found";
 
-export function useBudgetSync({ bidId, enabled, rows, setRows }) {
+// `remessaId`: planilha da remessa (mesmas operações em /bids/:id/remessas/:rid/budget
+// e sala própria no WebSocket); sem ele, o orçamento original da licitação.
+export function useBudgetSync({ bidId, remessaId = null, enabled, rows, setRows }) {
   const [clientId] = useState(randomId);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [started, setStarted] = useState(false);
@@ -58,7 +60,8 @@ export function useBudgetSync({ bidId, enabled, rows, setRows }) {
     };
   }
   const st = ref.current;
-  const base = `/bids/${bidId}/budget`;
+  const scopePath = remessaId ? `${bidId}/remessas/${remessaId}` : bidId;
+  const base = `/bids/${scopePath}/budget`;
 
   const applyToRow = (rowId, patch) =>
     setRows((prev) => prev.map((r) => (r._id === rowId ? { ...r, ...patch } : r)));
@@ -359,7 +362,7 @@ export function useBudgetSync({ bidId, enabled, rows, setRows }) {
   // ---------------------------------------------------------------- WebSocket
   useEffect(() => {
     if (!enabled || !started || !bidId) return undefined;
-    const url = `${API.replace(/^http/, "ws")}/ws/budget/${bidId}`;
+    const url = `${API.replace(/^http/, "ws")}/ws/budget/${scopePath}`;
     let ws = null;
     let closed = false;
     let attempt = 0;
@@ -411,7 +414,8 @@ export function useBudgetSync({ bidId, enabled, rows, setRows }) {
       window.removeEventListener("online", onOnline);
       if (ws) ws.close(1000);
     };
-  }, [enabled, started, bidId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, started, bidId, remessaId]);
 
   // Sair da página com alteração ainda não gravada: pede confirmação ao navegador.
   useEffect(() => {

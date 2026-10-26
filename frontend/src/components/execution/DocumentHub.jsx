@@ -19,6 +19,10 @@ import { toast } from "sonner";
  *   Nota Fiscal      } gravados pelas rotas /executions/:id/documentos/:categoria
  *   Outros           } + compatibilidade com os anexos antigos das etapas
  *
+ * Com REMESSAS, `execution` é a remessa ativa (Nota de Empenho / Nota Fiscal /
+ * Outros e o Orçamento são dela); Edital e Proposta continuam os da licitação.
+ * `orcamentoPath` = planilha a abrir (padrão: orçamento original).
+ *
  * Vazio = ícone cinza/desbotado e clique abre o envio. Preenchido = cor própria;
  * mais de um arquivo = badge com a quantidade REAL (vem do dado persistido) e o
  * clique abre a lista. Cores amostradas da ref 2.
@@ -219,7 +223,7 @@ export const abrirCategoria = (cat, abrirLista) => {
 };
 
 /* ----------------------------------- Hub ----------------------------------- */
-export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
+export function DocumentHub({ execution, bid, orcamentoPath, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
   const navigate = useNavigate();
   const [aberta, setAberta] = useState(null); // chave da categoria com a janela aberta
 
@@ -253,8 +257,8 @@ export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdi
         />
         <HubItem
           testid="hub-orcamento" icon={Calculator} label="Orçamento" color={COLORS.orcamento}
-          title="Abrir planilha de orçamento" filled
-          onClick={() => bidId && navigate(`/orcamento/${bidId}`)}
+          title={orcamentoPath ? "Abrir orçamento da remessa" : "Abrir planilha de orçamento"} filled
+          onClick={() => bidId && navigate(orcamentoPath || `/orcamento/${bidId}`)}
         />
         <HubItem
           testid="hub-proposta" icon={PropostaIcon} label="Proposta" color={COLORS.proposta}

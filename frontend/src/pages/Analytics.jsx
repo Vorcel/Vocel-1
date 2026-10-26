@@ -19,6 +19,7 @@ import { PanelAction } from "@/components/analytics/PanelAction";
 import { useData } from "@/context/DataContext";
 import api, { formatApiError } from "@/lib/api";
 import { LINE_COLORS, SERIES_COLORS, compactMoney, defaultPeriod } from "@/lib/analytics";
+import { comparar, COMPARACAO_LABEL } from "@/lib/remessas";
 
 // Página Análises de Licitações (layout conforme referências/Ref 1.png).
 // Toda métrica vem consolidada de GET /api/analytics (backend/analytics.py):
@@ -67,12 +68,22 @@ export default function Analytics() {
   const s = data?.summary || {};
   const c = data?.comparison || {};
 
+  // Remessas: Total Adjudicado = original; Valor Empenhado = remessas. A diferença
+  // (saldo/excedente) e o lucro original aparecem como apoio, não como KPI novo.
+  const remCmp = s.remessas_bids ? comparar(s.remessas_original, s.remessas_executed) : null;
+  const hintEmpenhado = remCmp
+    ? `${s.remessas_bids} licitaç${s.remessas_bids === 1 ? "ão" : "ões"} com remessas: original ${compactMoney(s.remessas_original)} · remessas ${compactMoney(s.remessas_executed)} · ${COMPARACAO_LABEL[remCmp.tipo]}${remCmp.tipo === "igual" ? "" : `: ${compactMoney(remCmp.valor)}`}`
+    : undefined;
+  const hintLucro = s.remessas_bids && Math.abs((s.estimated_profit ?? 0) - (s.estimated_profit_original ?? 0)) > 0.005
+    ? `Lucro previsto original: ${compactMoney(s.estimated_profit_original)} · atualizado pelas remessas: ${compactMoney(s.estimated_profit)}`
+    : undefined;
+
   const kpis = [
     { testid: "kpi-participadas", icon: FileText, label: "Licitações Participadas", value: s.participated ?? 0, change: c.participated, tone: "participadas" },
     { testid: "kpi-adjudicadas", icon: Trophy, label: "Licitações Adjudicadas", value: s.adjudicated ?? 0, change: c.adjudicated, tone: "adjudicadas" },
     { testid: "kpi-total-adjudicado", icon: Coins, label: "Total Adjudicado", value: compactMoney(s.total_adjudicated), change: c.total_adjudicated, tone: "total" },
-    { testid: "kpi-valor-empenhado", icon: Wallet, label: "Valor Empenhado", value: compactMoney(s.committed_value), change: c.committed_value, tone: "empenhado" },
-    { testid: "kpi-lucro", icon: TrendingUp, label: "Lucro Estimado", value: compactMoney(s.estimated_profit), change: c.estimated_profit, tone: (s.estimated_profit ?? 0) < 0 ? "lucroNegativo" : "lucro" },
+    { testid: "kpi-valor-empenhado", icon: Wallet, label: "Valor Empenhado", value: compactMoney(s.committed_value), change: c.committed_value, tone: "empenhado", hint: hintEmpenhado },
+    { testid: "kpi-lucro", icon: TrendingUp, label: "Lucro Estimado", value: compactMoney(s.estimated_profit), change: c.estimated_profit, tone: (s.estimated_profit ?? 0) < 0 ? "lucroNegativo" : "lucro", hint: hintLucro },
   ];
 
   // Título e seletor no cabeçalho do app (mesma barra das outras telas):

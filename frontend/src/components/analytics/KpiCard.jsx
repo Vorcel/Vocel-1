@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Info } from "lucide-react";
 import { shortPeriodLabel } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,9 @@ export const KPI_TONES = {
   lucroNegativo: { fg: "#E23D3D", bg: "#FDE8E8" },
 };
 
-export function KpiCard({ icon: Icon, label, value, change, comparisonLabel, tone, testid }) {
+// `hint` (opcional): informação de apoio (ex.: original x remessas) num ícone
+// discreto ao lado do rótulo — tooltip, sem mudar a altura do card.
+export function KpiCard({ icon: Icon, label, value, change, comparisonLabel, tone, testid, hint }) {
   const semBase = change == null;
   const positivo = !semBase && change >= 0;
   const Seta = positivo ? ArrowUp : ArrowDown;
@@ -37,8 +39,9 @@ export function KpiCard({ icon: Icon, label, value, change, comparisonLabel, ton
         >
           {value}
         </p>
-        <p title={label} className="mt-1 truncate text-[10.5px] font-medium leading-tight text-[var(--an-label)]">
-          {label}
+        <p title={hint ? `${label} — ${hint}` : label} className="mt-1 flex min-w-0 items-center gap-1 text-[10.5px] font-medium leading-tight text-[var(--an-label)]">
+          <span className="truncate">{label}</span>
+          {hint && <Info size={11} data-testid={`${testid}-hint`} className="shrink-0 cursor-help text-[#F97316]" />}
         </p>
       </div>
 

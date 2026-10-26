@@ -3,6 +3,7 @@
 Todos os registros são isolados por usuário via `owner_id` (multi-tenant no mesmo banco).
 Cada consulta/edição filtra pelo usuário autenticado; acesso a registros de outro
 usuário retorna 404 (não revela existência)."""
+import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import Optional, List, Any
@@ -451,6 +452,9 @@ async def delete_bid(bid_id: str, current=Depends(get_current_user)):
     await db.bids.delete_one({"_id": ObjectId(bid_id), "owner_id": owner})
     await db.budgets.delete_one({"bid_id": bid_id, "owner_id": owner})
     await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
+    # Remessas (orçamentos próprios + execução guardada ao encerrar) saem junto.
+    await db.remessa_budgets.delete_many({"bid_id": bid_id, "owner_id": owner})
+    await db.executions_archive.delete_many({"bid_id": bid_id, "owner_id": owner})
     return {"message": "Licitação removida"}
 
 
@@ -519,6 +523,14 @@ async def _ensure_execution(bid: dict):
     existing = await db.executions.find_one({"bid_id": bid_id})
     if existing:
         return existing
+    # Execução com remessas guardada ao sair de "Adjudicado" (ver _sync_execution):
+    # volta exatamente como estava — remessas, timelines e documentos.
+    arquivada = await db.executions_archive.find_one({"bid_id": bid_id, "owner_id": owner})
+    if arquivada:
+        arquivada.pop("archived_at", None)
+        await db.executions.insert_one(arquivada)
+        await db.executions_archive.delete_one({"_id": arquivada["_id"]})
+        return arquivada
     bud = await db.budgets.find_one({"bid_id": bid_id})
     s = (bud or {}).get("summary", {})
     doc = {
@@ -576,6 +588,13 @@ async def _sync_execution(bid: dict):
             }},
         )
     else:
+        # Execução COM remessas não pode simplesmente sumir (cada remessa tem timeline,
+        # documentos e orçamento próprios): é guardada e volta se a licitação for
+        # adjudicada de novo. Sem remessas, o comportamento continua o de sempre.
+        ex = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
+        if ex and ex.get("remessas"):
+            await db.executions_archive.replace_one(
+                {"_id": ex["_id"]}, {**ex, "archived_at": now_iso()}, upsert=True)
         await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
 
 
@@ -601,26 +620,90 @@ def _totals_from_summary(s: dict) -> dict:
     }
 
 
-async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None) -> dict:
-    """Injeta os valores reais agregados do orçamento na execução (tempo real).
-    - valor_compra  = soma do custo de todos os lotes
-    - lucro_previsto = soma do lucro de todos os lotes
-    - valor_empenho  = override manual (edição inline), se houver; senão o valor total agregado
-    `totals` pode vir pré-calculado (listagem em lote) para evitar uma consulta por execução."""
-    t = totals if totals is not None else await _budget_totals(doc.get("bid_id", ""), owner)
-    # Empenho, Compra e Lucro Previsto seguem a MESMA base: o orçamento vinculado
-    # (soma de todos os lotes). Empenho = "Valor Total" do orçamento (card azul).
-    doc["valor_empenho"] = t["valor_total"]
-    doc["valor_compra"] = t["custo_global"]
-    doc["lucro_previsto"] = t["lucro_global"]
-    # Retrocompatibilidade (só na leitura, sem gravar): execuções antigas sem o campo
-    # `atestado` valem "Não solicitado"; as paradas na etapa removida "Solicitar
-    # Atestado" passam a ser lidas como "Entregue" (etapa imediatamente anterior).
+_NUM_RE = re.compile(r"\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
+
+
+def _num(v) -> float:
+    """Número de uma célula da planilha — mesma regra do `num()` de lib/calc.js
+    (parseFloat: prefixo numérico; vazio/inválido = 0)."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    m = _NUM_RE.match(str(v or ""))
+    return float(m.group(0)) if m else 0.0
+
+
+def _resumo_itens(rows: list) -> dict:
+    """Resumo dos itens de um orçamento para o rótulo "Telefone IP - 10 unidades":
+    só as linhas SELECIONADAS (as mesmas que entram nos totais do summary)."""
+    sel = [r for r in rows or [] if isinstance(r, dict) and r.get("selecionado")]
+    produtos = []
+    for r in sel:
+        p = (r.get("produto") or "").strip()
+        if p and p not in produtos:
+            produtos.append(p)
+    return {"produto": produtos[0] if produtos else "", "itens": len(produtos), "qtd": sum(_num(r.get("qtd")) for r in sel)}
+
+
+def _normalize_operational(doc: dict) -> None:
+    """Retrocompatibilidade (só na leitura, sem gravar): sem `atestado` vale "Não
+    solicitado"; parado na etapa removida "Solicitar Atestado" vira "Entregue"."""
     if doc.get("atestado") not in ATESTADO_OPTIONS:
         doc["atestado"] = ATESTADO_DEFAULT
     if doc.get("status_atual") == LEGACY_ATESTADO_STEP:
         doc["status_atual"] = "Entregue"
         doc["current_step"] = TIMELINE_STEPS.index("Entregue")
+
+
+_RESUMO_PROJ = {"bid_id": 1, "summary": 1, "rows.produto": 1, "rows.qtd": 1, "rows.selecionado": 1}
+
+
+async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None,
+                            original_rows: Optional[list] = None, remessa_budgets: Optional[dict] = None) -> dict:
+    """Injeta os valores reais agregados do orçamento na execução (tempo real).
+    - valor_compra  = soma do custo de todos os lotes
+    - lucro_previsto = soma do lucro de todos os lotes
+    - valor_empenho  = valor total agregado
+    Com REMESSAS (ver remessas.py) os três passam a ser a SOMA das remessas (execução
+    real) e o orçamento original fica em `valor_original` / `compra_original` /
+    `lucro_original` (referência do adjudicado) — nunca somados entre si.
+    `totals`, `original_rows` e `remessa_budgets` ({remessa_id: doc}) podem vir
+    pré-carregados (listagem em lote) para evitar consultas por execução."""
+    bid_id = doc.get("bid_id", "")
+    if totals is None or original_rows is None:
+        bud = await db.budgets.find_one({"bid_id": bid_id, "owner_id": owner}, _RESUMO_PROJ) or {}
+        totals = _totals_from_summary(bud.get("summary"))
+        original_rows = bud.get("rows") or []
+    t = totals
+    # Empenho, Compra e Lucro Previsto seguem a MESMA base: o orçamento vinculado
+    # (soma de todos os lotes). Empenho = "Valor Total" do orçamento (card azul).
+    doc["valor_empenho"] = t["valor_total"]
+    doc["valor_compra"] = t["custo_global"]
+    doc["lucro_previsto"] = t["lucro_global"]
+    doc["valor_original"] = t["valor_total"]
+    doc["compra_original"] = t["custo_global"]
+    doc["lucro_original"] = t["lucro_global"]
+    doc["resumo_original"] = _resumo_itens(original_rows)
+    _normalize_operational(doc)
+    doc.pop("remessas_excluidas", None)
+
+    remessas = doc.get("remessas") or []
+    if remessas:
+        if remessa_budgets is None:
+            remessa_budgets = {}
+            async for b in db.remessa_budgets.find({"bid_id": bid_id, "owner_id": owner}, {**_RESUMO_PROJ, "remessa_id": 1}):
+                remessa_budgets[b.get("remessa_id")] = b
+        for r in remessas:
+            b = remessa_budgets.get(r.get("id")) or {}
+            rt = _totals_from_summary(b.get("summary"))
+            r["valor_empenho"] = rt["valor_total"]
+            r["valor_compra"] = rt["custo_global"]
+            r["lucro_previsto"] = rt["lucro_global"]
+            r["resumo"] = _resumo_itens(b.get("rows") or [])
+            _normalize_operational(r)
+        # Consolidado operacional = soma das remessas (o original NÃO entra na soma).
+        doc["valor_empenho"] = sum(r["valor_empenho"] for r in remessas)
+        doc["valor_compra"] = sum(r["valor_compra"] for r in remessas)
+        doc["lucro_previsto"] = sum(r["lucro_previsto"] for r in remessas)
     return doc
 
 
@@ -628,12 +711,22 @@ async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None
 async def list_executions(current=Depends(get_current_user)):
     owner = uid(current)
     docs = await db.executions.find({"owner_id": owner}).sort("created_at", -1).to_list(2000)
-    # Uma única consulta aos orçamentos do usuário (em vez de uma por execução).
+    # Uma única consulta aos orçamentos do usuário (em vez de uma por execução) e
+    # uma aos orçamentos das remessas.
     bids_ids = [d.get("bid_id", "") for d in docs]
-    summaries = {}
-    async for b in db.budgets.find({"owner_id": owner, "bid_id": {"$in": bids_ids}}, {"bid_id": 1, "summary": 1}):
-        summaries[b.get("bid_id")] = b.get("summary") or {}
-    return [await _enrich_execution(ser(d), owner, _totals_from_summary(summaries.get(d.get("bid_id")))) for d in docs]
+    budgets = {}
+    async for b in db.budgets.find({"owner_id": owner, "bid_id": {"$in": bids_ids}}, _RESUMO_PROJ):
+        budgets[b.get("bid_id")] = b
+    rem = {}
+    if any(d.get("remessas") for d in docs):
+        async for b in db.remessa_budgets.find({"owner_id": owner, "bid_id": {"$in": bids_ids}}, {**_RESUMO_PROJ, "remessa_id": 1}):
+            rem[b.get("remessa_id")] = b
+    out = []
+    for d in docs:
+        b = budgets.get(d.get("bid_id")) or {}
+        out.append(await _enrich_execution(
+            ser(d), owner, _totals_from_summary(b.get("summary")), b.get("rows") or [], rem))
+    return out
 
 
 @api.get("/executions/kpis")

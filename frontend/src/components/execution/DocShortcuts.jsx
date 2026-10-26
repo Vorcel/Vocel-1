@@ -4,6 +4,7 @@ import { PropostaIcon, PROPOSTA_COLOR, listPropostas } from "@/components/bids/P
 import { CountBadge } from "@/components/CountBadge";
 import { DocsDialog, abrirCategoria, buildDocCategories } from "@/components/execution/DocumentHub";
 import { useData } from "@/context/DataContext";
+import { hasRemessas } from "@/lib/remessas";
 import { cn } from "@/lib/utils";
 
 /* Atalhos compactos para os documentos da licitação — hoje no cabeçalho da
@@ -17,6 +18,10 @@ import { cn } from "@/lib/utils";
  *
  * Nota de Empenho / Nota Fiscal / Outros pertencem à execução, que só existe
  * depois da adjudicação: antes disso ficam desabilitados (com aviso no tooltip).
+ *
+ * Remessas: na planilha de uma remessa (`remessa`), os três são os DELA. No
+ * orçamento original de uma licitação que já tem remessas ficam desabilitados —
+ * cada remessa tem os seus (não existe um conjunto “da licitação inteira”).
  */
 function Atalho({ testid, icon: Icon, label, color, count, disabled, title, onClick, onManage }) {
   const ativo = !disabled && count > 0;
@@ -58,20 +63,24 @@ function Atalho({ testid, icon: Icon, label, color, count, disabled, title, onCl
   );
 }
 
-export function DocShortcuts({ bid, execution, onProposta }) {
-  const { addExecutionDoc, removeExecutionDoc } = useData();
+export function DocShortcuts({ bid, execution, remessa, onProposta }) {
+  const { addExecutionDoc, removeExecutionDoc, addRemessaDoc, removeRemessaDoc } = useData();
   const [aberta, setAberta] = useState(null);
 
   const semExecucao = !execution;
-  const cats = buildDocCategories(execution, bid);
+  const docsPorRemessa = hasRemessas(execution) && !remessa;
+  const bloqueado = semExecucao || docsPorRemessa;
+  const cats = buildDocCategories(remessa || execution, bid);
   // Anexos antigos das etapas (em Outros) só são removíveis pela própria
   // Execução, onde estão gravados — aqui ficam só para abrir.
   cats.outros = { ...cats.outros, files: cats.outros.files.map((f) => (f.origem === "timeline" ? { ...f, removivel: false } : f)) };
   const totalPropostas = listPropostas(bid).length;
-  const avisoSemExecucao = "Disponível depois que a licitação for adjudicada (Execução & Pós-Venda)";
+  const avisoSemExecucao = semExecucao
+    ? "Disponível depois que a licitação for adjudicada (Execução & Pós-Venda)"
+    : "Os documentos ficam em cada remessa — abra o orçamento da remessa ou a Execução & Pós-Venda";
 
   const docTitle = (cat) => {
-    if (semExecucao) return `${cat.label} — ${avisoSemExecucao}`;
+    if (bloqueado) return `${cat.label} — ${avisoSemExecucao}`;
     const n = cat.files.length;
     return n === 0 ? `${cat.label} — adicionar` : n === 1 ? `${cat.label} — abrir` : `${cat.label} (${n})`;
   };
@@ -91,7 +100,7 @@ export function DocShortcuts({ bid, execution, onProposta }) {
       ].map(({ cat, icon, testid }) => (
         <Atalho
           key={cat.key} testid={testid} icon={icon} label={cat.label} color={cat.color}
-          count={cat.files.length} disabled={semExecucao} title={docTitle(cat)}
+          count={cat.files.length} disabled={bloqueado} title={docTitle(cat)}
           onClick={() => abrirCategoria(cat, setAberta)}
           onManage={() => setAberta(cat.key)}
         />
@@ -101,8 +110,8 @@ export function DocShortcuts({ bid, execution, onProposta }) {
         open={!!aberta}
         categoria={aberta ? cats[aberta] : null}
         onClose={() => setAberta(null)}
-        onUpload={(key, file) => addExecutionDoc(bid.id, key, file)}
-        onRemove={(key, f) => removeExecutionDoc(bid.id, key, f.id)}
+        onUpload={(key, file) => (remessa ? addRemessaDoc(bid.id, remessa.id, key, file) : addExecutionDoc(bid.id, key, file))}
+        onRemove={(key, f) => (remessa ? removeRemessaDoc(bid.id, remessa.id, key, f.id) : removeExecutionDoc(bid.id, key, f.id))}
       />
     </div>
   );

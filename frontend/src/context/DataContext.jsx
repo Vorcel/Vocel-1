@@ -174,6 +174,38 @@ export function DataProvider({ children }) {
     return applyExecution(data);
   };
 
+  // ---- Remessas da execução (backend: remessas.py) ----
+  // Mesmas estratégias acima, aplicadas a UMA remessa: o backend sempre devolve a
+  // execução inteira enriquecida (com o consolidado das remessas).
+  const createRemessa = async (bidId, base) => {
+    const { data } = await api.post(`/executions/${bidId}/remessas`, { base });
+    return applyExecution(data);
+  };
+  const updateRemessa = async (bidId, remessaId, patch) => {
+    setExecutions((prev) => prev.map((e) => (e.bid_id === bidId
+      ? { ...e, remessas: (e.remessas || []).map((r) => (r.id === remessaId ? { ...r, ...patch } : r)) }
+      : e)));
+    try {
+      const { data } = await api.put(`/executions/${bidId}/remessas/${remessaId}`, patch);
+      return applyExecution(data);
+    } catch (err) {
+      await refreshExecutions();
+      throw err;
+    }
+  };
+  const deleteRemessa = async (bidId, remessaId) => {
+    const { data } = await api.delete(`/executions/${bidId}/remessas/${remessaId}`);
+    return applyExecution(data);
+  };
+  const addRemessaDoc = async (bidId, remessaId, categoria, file) => {
+    const { data } = await api.post(`/executions/${bidId}/remessas/${remessaId}/documentos/${categoria}`, { file });
+    return applyExecution(data);
+  };
+  const removeRemessaDoc = async (bidId, remessaId, categoria, fileId) => {
+    const { data } = await api.delete(`/executions/${bidId}/remessas/${remessaId}/documentos/${categoria}/${fileId}`);
+    return applyExecution(data);
+  };
+
   // ---- Lists ----
   // `extras` = campos extras do item (só `statuses` usa): `categoria`
   // (Categoria Analítica), `ativo` e `grafico`. O backend ignora nas demais
@@ -297,6 +329,7 @@ export function DataProvider({ children }) {
         connectGoogle, createDriveFolder, disconnectGoogle,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
         updateExecution, addExecutionDoc, removeExecutionDoc,
+        createRemessa, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc,
         addBidAnexo, removeBidAnexo,
         uploadProposta, replaceProposta, removeProposta, syncProposta,
         addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort, saveTablePageSize, saveExecutionGroup,
