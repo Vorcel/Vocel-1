@@ -5,9 +5,16 @@ Arquitetura (ver plano): o **original** fica sempre no Cloudflare R2 — reusand
 O Google Drive/Docs é uma camada ADICIONAL (versão viva/editável) que pode falhar
 ou nem existir sem comprometer a proposta salva.
 
-A proposta é um subdocumento do próprio bid (`bids.proposta`), então:
+As propostas são subdocumentos do próprio bid (`bids.propostas`, uma LISTA), então:
 - `GET /bids` já entrega o estado do ícone "P" sem request extra;
-- excluir a licitação leva a proposta junto (nada de registro órfão).
+- excluir a licitação leva as propostas junto (nada de registro órfão).
+
+Várias propostas por licitação: `bids.propostas = [{id, file_id, ...}, ...]`. O
+modelo antigo (`bids.proposta`, um só documento) é lido como a lista de UM item —
+sem migração no banco, nada é apagado — e a partir da primeira gravação a lista é
+persistida. `bids.proposta` continua espelhando a PRIMEIRA proposta, para quem
+ainda lê o campo antigo (abas com o frontend anterior abertas durante o deploy).
+Cada rota aceita `?pid=` para escolher a proposta; sem ele, vale a primeira.
 
 Isolamento multi-usuário: todo acesso passa por `_owned_bid(bid_id, owner)`; bid de
 outro usuário retorna 404 (não revela existência). Downloads usam o mesmo padrão
@@ -150,13 +157,37 @@ async def _sync_to_google(owner: str, prop: dict, data: bytes) -> dict:
     return prop
 
 
-async def _save_proposta(bid_id: str, owner: str, prop: dict) -> dict:
-    """Persiste a proposta no bid e mantém `proposta_enviada` derivado do documento."""
-    await db.bids.update_one(
-        {"_id": ObjectId(bid_id), "owner_id": owner},
-        {"$set": {"proposta": prop, "proposta_enviada": True}},
-    )
+def _propostas(bid: dict) -> list:
+    """Lista de propostas da licitação, compatível com o modelo antigo.
+
+    Licitação gravada antes das múltiplas propostas só tem `bid.proposta`: ela vira
+    a primeira (e única) da lista. O `id` estável de cada proposta é gerado na
+    criação; a antiga usa o próprio `file_id` (determinístico, então a mesma
+    proposta tem sempre o mesmo id até ser gravada na lista com ele).
+    """
+    lista = bid.get("propostas")
+    if lista is None:
+        antiga = bid.get("proposta") or {}
+        lista = [antiga] if antiga.get("file_id") else []
+    return [{**p, "id": p.get("id") or p["file_id"]} for p in lista if p.get("file_id")]
+
+
+async def _save_propostas(bid_id: str, owner: str, lista: list) -> dict:
+    """Persiste a lista no bid, espelha a primeira em `proposta` (campo antigo) e
+    mantém `proposta_enviada` derivado de existir documento."""
+    update = {"$set": {"propostas": lista, "proposta_enviada": bool(lista)}}
+    if lista:
+        update["$set"]["proposta"] = lista[0]
+    else:
+        update["$unset"] = {"proposta": ""}
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, update)
     return ser(await db.bids.find_one({"_id": ObjectId(bid_id)}))
+
+
+async def _save_proposta(bid_id: str, owner: str, bid: dict, prop: dict) -> dict:
+    """Grava UMA proposta (já existente, pelo `id`) mantendo as demais da lista."""
+    lista = [prop if p["id"] == prop["id"] else p for p in _propostas(bid)]
+    return await _save_propostas(bid_id, owner, lista)
 
 
 async def _require_bid(bid_id: str, owner: str) -> dict:
@@ -166,9 +197,11 @@ async def _require_bid(bid_id: str, owner: str) -> dict:
     return bid
 
 
-def _require_proposta(bid: dict) -> dict:
-    prop = bid.get("proposta") or {}
-    if not prop.get("file_id"):
+def _require_proposta(bid: dict, pid: Optional[str] = None) -> dict:
+    """A proposta `pid` da licitação (sem `pid`, a primeira)."""
+    lista = _propostas(bid)
+    prop = next((p for p in lista if p["id"] == pid), None) if pid else (lista[0] if lista else None)
+    if not prop:
         raise HTTPException(status_code=404, detail="Esta licitação não possui proposta")
     return prop
 
@@ -176,9 +209,10 @@ def _require_proposta(bid: dict) -> dict:
 # =================== ENDPOINTS ===================
 @propostas_router.post("/bids/{bid_id}/proposta")
 async def create_proposta(bid_id: str, file: UploadFile = File(...), current=Depends(get_current_user)):
-    """Primeiro upload: R2 primeiro (fonte de verdade), Google depois (best-effort)."""
+    """Adicionar proposta: entra no FIM da lista (nunca substitui as existentes).
+    R2 primeiro (fonte de verdade), Google depois (best-effort)."""
     owner = uid(current)
-    await _require_bid(bid_id, owner)
+    bid = await _require_bid(bid_id, owner)
 
     data = await _read_docx_upload(file)
     try:
@@ -188,6 +222,7 @@ async def create_proposta(bid_id: str, file: UploadFile = File(...), current=Dep
         raise HTTPException(status_code=500, detail="Falha ao salvar a proposta")
 
     prop = {
+        "id": str(uuid.uuid4()),
         **stored,
         "content_type": DOCX_MIME,
         "google_file_id": None,
@@ -201,16 +236,21 @@ async def create_proposta(bid_id: str, file: UploadFile = File(...), current=Dep
         "updated_at": now_iso(),
     }
     prop = await _sync_to_google(owner, prop, data)
-    return await _save_proposta(bid_id, owner, prop)
+    # Relê a lista agora: outro upload pode ter terminado enquanto o Google respondia.
+    bid = await _require_bid(bid_id, owner)
+    return await _save_propostas(bid_id, owner, [*_propostas(bid), prop])
 
 
 @propostas_router.put("/bids/{bid_id}/proposta")
-async def replace_proposta(bid_id: str, file: UploadFile = File(...), current=Depends(get_current_user)):
-    """Substituir: novo original no R2, preservando as referências do Google
-    (o mesmo Google Doc é atualizado no lugar — ver Fase 3)."""
+async def replace_proposta(
+    bid_id: str, file: UploadFile = File(...), pid: Optional[str] = Query(None), current=Depends(get_current_user)
+):
+    """Substituir: troca SÓ o arquivo da proposta `pid` (as demais ficam como estão).
+    Novo original no R2, preservando o `id` e as referências do Google (o mesmo
+    Google Doc é atualizado no lugar — ver Fase 3)."""
     owner = uid(current)
     bid = await _require_bid(bid_id, owner)
-    atual = _require_proposta(bid)
+    atual = _require_proposta(bid, pid)
 
     data = await _read_docx_upload(file)
     try:
@@ -227,7 +267,7 @@ async def replace_proposta(bid_id: str, file: UploadFile = File(...), current=De
         "google_error": None,
     }
     prop = await _sync_to_google(owner, prop, data)
-    bid = await _save_proposta(bid_id, owner, prop)
+    bid = await _save_proposta(bid_id, owner, await _require_bid(bid_id, owner), prop)
 
     # O original anterior deixa de ser referenciado — marcado como removido para
     # não ficar órfão visível, sem apagar o objeto no R2 (backup preservado).
@@ -240,19 +280,16 @@ async def replace_proposta(bid_id: str, file: UploadFile = File(...), current=De
 
 
 @propostas_router.delete("/bids/{bid_id}/proposta")
-async def delete_proposta(bid_id: str, current=Depends(get_current_user)):
-    """Desvincula a proposta da licitação (o "P" volta a ficar desbotado).
+async def delete_proposta(bid_id: str, pid: Optional[str] = Query(None), current=Depends(get_current_user)):
+    """Desvincula a proposta `pid` da licitação; removida a última, o "P" volta a
+    ficar desbotado.
 
     NÃO apaga o arquivo no R2 nem o documento no Google Drive — só remove o vínculo.
     """
     owner = uid(current)
     bid = await _require_bid(bid_id, owner)
-    _require_proposta(bid)
-    await db.bids.update_one(
-        {"_id": ObjectId(bid_id), "owner_id": owner},
-        {"$unset": {"proposta": ""}, "$set": {"proposta_enviada": False}},
-    )
-    return ser(await db.bids.find_one({"_id": ObjectId(bid_id)}))
+    alvo = _require_proposta(bid, pid)
+    return await _save_propostas(bid_id, owner, [p for p in _propostas(bid) if p["id"] != alvo["id"]])
 
 
 async def _resolve_requester(auth: Optional[str], authorization: Optional[str]) -> str:
@@ -276,7 +313,7 @@ async def _original_bytes(prop: dict, owner: str) -> bytes:
 
 
 @propostas_router.post("/bids/{bid_id}/proposta/sync")
-async def sync_proposta(bid_id: str, current=Depends(get_current_user)):
+async def sync_proposta(bid_id: str, pid: Optional[str] = Query(None), current=Depends(get_current_user)):
     """(Re)envia a proposta para o Google Drive a partir do original guardado no R2.
 
     Serve aos três caminhos da tela — "Enviar para o Google Drive", "Tentar
@@ -285,7 +322,7 @@ async def sync_proposta(bid_id: str, current=Depends(get_current_user)):
     """
     owner = uid(current)
     bid = await _require_bid(bid_id, owner)
-    prop = _require_proposta(bid)
+    prop = _require_proposta(bid, pid)
 
     try:
         data = await _original_bytes(prop, owner)
@@ -296,11 +333,11 @@ async def sync_proposta(bid_id: str, current=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Falha ao recuperar a proposta original")
 
     prop = await _sync_to_google(owner, dict(prop), data)
-    return await _save_proposta(bid_id, owner, prop)
+    return await _save_proposta(bid_id, owner, await _require_bid(bid_id, owner), prop)
 
 
 @propostas_router.get("/bids/{bid_id}/proposta/status")
-async def proposta_status(bid_id: str, current=Depends(get_current_user)):
+async def proposta_status(bid_id: str, pid: Optional[str] = Query(None), current=Depends(get_current_user)):
     """Situação REAL do documento agora (o Google Docs pode ter sido apagado à mão).
 
     A tela usa isto ao abrir o visualizador para escolher entre exibir o documento
@@ -308,7 +345,7 @@ async def proposta_status(bid_id: str, current=Depends(get_current_user)):
     """
     owner = uid(current)
     bid = await _require_bid(bid_id, owner)
-    prop = _require_proposta(bid)
+    prop = _require_proposta(bid, pid)
 
     integracao = await gdrive.get_integration(owner)
     if not integracao:
@@ -335,12 +372,14 @@ def _google_http_error(e: "gdrive.GoogleError") -> HTTPException:
 
 
 @propostas_router.get("/bids/{bid_id}/proposta/preview.pdf")
-async def preview_proposta(bid_id: str, auth: str = Query(None), authorization: str = Header(None)):
+async def preview_proposta(
+    bid_id: str, pid: Optional[str] = Query(None), auth: str = Query(None), authorization: str = Header(None)
+):
     """Representação PDF da versão ATUAL do Google Docs, exibida no <iframe> do
     visualizador. É o que permite ler a proposta sem baixar e sem abrir o Docs."""
     requester = await _resolve_requester(auth, authorization)
     bid = await _require_bid(bid_id, requester)
-    prop = _require_proposta(bid)
+    prop = _require_proposta(bid, pid)
 
     if not prop.get("google_file_id"):
         raise HTTPException(status_code=409, detail="Proposta ainda não sincronizada com o Google Drive")
@@ -363,6 +402,7 @@ async def preview_proposta(bid_id: str, auth: str = Query(None), authorization: 
 async def download_proposta(
     bid_id: str,
     format: str = Query("docx", pattern="^(docx|pdf)$"),
+    pid: Optional[str] = Query(None),
     auth: str = Query(None),
     authorization: str = Header(None),
 ):
@@ -371,7 +411,7 @@ async def download_proposta(
     quando o Google estiver indisponível ou a conta não conectada."""
     requester = await _resolve_requester(auth, authorization)
     bid = await _require_bid(bid_id, requester)
-    prop = _require_proposta(bid)
+    prop = _require_proposta(bid, pid)
     google_id = prop.get("google_file_id")
 
     if format == "pdf":

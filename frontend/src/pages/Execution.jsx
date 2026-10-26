@@ -36,6 +36,7 @@ import {
   atestadoOf, atestadoRank, isAtestadoPending, stageColor,
   ACTION_STAGES, PHASE_GROUPS, phaseOfStage, STEP_PENDING, STEP_ACTIVE, STEP_DONE,
 } from "@/lib/execution";
+import { matchesDigits } from "@/lib/search";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -172,8 +173,8 @@ export default function Execution() {
   // texto parcial sem diferenciar maiúsculas; status = fases da timeline, multi).
   const baseSet = useMemo(() => (executions || []).filter((e) => {
     if (filters.objeto && !has(bidField(e, "objeto"), filters.objeto)) return false;
-    if (filters.pregao && !has(bidField(e, "pregao"), filters.pregao)) return false;
-    if (filters.uasg && !has(bidField(e, "uasg"), filters.uasg)) return false;
+    if (filters.pregao && !matchesDigits(bidField(e, "pregao"), filters.pregao)) return false;  // só dígitos (lib/search.js)
+    if (filters.uasg && !matchesDigits(bidField(e, "uasg"), filters.uasg)) return false;
     if (filters.orgao && !has(orgaoOf(e), filters.orgao)) return false;
     if (filters.portal && bidField(e, "portal") !== filters.portal) return false;
     if (filters.modalidade && bidField(e, "modalidade") !== filters.modalidade) return false;

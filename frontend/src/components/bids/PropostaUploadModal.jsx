@@ -18,7 +18,9 @@ const Info = ({ label, value }) =>
 
 // "Adicionar Proposta" (primeiro upload) e "Substituir proposta" — o mesmo formulário,
 // mudando só o texto e o verbo usado no DataContext.
-export const PropostaUploadModal = ({ open, onOpenChange, bid, modo = "novo", onSaved }) => {
+// Com várias propostas, "novo" acrescenta uma à lista e "substituir" troca só o
+// arquivo da proposta `pid` (a selecionada no visualizador).
+export const PropostaUploadModal = ({ open, onOpenChange, bid, modo = "novo", pid, onSaved }) => {
   const { uploadProposta, replaceProposta } = useData();
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -33,7 +35,7 @@ export const PropostaUploadModal = ({ open, onOpenChange, bid, modo = "novo", on
     if (!file || !bid) return;
     setSaving(true);
     try {
-      const atualizada = substituindo ? await replaceProposta(bid.id, file) : await uploadProposta(bid.id, file);
+      const atualizada = substituindo ? await replaceProposta(bid.id, file, pid) : await uploadProposta(bid.id, file);
       toast.success(substituindo ? "Proposta substituída" : "Proposta salva");
       onOpenChange(false);
       onSaved?.(atualizada);

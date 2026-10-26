@@ -331,7 +331,7 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
     doc["itens_list"] = _itens_list(body.itens)
     # `proposta_enviada` é DERIVADO do documento da proposta (ver propostas.py): o
     # formulário de edição da licitação não envia esse dado e não pode zerá-lo.
-    doc["proposta_enviada"] = bool((existing.get("proposta") or {}).get("file_id"))
+    doc["proposta_enviada"] = bool((existing.get("proposta") or {}).get("file_id") or existing.get("propostas"))
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     await _sync_execution(bid)

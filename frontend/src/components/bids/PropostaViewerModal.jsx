@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, CloudOff, FileDown, FileText, FileX, FolderPlus, Loader2, Pencil, RefreshCw, Trash2, Unplug,
+  AlertTriangle, ChevronLeft, ChevronRight, CloudOff, FileDown, FileText, FileX, FolderPlus, Loader2, Pencil, Plus, RefreshCw,
+  Trash2, Unplug,
 } from "lucide-react";
+import { listPropostas } from "@/components/bids/PropostaIcon";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -48,7 +50,11 @@ const Aviso = ({ icon: Icon, titulo, texto, children }) => (
 // A leitura usa a representação PDF da versão ATUAL do Google Docs; o Google Docs
 // em si serve para EDIÇÃO, aberto em outra aba. Quando o Google não está
 // disponível, o modal não quebra: oferece o DOCX original guardado no Vorcel.
-export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) => {
+//
+// Várias propostas: UMA área de leitura só; as setas ← → trocam a proposta
+// exibida (desabilitadas nas pontas) e o contador mostra "2 de 3". Todas as
+// ações do cabeçalho valem para a proposta selecionada (`pid`).
+export const PropostaViewerModal = ({ open, onOpenChange, bid, pid, onSelect, onSubstituir, onAdicionar }) => {
   const { removeProposta, syncProposta } = useData();
   const navigate = useNavigate();
   const [situacao, setSituacao] = useState(null);   // null = consultando
@@ -57,29 +63,37 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) =
   const [confirmarRemocao, setConfirmarRemocao] = useState(false);
   const [removendo, setRemovendo] = useState(false);
 
-  const prop = bid?.proposta || {};
+  const propostas = listPropostas(bid);
+  const total = propostas.length;
+  // Proposta selecionada; se ela sumiu (removida em outra tela), fica a primeira.
+  const posicao = Math.max(0, propostas.findIndex((p) => p.id === pid));
+  const prop = propostas[posicao] || {};
+  const propId = prop.id;
   const bidId = bid?.id;
   const googleFileId = prop.google_file_id;
   const estado = situacao?.state;
   const pronto = estado === "synced";
   const linkEdicao = situacao?.web_view_link || prop.google_web_view_link;
 
-  const previewUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/preview.pdf`) : null;
-  const docxUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/download?format=docx`) : null;
-  const pdfUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/download?format=pdf`) : null;
+  const pidQs = propId ? `pid=${encodeURIComponent(propId)}` : "";
+  const previewUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/preview.pdf?${pidQs}`) : null;
+  const docxUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/download?format=docx&${pidQs}`) : null;
+  const pdfUrl = bidId ? authedUrl(`/bids/${bidId}/proposta/download?format=pdf&${pidQs}`) : null;
   const atualizado = fmtDateTime(prop.updated_at);
+
+  const irPara = (i) => { if (propostas[i]) onSelect?.(propostas[i].id); };
 
   // Situação real do documento AGORA (ele pode ter sido apagado no Drive à mão).
   const consultar = useCallback(async () => {
-    if (!bidId) return;
+    if (!bidId || !propId) return;
     setSituacao(null);
     try {
-      const { data } = await api.get(`/bids/${bidId}/proposta/status`);
+      const { data } = await api.get(`/bids/${bidId}/proposta/status`, { params: { pid: propId } });
       setSituacao(data);
     } catch {
       setSituacao({ state: "unavailable" });
     }
-  }, [bidId]);
+  }, [bidId, propId]);
 
   useEffect(() => {
     if (!open) return;
@@ -87,11 +101,24 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) =
     consultar();
   }, [open, googleFileId, consultar]);
 
+  // Setas do teclado também navegam (quando há mais de uma proposta).
+  useEffect(() => {
+    if (!open || total < 2) return undefined;
+    const onKey = (e) => {
+      if (e.target?.closest?.("input, textarea, [contenteditable='true']")) return;
+      if (e.key === "ArrowLeft" && posicao > 0) irPara(posicao - 1);
+      if (e.key === "ArrowRight" && posicao < total - 1) irPara(posicao + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, total, posicao]);
+
   const sincronizar = async () => {
     setSincronizando(true);
     try {
-      const atualizada = await syncProposta(bidId);
-      if (atualizada?.proposta?.google_sync_status === "synced") {
+      const atualizada = await syncProposta(bidId, propId);
+      if (listPropostas(atualizada).find((p) => p.id === propId)?.google_sync_status === "synced") {
         toast.success("Proposta sincronizada com o Google Drive");
       } else {
         toast.error("Não foi possível sincronizar com o Google Drive.");
@@ -109,10 +136,13 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) =
   const remover = async () => {
     setRemovendo(true);
     try {
-      await removeProposta(bidId);
+      const atualizada = await removeProposta(bidId, propId);
       toast.success("Proposta removida da licitação");
       setConfirmarRemocao(false);
-      onOpenChange(false);
+      // Sobrou alguma: continua na leitura, na vizinha (a anterior, ou a nova primeira).
+      const restantes = listPropostas(atualizada);
+      if (restantes.length) onSelect?.(restantes[Math.max(0, posicao - 1)].id);
+      else onOpenChange(false);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
     } finally {
@@ -142,16 +172,46 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) =
           {/* Cabeçalho: identificação + ações. O X fica no canto (padrão do Dialog). */}
           <DialogHeader className="shrink-0 space-y-0 border-b border-border px-5 py-3 pr-12">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <DialogTitle className="truncate font-heading text-base" title={bid.objeto}>
-                  {bid.pregao ? `Proposta — Pregão ${bid.pregao}` : "Proposta"}
-                </DialogTitle>
-                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                  <span className="truncate" title={prop.filename}>{prop.filename}</span>
-                  {atualizado && <span>· Atualizado em {atualizado}</span>}
-                </p>
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="min-w-0">
+                  <DialogTitle className="truncate font-heading text-base" title={bid.objeto}>
+                    {bid.pregao ? `Proposta — Pregão ${bid.pregao}` : "Proposta"}
+                  </DialogTitle>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <span className="truncate" title={prop.filename}>{prop.filename}</span>
+                    {atualizado && <span>· Atualizado em {atualizado}</span>}
+                  </p>
+                </div>
+                {/* Navegação entre propostas: só com 2+. Pontas desabilitadas. */}
+                {total > 1 && (
+                  <div data-testid="proposta-nav" className="flex shrink-0 items-center gap-1 rounded-md border border-border px-1 py-0.5">
+                    <button
+                      type="button" data-testid="proposta-nav-prev" title="Proposta anterior"
+                      disabled={posicao === 0} onClick={() => irPara(posicao - 1)}
+                      className="flex h-7 w-7 items-center justify-center rounded text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-30"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span data-testid="proposta-nav-counter" className="min-w-[48px] text-center text-xs font-semibold tabular-nums text-foreground">
+                      {posicao + 1} de {total}
+                    </span>
+                    <button
+                      type="button" data-testid="proposta-nav-next" title="Próxima proposta"
+                      disabled={posicao === total - 1} onClick={() => irPara(posicao + 1)}
+                      className="flex h-7 w-7 items-center justify-center rounded text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-30"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                <Acao
+                  icon={Plus} label="Adicionar" testid="proposta-acao-adicionar"
+                  title="Adicionar outra proposta a esta licitação (as atuais continuam)"
+                  onClick={() => onAdicionar?.()}
+                  className="border-[#0114FF]/40 text-[#0114FF]"
+                />
                 <Acao
                   icon={Pencil} label="Editar" testid="proposta-acao-editar"
                   title={pronto ? "Editar no Google Docs (nova aba)" : "Disponível quando a proposta estiver no Google Drive"}
@@ -165,7 +225,7 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, onSubstituir }) =
                   title={pronto ? "Baixar em PDF" : "Disponível quando a proposta estiver no Google Drive"}
                   href={pdfUrl} disabled={!pronto}
                 />
-                <Acao icon={RefreshCw} label="Substituir" testid="proposta-acao-substituir" title="Enviar outro arquivo no lugar" onClick={() => onSubstituir?.(bid)} />
+                <Acao icon={RefreshCw} label="Substituir" testid="proposta-acao-substituir" title="Enviar outro arquivo no lugar DESTA proposta" onClick={() => onSubstituir?.(propId)} />
                 <Acao icon={Trash2} label="Remover" testid="proposta-acao-remover" title="Remover a proposta desta licitação" onClick={() => setConfirmarRemocao(true)} className="text-muted-foreground hover:text-alert" />
               </div>
             </div>

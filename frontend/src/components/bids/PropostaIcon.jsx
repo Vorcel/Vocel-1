@@ -1,3 +1,4 @@
+import { CountBadge } from "@/components/CountBadge";
 import { cn } from "@/lib/utils";
 
 // Ícone da proposta: folha/documento com a letra "P" incorporada.
@@ -28,26 +29,39 @@ export const PropostaIcon = ({ size = 18, className, strokeWidth = 2, ...props }
   </svg>
 );
 
-// Estado real, vindo do dado da licitação (nunca de state temporário do frontend).
-export const hasProposta = (bid) => Boolean(bid?.proposta?.file_id);
+// Cor da proposta preenchida — a MESMA em todas as telas (tabela, hub, orçamento).
+export const PROPOSTA_COLOR = "#0114FF";
+
+// Propostas da licitação, do dado real (nunca de state temporário do frontend).
+// Mesma regra do backend (`_propostas` em propostas.py): a lista `propostas`; a
+// licitação gravada no modelo antigo (só `proposta`) vale como lista de UM item.
+// O id da antiga é o próprio file_id — o mesmo que o backend usa no `?pid=`.
+export const listPropostas = (bid) => {
+  const lista = bid?.propostas ?? (bid?.proposta?.file_id ? [bid.proposta] : []);
+  return lista.filter((p) => p?.file_id).map((p) => ({ ...p, id: p.id || p.file_id }));
+};
+export const hasProposta = (bid) => listPropostas(bid).length > 0;
 
 // Botão da tabela, ao lado da calculadora. Mesmo tamanho/raio do botão do orçamento.
+// Sem proposta: cinza desbotado; com proposta: #0114FF; com 2+: #0114FF + badge.
 export const PropostaButton = ({ bid, onClick }) => {
-  const ativa = hasProposta(bid);
+  const total = listPropostas(bid).length;
+  const ativa = total > 0;
   return (
     <button
       type="button"
       data-testid={`bid-proposta-${bid.id}`}
+      data-count={total}
       onClick={onClick}
-      title="Proposta"
+      title={total > 1 ? `Propostas (${total})` : "Proposta"}
       className={cn(
-        "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
-        ativa
-          ? "text-brand hover:bg-brand/10"                       // com proposta: azul vivo
-          : "text-brand/30 hover:bg-accent hover:text-brand/60"  // sem proposta: azul desbotado
+        "relative flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+        ativa ? "hover:bg-[#0114FF]/10" : "text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground/70"
       )}
+      style={ativa ? { color: PROPOSTA_COLOR } : undefined}
     >
       <PropostaIcon size={18} />
+      <CountBadge count={total} color={PROPOSTA_COLOR} testid={`bid-proposta-${bid.id}-badge`} small />
     </button>
   );
 };

@@ -3,7 +3,8 @@ import { FileText, Calculator, Receipt, FileSpreadsheet, Folder, Plus, X, Extern
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { FileUpload } from "@/components/FileUpload";
-import { PropostaIcon, hasProposta } from "@/components/bids/PropostaIcon";
+import { PropostaIcon, PROPOSTA_COLOR, listPropostas } from "@/components/bids/PropostaIcon";
+import { CountBadge } from "@/components/CountBadge";
 import { fileUrl, formatApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -23,10 +24,10 @@ import { toast } from "sonner";
  * clique abre a lista. Cores amostradas da ref 2.
  */
 
-const COLORS = {
+export const COLORS = {
   edital: "#EF4444",        // vermelho
   orcamento: "#059669",     // verde
-  proposta: "#2563EB",      // azul
+  proposta: PROPOSTA_COLOR, // azul #0114FF (a mesma cor em todas as telas)
   nota_empenho: "#F97316",  // laranja
   nota_fiscal: "#7C3AED",   // roxo/violeta
   outros: "#475569",        // grafite
@@ -34,7 +35,7 @@ const COLORS = {
 
 // Abre o documento no navegador (nova aba), pelo MESMO endpoint autenticado das
 // demais telas: /api/files/{id}?auth=<token>. Nada vira público.
-const openFile = (id) => {
+export const openFile = (id) => {
   const url = fileUrl(id);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 };
@@ -60,15 +61,7 @@ function HubItem({ testid, icon: Icon, label, title, color, count = 0, filled, o
             style={ativo ? { color } : undefined}
           />
         </button>
-        {count > 1 && (
-          <span
-            data-testid={`${testid}-badge`}
-            className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-card px-1 text-[10px] font-bold leading-none text-white"
-            style={{ backgroundColor: color }}
-          >
-            {count}
-          </span>
-        )}
+        <CountBadge count={count} color={color} testid={`${testid}-badge`} />
         {/* Gerenciar (adicionar outro arquivo / excluir) quando existe exatamente
             um documento — com 2+ o próprio clique no ícone já abre a lista. */}
         {onManage && count === 1 && (
@@ -98,7 +91,7 @@ function HubItem({ testid, icon: Icon, label, title, color, count = 0, filled, o
 /* ------------------------------ Lista + envio ------------------------------ */
 // Mesma janela para as três situações: lista dos documentos da categoria, envio
 // do primeiro arquivo e "+ Adicionar arquivo" com a categoria já preenchida.
-function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
+export function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
   const [enviando, setEnviando] = useState(false);
   if (!categoria) return null;
   const { key, label, files, color, aceita, multiplos } = categoria;
@@ -184,12 +177,11 @@ function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
   );
 }
 
-/* ----------------------------------- Hub ----------------------------------- */
-export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
-  const navigate = useNavigate();
-  const [aberta, setAberta] = useState(null); // chave da categoria com a janela aberta
-
-  const bidId = execution?.bid_id;
+/* ------------------------------- Categorias -------------------------------- */
+// Arquivos de cada porta, lidos da fonte de verdade de cada uma. Exportado para
+// que outros acessos aos MESMOS documentos (ex.: atalhos da Planilha de
+// Orçamento) contem e listem exatamente o que o hub mostra.
+export function buildDocCategories(execution, bid) {
   const docs = execution?.documentos || {};
 
   // EDITAL — fonte de verdade: a própria licitação (mesmos arquivos da coluna
@@ -211,19 +203,30 @@ export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdi
   const notaEmpenho = docs.nota_empenho || [];
   const notaFiscal = docs.nota_fiscal || [];
 
-  const CATS = {
+  return {
     edital: { key: "edital", label: "Edital", files: edital, color: COLORS.edital, aceita: ".pdf,image/*,.docx,.xlsx", multiplos: true },
     nota_empenho: { key: "nota_empenho", label: "Nota de Empenho", files: notaEmpenho, color: COLORS.nota_empenho, aceita: ".pdf,image/*,.docx,.xlsx", multiplos: true },
     nota_fiscal: { key: "nota_fiscal", label: "Nota Fiscal", files: notaFiscal, color: COLORS.nota_fiscal, aceita: ".pdf,image/*,.docx,.xlsx,.xml", multiplos: true },
     outros: { key: "outros", label: "Outros", files: outros, color: COLORS.outros, aceita: ".pdf,image/*,.docx,.xlsx,.xml,.zip", multiplos: true },
   };
+}
 
-  // Clique no ícone: vazio abre o envio, 1 arquivo abre direto no navegador,
-  // vários abrem a lista compacta.
-  const abrir = (cat) => {
-    if (cat.files.length === 1) openFile(cat.files[0].id);
-    else setAberta(cat.key);
-  };
+// Clique no ícone: vazio abre o envio, 1 arquivo abre direto no navegador,
+// vários abrem a lista compacta. `abrirLista(key)` abre o DocsDialog.
+export const abrirCategoria = (cat, abrirLista) => {
+  if (cat.files.length === 1) openFile(cat.files[0].id);
+  else abrirLista(cat.key);
+};
+
+/* ----------------------------------- Hub ----------------------------------- */
+export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
+  const navigate = useNavigate();
+  const [aberta, setAberta] = useState(null); // chave da categoria com a janela aberta
+
+  const bidId = execution?.bid_id;
+  const CATS = buildDocCategories(execution, bid);
+  const { edital: { files: edital }, nota_empenho: { files: notaEmpenho }, nota_fiscal: { files: notaFiscal }, outros: { files: outros } } = CATS;
+  const abrir = (cat) => abrirCategoria(cat, setAberta);
 
   const enviar = (key, file) => {
     if (key === "edital") return onAddEdital(file);
@@ -235,7 +238,7 @@ export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdi
     return onRemoveDoc(key, f.id);
   };
 
-  const propostaAtiva = hasProposta(bid);
+  const totalPropostas = listPropostas(bid).length;
 
   return (
     <>
@@ -255,8 +258,8 @@ export function DocumentHub({ execution, bid, onUploadDoc, onRemoveDoc, onAddEdi
         />
         <HubItem
           testid="hub-proposta" icon={PropostaIcon} label="Proposta" color={COLORS.proposta}
-          title={propostaAtiva ? "Abrir proposta" : "Adicionar proposta"}
-          filled={propostaAtiva} count={propostaAtiva ? 1 : 0}
+          title={totalPropostas > 1 ? `Abrir propostas (${totalPropostas})` : totalPropostas ? "Abrir proposta" : "Adicionar proposta"}
+          count={totalPropostas}
           onClick={() => onProposta(bid)}
         />
         <HubItem

@@ -1,5 +1,6 @@
 import { FileText, Image as ImageIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { CountBadge } from "@/components/CountBadge";
 import { fileUrl } from "@/lib/api";
 
 const isImage = (name = "") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
@@ -13,9 +14,10 @@ const FileTypeIcon = ({ name, size = 16 }) =>
 export const collectBidFiles = (bid) =>
   [bid?.termo_referencia, ...(bid?.anexos || [])].filter(Boolean);
 
-// Bloco compacto de arquivos para o cabeçalho do orçamento (padrão ref23:
-// ícone de pasta + label "Arquivos" + quantidade). Reutiliza o mesmo mecanismo
-// de visualização das demais telas: fileUrl() abre cada arquivo em nova aba.
+// Arquivos no cabeçalho do orçamento: só o ícone vermelho (sem rótulo), no
+// mesmo formato dos atalhos de documentos ao lado — cinza sem arquivo, badge
+// com a quantidade quando há 2+. Reutiliza o mesmo mecanismo de visualização
+// das demais telas: fileUrl() abre cada arquivo em nova aba.
 export const BidFilesButton = ({ bid }) => {
   const files = collectBidFiles(bid);
   const count = files.length;
@@ -24,15 +26,13 @@ export const BidFilesButton = ({ bid }) => {
     <button
       type="button"
       data-testid="budget-files-trigger"
+      data-count={count}
       disabled={count === 0}
-      title={count === 0 ? "Nenhum arquivo anexado" : `${count} arquivo${count > 1 ? "s" : ""}`}
-      className="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
+      title={count === 0 ? "Nenhum arquivo anexado" : `Arquivos (${count})`}
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
     >
-      <FileText size={15} className="shrink-0 text-alert" />
-      <span className="leading-none">
-        <span className="block text-[10px] text-muted-foreground">Arquivos</span>
-        <span className="block text-xs font-medium text-foreground">{count}</span>
-      </span>
+      <FileText size={20} className={count ? "shrink-0 text-alert" : "shrink-0 text-muted-foreground/40"} />
+      <CountBadge count={count} color="#EF4444" testid="budget-files-badge" small />
     </button>
   );
 

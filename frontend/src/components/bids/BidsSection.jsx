@@ -9,6 +9,7 @@ import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { hasProposta } from "@/components/bids/PropostaIcon";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useData } from "@/context/DataContext";
+import { matchesDigits } from "@/lib/search";
 import { toast } from "sonner";
 
 const EMPTY_FILTERS = {
@@ -46,8 +47,9 @@ export const BidsSection = () => {
     return bids.filter((b) => {
       if (hiddenIds.includes(b.id)) return false;
       if (filters.objeto && !b.objeto?.toLowerCase().includes(filters.objeto.toLowerCase())) return false;
-      if (filters.pregao && !(b.pregao || "").toLowerCase().includes(filters.pregao.toLowerCase())) return false;
-      if (filters.uasg && !(b.uasg || "").toLowerCase().includes(filters.uasg.toLowerCase())) return false;
+      // Pregão/UASG: só os dígitos dos dois lados (lib/search.js); Descrição segue textual.
+      if (filters.pregao && !matchesDigits(b.pregao, filters.pregao)) return false;
+      if (filters.uasg && !matchesDigits(b.uasg, filters.uasg)) return false;
       if (filters.data && (filters.data.from || filters.data.to)) {
         const d = b.data_disputa || "";
         if (!d) return false;

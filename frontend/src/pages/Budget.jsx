@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CloudOff, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock, RotateCcw } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, TrendingUp, Percent, Wallet, Pencil, Check, Cloud, CloudOff, CheckCircle2, EyeOff, Eye, ChevronDown, Filter, BadgePercent, GripVertical, Tag, Building2, Gavel, Globe, Briefcase, Calendar, Clock, RotateCcw, Undo2, Redo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -19,6 +19,9 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useColumnResize, ColResizer } from "@/components/table/resizable";
 import { PortalName } from "@/components/bids/PortalName";
 import { BidFilesButton } from "@/components/bids/BidFilesButton";
+import { usePropostaFlow } from "@/components/bids/PropostaFlow";
+import { DocShortcuts } from "@/components/execution/DocShortcuts";
+import { useData } from "@/context/DataContext";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
 import { smartTitleCase } from "@/lib/textcase";
@@ -26,6 +29,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { normalizeUrl, safeHref, displayUrl } from "@/lib/url";
 import { useBudgetSync, hydrateRows, newRowId } from "@/hooks/useBudgetSync";
+import { useUndoHistory } from "@/hooks/useUndoHistory";
 
 // _id estável e único entre sessões: identifica a linha nas operações granulares.
 const newRow = (defaults) => ({
@@ -49,10 +53,10 @@ const fmtDispDate = (d) => {
 function HeaderInfo({ icon: Icon, label, value }) {
   return (
     <div className="flex shrink-0 items-center gap-1.5">
-      <Icon size={15} className="shrink-0 text-muted-foreground" />
+      <Icon size={18} className="shrink-0 text-foreground" />
       <div className="min-w-0 leading-none">
-        <div className="text-[10px] leading-none text-muted-foreground">{label}</div>
-        <div className="mt-0.5 truncate text-xs font-medium leading-none text-foreground">{value}</div>
+        <div className="text-xs leading-none text-foreground">{label}</div>
+        <div className="mt-1 truncate text-sm font-semibold leading-none text-foreground">{value}</div>
       </div>
     </div>
   );
@@ -194,6 +198,9 @@ const LIVE_SAVE_MS = 700;
 // sem digitar nunca regrava um valor antigo por cima de uma alteração remota.
 // `liveSave`: também grava LIVE_SAVE_MS após a última tecla (bruto; o blur/Enter
 // aplica o Smart Title Case e grava de novo só se mudou).
+// `onCommit(valor, sessao)`: todos os commits de UMA edição da célula levam a
+// mesma `sessao` — o Desfazer trata a edição inteira como um passo só.
+let editSessionSeq = 0;
 function EditableCell({ value, type = "text", onCommit, align = "left", placeholder, readOnly, testid, shouldFocus, onAdvance, liveSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -201,10 +208,14 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
   const touched = useRef(false);
   const sent = useRef(null);
   const liveTimer = useRef(null);
+  const session = useRef(null);
 
   useEffect(() => () => clearTimeout(liveTimer.current), []);
 
-  const open = () => { touched.current = false; sent.current = null; setDraft(value ?? ""); setEditing(true); };
+  const open = () => {
+    touched.current = false; sent.current = null; session.current = ++editSessionSeq;
+    setDraft(value ?? ""); setEditing(true);
+  };
 
   useEffect(() => {
     if (shouldFocus && !readOnly) open();
@@ -216,7 +227,7 @@ function EditableCell({ value, type = "text", onCommit, align = "left", placehol
   }, [editing]);
 
   const start = () => { if (readOnly) return; open(); };
-  const send = (v) => { sent.current = v; onCommit(v); };
+  const send = (v) => { sent.current = v; onCommit(v, session.current); };
   const onChange = (v) => {
     setDraft(v);
     touched.current = true;
@@ -457,6 +468,14 @@ export default function Budget({ mode = "bid" }) {
   // Orçamento de licitação: edição simultânea (operações granulares + WebSocket).
   // O Rascunho continua com o salvamento da planilha inteira (1 por usuário).
   const sync = useBudgetSync({ bidId, enabled: !isDraft, rows, setRows });
+  // Desfazer/Refazer: só as edições desta sessão (ver useUndoHistory).
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const history = useUndoHistory({ rows, rowsRef, apply: (id, patch) => applyPatch(id, patch) });
+  // Documentos da licitação (Proposta / Nota de Empenho / Nota Fiscal / Outros):
+  // mesma fonte de verdade do hub da Execução — o estado vem do DataContext.
+  const { bids: ctxBids, executions, refreshBids, refreshExecutions } = useData();
+  const { abrirProposta, propostaModals } = usePropostaFlow();
   const saveState = isDraft ? draftSaveState : sync.saveState;
   const dragStartVis = useRef(null);
   const draggingRef = useRef(false);
@@ -535,18 +554,52 @@ export default function Budget({ mode = "bid" }) {
     return () => clearTimeout(timerRef.current);
   }, [rows, loading, bidId, isDraft]);
 
+  // Documentos (ícones do cabeçalho): ao abrir a planilha e ao voltar para a aba,
+  // relê licitações e execuções — reflete o que foi enviado em outra tela/computador.
+  useEffect(() => {
+    if (isDraft) return undefined;
+    refreshBids(); refreshExecutions();
+    const onFocus = () => { refreshBids(); refreshExecutions(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [isDraft, refreshBids, refreshExecutions]);
+
+  // Atalhos de teclado do Desfazer/Refazer — fora de campos de texto (lá o
+  // Ctrl+Z continua sendo o do próprio input) e sem janela aberta por cima.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      if (e.target?.closest?.("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='alertdialog']")) return;
+      e.preventDefault();
+      if (k === "y" || e.shiftKey) history.redo();
+      else history.undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   // Persiste o filtro de lote (cards) por escopo, para sobreviver à saída/retorno da página.
   useEffect(() => {
     try { localStorage.setItem(`erp_lote_hidden_${scopeKey}`, JSON.stringify([...hiddenLotes])); } catch { /* ignore */ }
   }, [hiddenLotes, scopeKey]);
 
   const markDirty = () => { dirtyRef.current = true; };
-  const updateRow = (id, patch) => {
+  // Grava campos de UMA linha pelo caminho normal (licitação: operação granular
+  // sincronizada; rascunho: autosave da planilha). Usado pela edição e pelo
+  // Desfazer/Refazer — não existe um segundo mecanismo de salvamento.
+  const applyPatch = (id, patch) => {
     if (!isDraft) { sync.patchRow(id, patch); return; }
     markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
   };
-  const onVenda = (id, v) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" });
-  const onMargem = (id, v) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" });
+  // Edição feita pelo usuário NESTA sessão: entra no histórico local e é gravada.
+  const updateRow = (id, patch, session) => {
+    history.record(id, patch, session);
+    applyPatch(id, patch);
+  };
+  const onVenda = (id, v, ses) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" }, ses);
+  const onMargem = (id, v, ses) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" }, ses);
   const addRow = () => {
     if (!isDraft) { sync.addRow(newRow(defaults)); return; }
     markDirty(); setRows((p) => [...p, newRow(defaults)]);
@@ -700,17 +753,17 @@ export default function Budget({ mode = "bid" }) {
       case "site":
         return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
       case "text":
-        return <EditableCell value={r[col.key]} type="text" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="text" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "number":
-        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "currency":
-        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "percent":
-        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v) => updateRow(r._id, { [col.key]: v })} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "venda":
-        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v) => onVenda(r._id, v)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v, ses) => onVenda(r._id, v, ses)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "margem":
-        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v) => onMargem(r._id, v)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v, ses) => onMargem(r._id, v, ses)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
       case "calc_pct":
         return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-emerald-700 dark:text-emerald-300">{pct(c[col.key])}</div>;
       case "calc_currency": {
@@ -738,34 +791,62 @@ export default function Budget({ mode = "bid" }) {
   if (!isDraft) {
     if (bid?.uasg) infoNodes.push({ key: "uasg", node: <HeaderInfo icon={Building2} label="UASG" value={bid.uasg} /> });
     if (bid?.pregao) infoNodes.push({ key: "pregao", node: <HeaderInfo icon={Gavel} label="Pregão" value={bid.pregao} /> });
-    if (bid?.portal) infoNodes.push({ key: "portal", node: <HeaderInfo icon={Globe} label="Portal" value={<PortalName portal={bid.portal} className="max-w-[140px] text-xs" />} /> });
+    if (bid?.portal) infoNodes.push({ key: "portal", node: <HeaderInfo icon={Globe} label="Portal" value={<PortalName portal={bid.portal} className="max-w-[160px] text-sm" />} /> });
     if (bid?.modalidade) infoNodes.push({ key: "mod", node: <HeaderInfo icon={Briefcase} label="Modalidade" value={bid.modalidade} /> });
     if (bid?.data_disputa) infoNodes.push({ key: "data", node: <HeaderInfo icon={Calendar} label="Data" value={fmtDispDate(bid.data_disputa)} /> });
     if (bid?.hora) infoNodes.push({ key: "hora", node: <HeaderInfo icon={Clock} label="Horário" value={bid.hora} /> });
-    infoNodes.push({ key: "files", node: <BidFilesButton bid={bid} /> });
+    // Arquivos (ícone vermelho) + atalhos para os documentos da Execução & Pós-Venda.
+    // A licitação do contexto é a versão viva (proposta adicionada aparece na hora).
+    const bidVivo = ctxBids.find((b) => b.id === bidId) || bid;
+    infoNodes.push({
+      key: "files",
+      node: (
+        <div className="flex shrink-0 items-center gap-1">
+          <BidFilesButton bid={bid} />
+          <DocShortcuts bid={bidVivo} execution={executions.find((e) => e.bid_id === bidId)} onProposta={abrirProposta} />
+        </div>
+      ),
+    });
   }
 
-  const vDivider = <span className="h-7 w-px shrink-0 bg-border" />;
+  const vDivider = <span className="h-9 w-px shrink-0 bg-border" />;
 
   // Bloco de ações do cabeçalho (indicador de salvamento + filtro de lote + reset + adicionar linha).
   // Reutilizado nos dois modos; o botão de reset só aparece no rascunho.
   const actionsBlock = (
     <div className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
       {!isDraft && vDivider}
-      <div data-testid="budget-save-state" className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        {saveState === "saving" && (<><Loader2 size={14} className="animate-spin" /> Salvando…</>)}
-        {saveState === "saved" && (<><CheckCircle2 size={14} className="text-emerald-600" /> Salvo</>)}
-        {saveState === "idle" && (<><Cloud size={14} /> Salvo na nuvem</>)}
-        {saveState === "error" && (<span className="flex items-center gap-1.5 text-alert" title="As alterações ficam na tela e serão gravadas assim que a conexão voltar."><CloudOff size={14} /> Sem conexão — tentando salvar…</span>)}
+      {/* Desfazer / Refazer — só as edições desta sessão; gravam e sincronizam. */}
+      <div className="flex shrink-0 items-center">
+        <button
+          type="button" data-testid="budget-undo" onClick={history.undo} disabled={!history.canUndo}
+          title="Desfazer (Ctrl+Z)"
+          className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-35"
+        >
+          <Undo2 size={19} />
+        </button>
+        <button
+          type="button" data-testid="budget-redo" onClick={history.redo} disabled={!history.canRedo}
+          title="Refazer (Ctrl+Y)"
+          className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-35"
+        >
+          <Redo2 size={19} />
+        </button>
+      </div>
+      <div data-testid="budget-save-state" className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-foreground">
+        {saveState === "saving" && (<><Loader2 size={17} className="animate-spin" /> Salvando…</>)}
+        {saveState === "saved" && (<><CheckCircle2 size={17} className="text-emerald-600" /> Salvo</>)}
+        {saveState === "idle" && (<><Cloud size={17} /> Salvo na nuvem</>)}
+        {saveState === "error" && (<span className="flex items-center gap-1.5 text-alert" title="As alterações ficam na tela e serão gravadas assim que a conexão voltar."><CloudOff size={17} /> Sem conexão — tentando salvar…</span>)}
       </div>
       {hiddenList.length > 0 && (
-        <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="budget-show-all" onClick={showAll}>
+        <Button variant="outline" size="sm" className="h-9 shrink-0 text-sm" data-testid="budget-show-all" onClick={showAll}>
           <Eye size={15} className="mr-1.5" /> Reexibir ({hiddenList.length})
         </Button>
       )}
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="h-8 shrink-0" data-testid="lote-filter-trigger">
+          <Button variant="outline" size="sm" className="h-9 shrink-0 text-sm" data-testid="lote-filter-trigger">
             <Filter size={15} className="mr-1.5" /> Filtrar por Lote{hiddenCount > 0 ? ` (${hiddenCount})` : ""}
             <ChevronDown size={14} className="ml-1.5 text-muted-foreground" />
           </Button>
@@ -796,14 +877,14 @@ export default function Budget({ mode = "bid" }) {
       {isDraft && (
         <Button
           variant="outline" size="sm" data-testid="draft-reset" onClick={() => setResetOpen(true)}
-          className="h-8 shrink-0 border-alert text-alert hover:bg-alert/10 hover:text-alert"
+          className="h-9 shrink-0 text-sm border-alert text-alert hover:bg-alert/10 hover:text-alert"
         >
           <RotateCcw size={15} className="mr-1.5" /> Resetar rascunho
         </Button>
       )}
       <Button
         size="sm" data-testid="budget-add-row" onClick={addRow}
-        className="h-8 shrink-0 bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+        className="h-9 shrink-0 text-sm bg-foreground text-background hover:bg-foreground/90 hover:text-background"
       >
         <Plus size={16} className="mr-1.5" /> Linha
       </Button>
@@ -812,18 +893,18 @@ export default function Budget({ mode = "bid" }) {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-card/70 px-6 backdrop-blur-md">
+      <header className="sticky top-0 z-30 flex h-[84px] items-center gap-3 border-b border-border bg-card/70 px-6 backdrop-blur-md">
         <Button
           variant="ghost" size="icon" data-testid="budget-back" onClick={() => navigate(-1)}
-          className="h-9 w-9 shrink-0 rounded-lg bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+          className="h-11 w-11 shrink-0 rounded-lg bg-foreground text-background hover:bg-foreground/90 hover:text-background"
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={20} />
         </Button>
-        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
-          <h1 data-testid="budget-bid-title" title={isDraft ? "Rascunho de Orçamento" : (bid?.objeto || undefined)} className="truncate font-heading text-lg font-bold leading-none tracking-tight">{tituloObjeto}</h1>
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5">
+          <h1 data-testid="budget-bid-title" title={isDraft ? "Rascunho de Orçamento" : (bid?.objeto || undefined)} className="truncate font-heading text-xl font-bold leading-none tracking-tight">{tituloObjeto}</h1>
           <div data-testid="budget-bid-meta" className="scrollbar-hide flex items-center gap-2.5 overflow-x-auto">
             {isDraft ? (
-              <span className="shrink-0 text-xs text-muted-foreground">Planilha independente — sem vínculo com licitação</span>
+              <span className="shrink-0 text-sm text-foreground">Planilha independente — sem vínculo com licitação</span>
             ) : (
               infoNodes.map((it, i) => (
                 <div key={it.key} className="flex shrink-0 items-center gap-2.5">
@@ -939,6 +1020,9 @@ export default function Budget({ mode = "bid" }) {
           )}
         </div>
       )}
+
+      {/* Proposta: o mesmo fluxo (leitura / adicionar / substituir) das demais telas */}
+      {!isDraft && propostaModals}
 
       {/* Confirmação de exclusão de linha */}
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>

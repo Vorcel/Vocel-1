@@ -100,23 +100,26 @@ export function DataProvider({ children }) {
     setBids((prev) => prev.map((b) => (b.id === bid.id ? bid : b)));
     return bid;
   };
-  const sendProposta = async (method, id, file) => {
+  // Várias propostas por licitação: `pid` escolhe qual (sem ele, o backend usa a primeira).
+  const sendProposta = async (method, id, file, pid) => {
     const fd = new FormData();
     fd.append("file", file);
     const { data } = await api[method](`/bids/${id}/proposta`, fd, {
       headers: { "Content-Type": "multipart/form-data" },
+      params: pid ? { pid } : undefined,
     });
     return applyBid(data);
   };
+  // Adicionar = nova proposta no fim da lista; Substituir = troca o arquivo da `pid`.
   const uploadProposta = (id, file) => sendProposta("post", id, file);
-  const replaceProposta = (id, file) => sendProposta("put", id, file);
-  const removeProposta = async (id) => {
-    const { data } = await api.delete(`/bids/${id}/proposta`);
+  const replaceProposta = (id, file, pid) => sendProposta("put", id, file, pid);
+  const removeProposta = async (id, pid) => {
+    const { data } = await api.delete(`/bids/${id}/proposta`, { params: pid ? { pid } : undefined });
     return applyBid(data);
   };
   // Enviar/tentar de novo/recriar no Drive — o backend usa sempre o original do R2.
-  const syncProposta = async (id) => {
-    const { data } = await api.post(`/bids/${id}/proposta/sync`);
+  const syncProposta = async (id, pid) => {
+    const { data } = await api.post(`/bids/${id}/proposta/sync`, null, { params: pid ? { pid } : undefined });
     return applyBid(data);
   };
 
