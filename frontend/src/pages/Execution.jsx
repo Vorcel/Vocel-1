@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { AtestadoDropdown } from "@/components/execution/AtestadoDropdown";
 import { TimelineProgressBar } from "@/components/execution/TimelineProgressBar";
 import { DocumentHub } from "@/components/execution/DocumentHub";
+import { BaixaRecebivelDialog, FinNote, RecebivelButton, RecebivelModal, unitKey, useFinLinks } from "@/components/execution/RecebivelAction";
 import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
@@ -179,6 +180,10 @@ export default function Execution() {
   // Proposta: o MESMO fluxo (upload / leitura rápida / substituição) de Todas
   // as Licitações, sobre o mesmo documento da licitação.
   const { abrirProposta, propostaModals } = usePropostaFlow();
+  // Integração com o Financeiro: estado da solicitação de recebível por unidade.
+  const { links: finLinks, refresh: refreshFinLinks } = useFinLinks();
+  const [recebivel, setRecebivel] = useState(null);     // { bidId, remessaId, nome, valorCents, link }
+  const [baixaPrompt, setBaixaPrompt] = useState(null); // vínculo aprovado a baixar no Financeiro
 
   const [selectedId, setSelectedId] = useState(null); // null => Componente A (dashboard)
   // Remessa ativa da licitação selecionada (undefined = a padrão; null = a própria
@@ -420,9 +425,27 @@ export default function Execution() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
   // Clicar numa etapa reposiciona o fluxo até ela; clicar na etapa atual conclui e avança.
-  const moveTo = (unit, idx) => {
+  const moveTo = async (unit, idx) => {
     const cs = doneCount(unitView(unit).nodes);
-    persistStep(unit, idx === cs ? idx + 1 : idx, filesOf(unit));
+    const step = idx === cs ? idx + 1 : idx;
+    await persistStep(unit, step, filesOf(unit));
+    // Chegou em Pagamento Recebido com recebível aprovado e em aberto no
+    // Financeiro: pergunta antes de dar baixa lá (nunca automático).
+    if (step >= TIMELINE_STEPS.length) {
+      const link = finLinks[unitKey(unit.bid_id, unit.virtual ? null : unit.id)];
+      if (link?.estado === "aprovado" || link?.estado === "parcial") {
+        setBaixaPrompt({ ...link, nome: unit.virtual ? (unit.objeto || "A licitação") : unit.nome });
+      }
+    }
+  };
+  const abrirRecebivel = (e, u) => {
+    const remessaId = u && !u.virtual ? u.id : null;
+    const valor = Number((u && !u.virtual ? u.valor_empenho : e.valor_empenho) || 0);
+    setRecebivel({
+      bidId: e.bid_id, remessaId, valorCents: Math.round(valor * 100),
+      nome: [bidsById[e.bid_id]?.objeto ?? e.objeto, remessaId && u.nome].filter(Boolean).join(" · "),
+      link: finLinks[unitKey(e.bid_id, remessaId)],
+    });
   };
   // Anexos antigos (enviados no modelo por etapa): continuam exatamente onde
   // estão — a única operação que sobrou é removê-los pela lista de "Outros".
@@ -496,13 +519,13 @@ export default function Execution() {
   // licitação e pelas linhas de remessa — mesmas colunas da tabela, então os
   // eixos (Empenho, Compra, Lucro, Status, Progresso, Atestado, Ações) coincidem.
   const stop = (ev) => ev.stopPropagation();
-  const opsCells = ({ prazo, dataEntrega, empenho, compra, lucro, lucroTitle, stage, progress, progressTestid, atestado, acoes }) => [
+  const opsCells = ({ prazo, dataEntrega, empenho, compra, lucro, lucroTitle, stage, finLink, progress, progressTestid, atestado, acoes }) => [
     <td key="entrega" className="px-3 py-3" onClick={stop}>{prazo}</td>,
     <td key="data" className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(dataEntrega)}</td>,
     <td key="empenho" className="font-mono-num whitespace-nowrap px-3 py-3">{brl(empenho)}</td>,
     <td key="compra" className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(compra)}</td>,
     <td key="lucro" className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600" title={lucroTitle}>{brl(lucro)}</td>,
-    <td key="status" className="px-3 py-3"><StatusBadge color={stageColor(stage)}>{stage}</StatusBadge></td>,
+    <td key="status" className="px-3 py-3"><StatusBadge color={stageColor(stage)}>{stage}</StatusBadge><FinNote link={finLink} /></td>,
     // Progresso — mesma regra da barra principal
     <td key="progresso" className="px-3 py-3">
       <div className="flex w-28 items-center gap-2" data-testid={progressTestid}>
@@ -571,6 +594,7 @@ export default function Execution() {
             lucro: e.lucro_previsto,
             lucroTitle: comRemessas ? `Lucro atualizado (soma das remessas). Lucro previsto original: ${brl(lucroOriginal)}` : undefined,
             stage: view.stage,
+            finLink: comRemessas ? null : finLinks[unitKey(e.bid_id)],
             progress: view.progress,
             progressTestid: `exec-progress-${e.bid_id}`,
             atestado: <AtestadoDropdown execution={e} onChange={(v) => updateAtestado({ ...e, virtual: true }, v)} />,
@@ -578,6 +602,10 @@ export default function Execution() {
               <>
                 <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
                   className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
+                {/* Recebíveis: sem remessas, a licitação envia; com remessas, cada remessa envia a sua */}
+                {(!comRemessas || finLinks[unitKey(e.bid_id)]) && (
+                  <RecebivelButton link={finLinks[unitKey(e.bid_id)]} testid={`exec-recebivel-${e.bid_id}`} onClick={() => abrirRecebivel(e, null)} />
+                )}
                 <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
                   className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" title="Encerrar execução"><Archive size={15} /></button>
                 {/* Nova remessa (abre a confirmação); a seta só aparece depois que existem remessas */}
@@ -662,6 +690,7 @@ export default function Execution() {
                             compra: u.valor_compra,
                             lucro: u.lucro_previsto,
                             stage: v.stage,
+                            finLink: u.virtual ? null : finLinks[unitKey(e.bid_id, u.id)],
                             progress: v.progress,
                             progressTestid: `exec-remessa-progress-${e.bid_id}-${u.numero}`,
                             atestado: <AtestadoDropdown execution={u} testKey={`${e.bid_id}-r${u.numero}`} onChange={(val) => updateAtestado(u, val)} />,
@@ -669,6 +698,9 @@ export default function Execution() {
                               <>
                                 <button data-testid={`exec-remessa-orcamento-${e.bid_id}-${u.numero}`} onClick={() => navigate(orcamentoPath(u))}
                                   className="flex h-8 w-8 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50" title={`Abrir orçamento da ${u.nome}`}><Pencil size={15} /></button>
+                                {!u.virtual && (
+                                  <RecebivelButton link={finLinks[unitKey(e.bid_id, u.id)]} testid={`exec-remessa-recebivel-${e.bid_id}-${u.numero}`} onClick={() => abrirRecebivel(e, u)} />
+                                )}
                                 <button data-testid={`exec-remessa-excluir-${e.bid_id}-${u.numero}`} disabled={!podeExcluir}
                                   onClick={() => podeExcluir && setExcluirRemessa({ execution: e, unit: u })}
                                   title={podeExcluir ? `Excluir ${u.nome}` : "A licitação precisa manter ao menos uma remessa"}
@@ -836,6 +868,9 @@ export default function Execution() {
         showItens={false} showProposta={false} showFavoritos={false}
         showOrgao showAtestado
       />
+
+      <RecebivelModal target={recebivel} onClose={() => setRecebivel(null)} onChanged={refreshFinLinks} />
+      <BaixaRecebivelDialog prompt={baixaPrompt} onClose={() => setBaixaPrompt(null)} onDone={refreshFinLinks} />
 
       {/* Encerrar execução com confirmação (não exclui nada) */}
       <Dialog open={!!encerrarTarget} onOpenChange={(o) => !o && setEncerrarTarget(null)}>

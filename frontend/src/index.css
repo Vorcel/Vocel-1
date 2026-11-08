@@ -296,3 +296,89 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
 .dark .an-scope .recharts-label {
     fill: hsl(var(--muted-foreground));
 }
+
+/* ===================== FINANCEIRO =====================
+   Identidade própria do módulo (sidebar escura esmeralda, áreas de trabalho
+   claras). Tudo escopado em .fin-scope: nada vaza para Licitações. Componentes
+   do Financeiro usam SÓ estas variáveis (nada de hex solto). */
+.fin-scope {
+  --fin-bg: #F4F7F6;
+  --fin-surface: #FFFFFF;
+  --fin-surface-2: #F7FAF9;
+  --fin-border: #E3EAE8;
+  --fin-ink: #0F1F1C;
+  --fin-ink-2: #475A56;
+  --fin-ink-3: #7A8B88;
+  --fin-primary: #0F6B5C;
+  --fin-primary-hover: #0B564A;
+  --fin-primary-soft: #E4F2EE;
+  --fin-sidebar-1: #0D433E;
+  --fin-sidebar-2: #062522;
+  --fin-success: #047857;
+  --fin-success-soft: #E2F4EC;
+  --fin-danger: #C2412D;
+  --fin-danger-soft: #FBEAE6;
+  --fin-warning: #B45309;
+  --fin-warning-soft: #FDF1DF;
+  --fin-info: #0E6E86;
+  --fin-info-soft: #E3F1F5;
+  --fin-muted: #64748B;
+  --fin-muted-soft: #EEF1F4;
+  --fin-radius: 14px;
+  --fin-shadow: 0 1px 2px rgba(15, 31, 28, 0.04), 0 4px 16px -8px rgba(15, 31, 28, 0.08);
+  background: var(--fin-bg);
+  color: var(--fin-ink);
+}
+.dark .fin-scope {
+  --fin-bg: #0B1312;
+  --fin-surface: #111C1A;
+  --fin-surface-2: #15221F;
+  --fin-border: #22322F;
+  --fin-ink: #E6EFED;
+  --fin-ink-2: #A9BAB6;
+  --fin-ink-3: #7D908C;
+  --fin-primary: #2BA88F;
+  --fin-primary-hover: #36BFA3;
+  --fin-primary-soft: #143A33;
+  --fin-sidebar-1: #0A2F2B;
+  --fin-sidebar-2: #041715;
+  --fin-success: #34C38F;
+  --fin-success-soft: #123329;
+  --fin-danger: #F07F6B;
+  --fin-danger-soft: #3A1E19;
+  --fin-warning: #F2B05E;
+  --fin-warning-soft: #3A2A14;
+  --fin-info: #5CC3DB;
+  --fin-info-soft: #13303A;
+  --fin-muted: #94A3B8;
+  --fin-muted-soft: #1E2A33;
+  --fin-shadow: none;
+}
+.fin-card {
+  background: var(--fin-surface);
+  border: 1px solid var(--fin-border);
+  border-radius: var(--fin-radius);
+  box-shadow: var(--fin-shadow);
+}
+.fin-table th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fin-ink-3);
+  background: var(--fin-surface-2);
+  text-align: left;
+  white-space: nowrap;
+  padding: 10px 12px;
+}
+.fin-table td {
+  padding: 11px 12px;
+  border-top: 1px solid var(--fin-border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.fin-table tbody tr:hover td { background: var(--fin-surface-2); }
+.fin-scope .recharts-cartesian-grid line { stroke: var(--fin-border); }
+.fin-scope .recharts-cartesian-axis-tick-value { fill: var(--fin-ink-3); font-size: 11px; }
+.fin-sidebar {
+  background: linear-gradient(180deg, var(--fin-sidebar-1) 0%, var(--fin-sidebar-2) 100%);
+}

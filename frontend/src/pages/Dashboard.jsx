@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Award, Star, Clock, MapPin } from "lucide-react";
+import { CalendarDays, Award, Star, Clock, MapPin, Wallet } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { BidsSection } from "@/components/bids/BidsSection";
 import { useData } from "@/context/DataContext";
@@ -91,9 +91,23 @@ export default function Dashboard() {
     </>
   );
 
+  // Troca de módulo: fica à esquerda, logo depois do ícone da sidebar e antes
+  // dos cards de indicadores (não junto do Rascunho, que é ferramenta de trabalho).
+  const financeiroButton = (
+    <button
+      data-testid="header-financeiro"
+      onClick={() => navigate("/financeiro")}
+      title="Abrir o módulo Financeiro"
+      className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-[#0F6B5C] px-3 text-sm font-semibold text-white transition-colors hover:bg-[#0B564A]"
+    >
+      <Wallet size={16} className="shrink-0" />
+      <span className="hidden sm:inline">Financeiro</span>
+    </button>
+  );
+
   return (
     <>
-      <Header centerContent={headerCards} />
+      <Header leftContent={financeiroButton} centerContent={headerCards} />
       <main className="space-y-8 p-6">
         {/* Seção 2 — Licitações do Dia (Hero Banner dinâmico) */}
         <section>
