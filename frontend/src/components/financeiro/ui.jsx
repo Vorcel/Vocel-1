@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, LogOut, Menu, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Loader2, LogOut, Moon, Sun } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -7,7 +7,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { fileUrl } from "@/lib/api";
-import { STATUS, TONES, entryStatus, money } from "@/lib/financeiro";
+import { FLOW_COLOR, STATUS, TONES, dueAlert, entryStatus, flowOf, money, todaySP } from "@/lib/financeiro";
 import { cn } from "@/lib/utils";
 import { useFinance } from "@/context/FinanceContext";
 import { FinIcon } from "./icons";
@@ -15,13 +15,8 @@ import { FinIcon } from "./icons";
 // Peças visuais do Financeiro. Cores só por variáveis --fin-* (index.css).
 
 export function PageHeader({ icon: Icon, title, subtitle, actions }) {
-  const { openMobileNav } = useFinance();
   return (
     <header className="flex flex-wrap items-start gap-x-4 gap-y-3 pb-6">
-      <button onClick={openMobileNav} className="mt-1 flex h-9 w-9 items-center justify-center rounded-lg border lg:hidden"
-        style={{ borderColor: "var(--fin-border)", color: "var(--fin-ink-2)" }} data-testid="fin-mobile-nav" title="Menu">
-        <Menu size={18} />
-      </button>
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {Icon && (
           <span className="mt-0.5 hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:flex"
@@ -51,8 +46,7 @@ function ModuleControls() {
   return (
     <>
       <button data-testid="fin-back-licitacoes" onClick={() => navigate("/")}
-        className="flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition-colors hover:bg-[var(--fin-primary-soft)]"
-        style={{ borderColor: "var(--fin-primary)", color: "var(--fin-primary)" }}>
+        className="flex h-9 items-center gap-1.5 rounded-lg border border-black bg-black px-3 text-sm font-semibold text-white transition-colors hover:bg-black/85">
         <ArrowLeft size={15} /> Licitações
       </button>
       <button onClick={toggleTheme} title="Alternar tema" data-testid="fin-theme-toggle"
@@ -80,7 +74,8 @@ function ModuleControls() {
   );
 }
 
-export function KpiCard({ icon: Icon, label, value, sub, tone = "info", highlight, testid, onClick }) {
+// `flow` pinta o VALOR do card pela regra global (entrada verde / saída vermelha).
+export function KpiCard({ icon: Icon, label, value, sub, tone = "info", highlight, testid, onClick, flow }) {
   const t = TONES[tone] || TONES.info;
   const Comp = onClick ? "button" : "div";
   return (
@@ -94,7 +89,7 @@ export function KpiCard({ icon: Icon, label, value, sub, tone = "info", highligh
       )}
       <div className="min-w-0">
         <p className="truncate text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>{label}</p>
-        <p className="font-mono-num truncate text-xl font-bold leading-snug tracking-tight sm:text-[22px]" style={{ color: "var(--fin-ink)" }}>{value}</p>
+        <p className="font-mono-num truncate text-xl font-bold leading-snug tracking-tight sm:text-[22px]" style={{ color: FLOW_COLOR[flow] || "var(--fin-ink)" }}>{value}</p>
         {sub && <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>{sub}</p>}
       </div>
     </Comp>
@@ -136,12 +131,15 @@ export function StatusPill({ status, className }) {
 
 // Status de um lançamento: "Parcialmente pago/recebido" mantém a parcialidade
 // visível e ganha um segundo selo "Atrasado" quando o saldo restante venceu.
+// "Vence hoje" é um selo textual (não só cor) para quem tem saldo vencendo no dia.
 export function EntryStatus({ entry, className }) {
   const s = entryStatus(entry);
+  const hoje = dueAlert(entry, todaySP()) === "hoje";
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-1", className)}>
       <StatusPill status={s.main} />
       {s.atrasado && <TonePill tone="danger">Atrasado</TonePill>}
+      {hoje && <TonePill tone="warning" title="Vencimento hoje com saldo em aberto">Vence hoje</TonePill>}
     </span>
   );
 }
@@ -170,15 +168,25 @@ export function TagChips({ ids = [], names = [], max = 2, className }) {
   );
 }
 
-// Valor com sinal/cor pelo tipo: receber verde, pagar neutro com "−".
-export function Amount({ cents, type, className, strong }) {
-  const isOut = type === "pagar";
+// VALOR FINANCEIRO — regra única do módulo (nunca colorir à mão nas páginas):
+//   flow="in"  entrada / receita / recebimento / crédito  -> verde
+//   flow="out" saída / despesa / pagamento / desconto      -> vermelho, com "−"
+//   flow="neutral" (padrão) valor original, saldo, limite  -> tinta normal
+// Só o número recebe cor; descrição, nome e linha continuam neutros.
+// `signed` mostra o "−" das saídas (desligue quando o rótulo já diz "Saídas").
+export function Money({ cents, flow = "neutral", strong, signed = true, className, title }) {
+  const out = flow === "out";
   return (
-    <span className={cn("font-mono-num whitespace-nowrap", strong && "font-semibold", className)}
-      style={{ color: isOut ? "var(--fin-ink)" : "var(--fin-success)" }}>
-      {isOut ? "−" : ""}{money(cents)}
+    <span title={title} className={cn("font-mono-num whitespace-nowrap", strong && "font-semibold", className)}
+      style={{ color: FLOW_COLOR[flow] || FLOW_COLOR.neutral }}>
+      {out && signed && Number(cents) > 0 ? "−" : ""}{money(cents)}
     </span>
   );
+}
+
+// Atalho para lançamentos/baixas: o tipo (pagar/receber) decide o fluxo.
+export function Amount({ cents, type, className, strong, signed }) {
+  return <Money cents={cents} flow={flowOf(type)} className={className} strong={strong} signed={signed} />;
 }
 
 export function CategoryChip({ id, name }) {

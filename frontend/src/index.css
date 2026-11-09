@@ -377,6 +377,14 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   vertical-align: middle;
 }
 .fin-table tbody tr:hover td { background: var(--fin-surface-2); }
+/* Alerta de vencimento na linha (saldo em aberto): fundo muito suave + filete
+   lateral. Atrasado (vermelho) pesa mais que Vence hoje (âmbar); nunca os dois. */
+.fin-table tbody tr.fin-row-late td { background: color-mix(in srgb, var(--fin-danger-soft) 62%, var(--fin-surface)); }
+.fin-table tbody tr.fin-row-late:hover td { background: var(--fin-danger-soft); }
+.fin-table tbody tr.fin-row-late td:first-child { box-shadow: inset 3px 0 0 var(--fin-danger); }
+.fin-table tbody tr.fin-row-today td { background: color-mix(in srgb, var(--fin-warning-soft) 55%, var(--fin-surface)); }
+.fin-table tbody tr.fin-row-today:hover td { background: var(--fin-warning-soft); }
+.fin-table tbody tr.fin-row-today td:first-child { box-shadow: inset 3px 0 0 #F59E0B; }
 .fin-scope .recharts-cartesian-grid line { stroke: var(--fin-border); }
 .fin-scope .recharts-cartesian-axis-tick-value { fill: var(--fin-ink-3); font-size: 11px; }
 .fin-sidebar {

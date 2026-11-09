@@ -143,6 +143,26 @@ export const TIPOS_CONTA = [
 ];
 export const BANDEIRAS = ["Visa", "Mastercard", "Elo", "American Express", "Hipercard", "Outra"];
 
+// ---------------- cor dos valores (regra global do Financeiro) ----------------
+// Entrada/receita/crédito = verde; saída/débito/desconto = vermelho; o resto
+// (valor original, saldo, limite) é neutro. Componente: <Money> / <Amount> (ui.jsx).
+export const FLOW_COLOR = { in: "var(--fin-success)", out: "var(--fin-danger)", neutral: "var(--fin-ink)" };
+export const flowOf = (type) => (type === "pagar" ? "out" : type === "receber" ? "in" : "neutral");
+// Fluxo de um evento do histórico (pelo módulo do registro).
+export const flowOfModule = (module) => (module === "pagar" ? "out" : module === "receber" ? "in" : "neutral");
+
+// Alerta de vencimento de um lançamento, SEMPRE pelo saldo em aberto:
+//   "atrasado" (vencido com saldo) > "hoje" (vence hoje com saldo) > null.
+// Quitado, cancelado ou sem saldo nunca recebe alerta.
+export function dueAlert(e, today) {
+  if (!(e.status === "pendente" || e.status === "parcial")) return null;
+  const aberto = e.open_cents ?? (e.amount_cents - (e.settled_cents || 0));
+  if (!(aberto > 0) || !e.due_date) return null;
+  if (e.due_date < today) return "atrasado";
+  if (e.due_date === today) return "hoje";
+  return null;
+}
+
 // Cores do gráfico de fluxo — Ref10 (verde = a receber, vermelho = a pagar,
 // azul = caixa projetado). Identidade nunca só pela cor: legenda + tooltip.
 export const CHART = { receber: "#5DB06F", pagar: "#F06B66", caixa: "#1559F5" };
@@ -188,6 +208,18 @@ for (const [k, nome] of Object.entries({ categoria: "Categoria", forma: "Forma d
   ACOES[`${k}_reativado`] = { label: `${nome} reativada`, tone: "info" };
   ACOES[`${k}_excluido`] = { label: `${nome} excluída`, tone: "danger" };
 }
+// Clientes e Fornecedores (fin_contacts)
+Object.assign(ACOES, {
+  cliente_criado: { label: "Cliente criado", tone: "info" },
+  fornecedor_criado: { label: "Fornecedor criado", tone: "info" },
+  cliente_fornecedor_criado: { label: "Cliente e Fornecedor criado", tone: "info" },
+  contato_editado: { label: "Cliente/Fornecedor editado", tone: "warning" },
+  contato_inativado: { label: "Cadastro inativado", tone: "muted" },
+  contato_reativado: { label: "Cadastro reativado", tone: "info" },
+  contato_excluido: { label: "Cadastro excluído", tone: "danger" },
+  contato_alterado: { label: "Cliente/Fornecedor alterado", tone: "warning" },
+});
+
 export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", config: "Configurações", execucao: "Execução" };
 
 // Valor legível de um campo alterado no histórico.
@@ -197,8 +229,63 @@ export function changeValue(field, v) {
   if (field === "due_date" || field.endsWith("_date")) return fmtDate(v);
   if (typeof v === "boolean") return v ? "Sim" : "Não";
   if (field === "status") return STATUS[v]?.label || (v === "parcial" ? "Parcial" : v);
+  if (field === "contato_document") return fmtDocument(v);
+  if (field === "contato_person_type") return PESSOAS[v] || v;
   if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
   return String(v);
+}
+
+// ---------------- clientes e fornecedores ----------------
+export const PAPEIS = { cliente: "Cliente", fornecedor: "Fornecedor", ambos: "Cliente e Fornecedor" };
+export const PESSOAS = { pf: "Pessoa Física", pj: "Pessoa Jurídica" };
+// Papéis que podem ser escolhidos em cada tipo de lançamento (mesma regra do backend).
+export const PAPEIS_DO_TIPO = { pagar: ["fornecedor", "ambos"], receber: ["cliente", "ambos"] };
+export const contatoServe = (c, type) => !!c && PAPEIS_DO_TIPO[type]?.includes(c.role);
+
+export const onlyDigits = (s) => String(s || "").replace(/\D/g, "");
+// Máscara progressiva (enquanto digita): CPF 000.000.000-00 / CNPJ 00.000.000/0000-00
+export function maskDocument(text, personType) {
+  const d = onlyDigits(text).slice(0, personType === "pf" ? 11 : 14);
+  if (personType === "pf") {
+    return d.replace(/^(\d{3})(\d)/, "$1.$2").replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+  }
+  return d.replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+}
+export const fmtDocument = (d) => {
+  const x = onlyDigits(d);
+  if (!x) return "—";
+  return maskDocument(x, x.length <= 11 ? "pf" : "pj");
+};
+export function maskPhone(text) {
+  const d = onlyDigits(text).slice(0, 11);
+  if (d.length <= 2) return d ? `(${d}` : "";
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+export const maskCep = (text) => { const d = onlyDigits(text).slice(0, 8); return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d; };
+export function validCpf(text) {
+  const d = onlyDigits(text);
+  if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+  for (const n of [9, 10]) {
+    let s = 0;
+    for (let i = 0; i < n; i += 1) s += Number(d[i]) * (n + 1 - i);
+    if (((s * 10) % 11) % 10 !== Number(d[n])) return false;
+  }
+  return true;
+}
+export function validCnpj(text) {
+  const d = onlyDigits(text);
+  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  for (const n of [12, 13]) {
+    const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let s = 0;
+    for (let i = 0; i < n; i += 1) s += Number(d[i]) * pesos[i];
+    const dv = 11 - (s % 11);
+    if ((dv >= 10 ? 0 : dv) !== Number(d[n])) return false;
+  }
+  return true;
 }
 
 // ---------------- API ----------------
@@ -231,6 +318,12 @@ export const finApi = {
   atualizacoes: () => api.get("/fin/recebiveis/atualizacoes").then((r) => r.data),
   decidirAtualizacao: (id, body) => api.post(`/fin/recebiveis/atualizacoes/${id}`, body).then((r) => r.data),
   vinculos: () => api.get("/fin/recebiveis/vinculos").then((r) => r.data),
+  contatos: (params) => api.get("/fin/contatos", { params }).then((r) => r.data),
+  contato: (id) => api.get(`/fin/contatos/${id}`).then((r) => r.data),
+  criarContato: (body) => api.post("/fin/contatos", body).then((r) => r.data),
+  editarContato: (id, body) => api.put(`/fin/contatos/${id}`, body).then((r) => r.data),
+  excluirContato: (id) => api.delete(`/fin/contatos/${id}`).then((r) => r.data),
+  sugestaoContato: (nome, type = "receber") => api.get("/fin/contatos/sugestao", { params: { nome, type } }).then((r) => r.data.item),
   sincronizarExecucao: (entryId) => api.post("/fin/recebiveis/sincronizar-execucao", { entry_id: entryId }).then((r) => r.data),
 };
 

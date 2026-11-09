@@ -7,7 +7,7 @@ import { useFinance } from "@/context/FinanceContext";
 import { apiError, finApi, money, periodPresets, todaySP } from "@/lib/financeiro";
 import { EntriesTable } from "@/components/financeiro/EntriesTable";
 import { ExecutionUpdates, ReceivableQueue, useReceivableQueue } from "@/components/financeiro/ReceivableQueue";
-import { EmptyState, FinSelect, KpiCard, PageHeader, Panel, TonePill } from "@/components/financeiro/ui";
+import { EmptyState, FinSelect, KpiCard, Money, PageHeader, Panel, TonePill } from "@/components/financeiro/ui";
 
 function usePeriodSummary(type) {
   const { version } = useFinance();
@@ -35,10 +35,10 @@ export function Pagar() {
     <>
       <PageHeader icon={ArrowUpFromLine} title="Contas a Pagar" subtitle="Despesas, parcelas, recorrências e vencimentos." actions={select} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight label="A pagar no período" value={money(data?.aberto_periodo?.cents)} sub={`${cnt(data?.aberto_periodo)} · ${period.label.toLowerCase()}`} />
-        <KpiCard testid="fin-pagar-vencidas" icon={AlertTriangle} tone="danger" label="Vencidas" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas)} />
-        <KpiCard testid="fin-pagar-7d" icon={CalendarRange} tone="info" label="Próximos 7 dias" value={money(data?.proximos_7?.cents)} sub={cnt(data?.proximos_7)} />
-        <KpiCard testid="fin-pagar-pagas" icon={CheckCircle2} tone="success" label="Pago no período" value={money(data?.realizado_periodo?.cents)}
+        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight flow="out" label="A pagar no período" value={money(data?.aberto_periodo?.cents)} sub={`${cnt(data?.aberto_periodo)} · ${period.label.toLowerCase()}`} />
+        <KpiCard testid="fin-pagar-vencidas" icon={AlertTriangle} tone="danger" flow="out" label="Vencidas" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas)} />
+        <KpiCard testid="fin-pagar-7d" icon={CalendarRange} tone="info" flow="out" label="Próximos 7 dias" value={money(data?.proximos_7?.cents)} sub={cnt(data?.proximos_7)} />
+        <KpiCard testid="fin-pagar-pagas" icon={CheckCircle2} tone="success" flow="out" label="Pago no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo, "pagamento")} · ${data?.parciais?.count ?? 0} parcialmente pago(s)`} />
       </div>
       <Panel className="mt-5" bodyClassName="pt-5"><EntriesTable type="pagar" pageKey="pagar" /></Panel>
@@ -62,7 +62,7 @@ function CategoryBreakdown({ data, period }) {
               <li key={r.category_id || "sem"}>
                 <div className="flex items-baseline justify-between gap-3 text-sm">
                   <span className="truncate font-medium" style={{ color: "var(--fin-ink)" }}>{byId[r.category_id]?.nome || r.nome}</span>
-                  <span className="font-mono-num shrink-0" style={{ color: "var(--fin-ink-2)" }}>{money(r.cents)} · {pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span>
+                  <span className="shrink-0 text-[13px]" style={{ color: "var(--fin-ink-2)" }}><Money cents={r.cents} flow="out" strong /> · {pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span>
                 </div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full" style={{ background: "var(--fin-muted-soft)" }}>
                   <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 1.5)}%`, background: cor }} />
@@ -84,11 +84,11 @@ export function Receber() {
     <>
       <PageHeader icon={ArrowDownToLine} title="Contas a Receber" subtitle="Recebíveis oficiais, aprovações da Execução e baixa de recebimentos." actions={select} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight label="A receber no período" value={money(data?.aberto_periodo?.cents)} sub={`${cnt(data?.aberto_periodo, "recebível")} · ${period.label.toLowerCase()}`} />
+        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight flow="in" label="A receber no período" value={money(data?.aberto_periodo?.cents)} sub={`${cnt(data?.aberto_periodo, "recebível")} · ${period.label.toLowerCase()}`} />
         <KpiCard testid="fin-receber-aguardando" icon={Hourglass} tone="warning" label="Aguardando aprovação" value={money(aguardando)} sub={`${queue.items.length} solicitação(ões) — fora do previsto`} />
-        <KpiCard testid="fin-receber-recebido" icon={CheckCircle2} tone="success" label="Recebido no período" value={money(data?.realizado_periodo?.cents)}
+        <KpiCard testid="fin-receber-recebido" icon={CheckCircle2} tone="success" flow="in" label="Recebido no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo, "recebimento")} · ${data?.parciais?.count ?? 0} parcialmente recebido(s)`} />
-        <KpiCard testid="fin-receber-atraso" icon={AlertTriangle} tone="danger" label="Em atraso" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas, "recebível")} />
+        <KpiCard testid="fin-receber-atraso" icon={AlertTriangle} tone="danger" flow="in" label="Em atraso" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas, "recebível")} />
       </div>
       <div className="mt-5 grid grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_420px]">
         <Panel className="2xl:order-2" icon={ClipboardCheck} title="Fila de aprovação" testid="fin-receber-queue"

@@ -13,7 +13,7 @@ import {
   ACOES, MODOS, TIPOS, apiError, centsToInput, changeValue, finApi, fmtDate, fmtTimestamp, isOpenEntry, money, parseMoney, todaySP,
 } from "@/lib/financeiro";
 import { FinConfirm, FinModal } from "./FinModal";
-import { Amount, CategoryChip, EntryStatus, Field, FinButton, FinInput, FinSelect, FinTextarea, TagChips, TonePill } from "./ui";
+import { Amount, CategoryChip, EntryStatus, Field, FinButton, FinInput, FinSelect, FinTextarea, Money, TagChips, TonePill } from "./ui";
 
 const hasSettlements = (e) => (e.settled_cents || 0) > 0;
 
@@ -98,16 +98,17 @@ export function EntryActionModals({ action, onClose, onDone, onEdit, onDuplicate
 // Valores do lançamento: original, já baixado e saldo em aberto.
 function Valores({ e, compact }) {
   const pagar = e.type === "pagar";
-  const item = (label, v, strong) => (
+  // Original e saldo em aberto são neutros; o realizado (pago/recebido) leva a cor do fluxo.
+  const item = (label, v, strong, flow) => (
     <div className="min-w-0">
       <p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>{label}</p>
-      <p className={`font-mono-num ${compact ? "text-sm" : "text-base"} ${strong ? "font-bold" : "font-semibold"}`} style={{ color: "var(--fin-ink)" }}>{money(v)}</p>
+      <p className={`${compact ? "text-sm" : "text-base"} ${strong ? "font-bold" : "font-semibold"}`}><Money cents={v} flow={flow} /></p>
     </div>
   );
   return (
     <div className="grid grid-cols-3 gap-3 rounded-xl border p-3" style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface-2)" }} data-testid="fin-entry-values">
       {item("Valor original", e.amount_cents)}
-      {item(pagar ? "Total pago" : "Total recebido", e.settled_cents || 0)}
+      {item(pagar ? "Total pago" : "Total recebido", e.settled_cents || 0, false, pagar ? "out" : "in")}
       {item(pagar ? "Saldo a pagar" : "Saldo a receber", e.open_cents ?? (e.amount_cents - (e.settled_cents || 0)), true)}
     </div>
   );
@@ -187,7 +188,7 @@ function useSettlements(entryId) {
   return [items, load];
 }
 
-function SettlementsList({ items, onReverse }) {
+function SettlementsList({ items, onReverse, type }) {
   if (!items.length) return <p className="text-xs" style={{ color: "var(--fin-ink-3)" }}>Nenhuma baixa registrada.</p>;
   const ativo = items.filter((b) => !b.reversed).reduce((s, b) => s + b.amount_cents, 0);
   return (
@@ -200,7 +201,7 @@ function SettlementsList({ items, onReverse }) {
               {[b.account_name, b.payment_method_name, b.created_by_name && `por ${b.created_by_name}`].filter(Boolean).join(" · ") || "—"}
               {b.reversed && <span className="block" style={{ color: "var(--fin-danger)" }}>Estornada{b.reversal_reason ? `: ${b.reversal_reason}` : ""}</span>}
             </span>
-            <span className={`font-mono-num font-semibold ${b.reversed ? "line-through" : ""}`} style={{ color: "var(--fin-ink)" }}>{money(b.amount_cents)}</span>
+            <Amount cents={b.amount_cents} type={b.reversed ? null : (b.type || type)} strong className={b.reversed ? "line-through" : ""} />
             {onReverse && !b.reversed && (
               <button onClick={() => onReverse(b)} title="Estornar esta baixa" data-testid={`fin-reverse-${b.id}`}
                 className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--fin-danger-soft)]" style={{ color: "var(--fin-danger)" }}>
@@ -210,7 +211,7 @@ function SettlementsList({ items, onReverse }) {
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-right text-xs" style={{ color: "var(--fin-ink-3)" }}>Total baixado: <b style={{ color: "var(--fin-ink)" }}>{money(ativo)}</b></p>
+      <p className="mt-1.5 text-right text-xs" style={{ color: "var(--fin-ink-3)" }}>Total baixado: <Amount cents={ativo} type={type} strong /></p>
     </div>
   );
 }
@@ -239,7 +240,7 @@ function SettlementsModal({ entry, onClose, onChanged }) {
         footer={<FinButton variant="outline" onClick={onClose}>Fechar</FinButton>}>
         <div className="space-y-4">
           <Valores e={e} />
-          <SettlementsList items={items} onReverse={setAlvo} />
+          <SettlementsList items={items} onReverse={setAlvo} type={entry.type} />
         </div>
       </FinModal>
       <FinConfirm open={!!alvo} onClose={() => setAlvo(null)} loading={busy} danger testid="fin-reverse-confirm"
@@ -344,7 +345,9 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
               <div className="mt-3">
                 {row("Vencimento / previsão", fmtDate(e.due_date))}
                 {e.settled_date && row(e.type === "pagar" ? "Quitado em" : "Recebido integralmente em", fmtDate(e.settled_date))}
-                {row(e.type === "pagar" ? "Fornecedor" : "Cliente / Órgão", e.client_supplier || "—")}
+                {row(e.type === "pagar" ? "Fornecedor" : "Cliente", e.client_supplier
+                  ? <>{e.client_supplier}{!e.contact_id && <span className="block text-[11px] font-normal" style={{ color: "var(--fin-ink-3)" }}>texto antigo, sem cadastro</span>}</>
+                  : "—")}
                 {row("Categoria", <CategoryChip id={e.category_id} name={e.category_name} />)}
                 {e.tag_ids?.length > 0 && row("Tags", <TagChips ids={e.tag_ids} names={e.tag_names} max={10} className="justify-end" />)}
                 {row("Forma de pagamento", name(e.payment_method_id, e.payment_method_name))}
@@ -362,7 +365,7 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
               {baixas.length > 0 && (
                 <>
                   <h3 className="mb-2 mt-6 flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}><Receipt size={15} /> Baixas</h3>
-                  <SettlementsList items={baixas} />
+                  <SettlementsList items={baixas} type={e.type} />
                 </>
               )}
               <h3 className="mb-2 mt-6 flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}><History size={15} /> Histórico deste lançamento</h3>

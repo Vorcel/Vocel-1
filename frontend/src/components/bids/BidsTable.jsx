@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star, FileText, Image as ImageIcon, Calculator, Pencil, Trash2, FileX } from "lucide-react";
+import { ORCAMENTO_COLOR } from "@/components/bids/orcamentoShortcut";
 import { StatusDropdown } from "@/components/bids/StatusDropdown";
 import { PropostaButton } from "@/components/bids/PropostaIcon";
 import { PortalModalidade } from "@/components/bids/PortalModalidade";
@@ -180,7 +181,7 @@ export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1">
                     <button data-testid={`bid-budget-${b.id}`} onClick={() => navigate(`/orcamento/${b.id}`)} className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento">
-                      <Calculator size={18} />
+                      <Calculator size={18} style={{ color: ORCAMENTO_COLOR }} />
                     </button>
                     <PropostaButton bid={b} onClick={() => onProposta(b)} />
                   </div>

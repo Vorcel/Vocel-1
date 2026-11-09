@@ -21,7 +21,7 @@ export default function Bancos() {
       <PageHeader icon={Landmark} title="Bancos" subtitle="Saldos, contas, cartões e movimentações por instituição." />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard testid="fin-banks-total" icon={Wallet} tone="success" highlight label="Saldo consolidado" value={money(consolidado)} sub={`${ativas.length} conta(s) ativa(s)`} />
-        <KpiCard testid="fin-banks-mes" icon={ArrowLeftRight} tone={(mes?.net_cents ?? 0) < 0 ? "warning" : "info"} label="Resultado das baixas no mês" value={money(mes?.net_cents)} sub={`${mes?.total ?? 0} pagamento(s)/recebimento(s)`} />
+        <KpiCard testid="fin-banks-mes" icon={ArrowLeftRight} tone={(mes?.net_cents ?? 0) < 0 ? "warning" : "info"} flow={(mes?.net_cents ?? 0) < 0 ? "out" : (mes?.net_cents ?? 0) > 0 ? "in" : undefined} label="Resultado das baixas no mês" value={money(mes?.net_cents)} sub={`${mes?.total ?? 0} pagamento(s)/recebimento(s)`} />
         <KpiCard testid="fin-banks-cards" icon={CreditCard} tone="info" label="Cartões ativos" value={cad.cartao.filter((c) => c.ativo !== false).length} sub="Configuração em Contas e cartões" />
       </div>
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-5">

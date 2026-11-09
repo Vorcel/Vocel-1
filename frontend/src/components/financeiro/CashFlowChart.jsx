@@ -9,17 +9,21 @@ import { CHART, money, moneyShort } from "@/lib/financeiro";
 function Tip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
-  const row = (dot, label, v, ring) => (
+  // Fundo escuro: entrada em verde claro, saída em vermelho claro com "−"
+  // (mesma regra de cor do módulo); caixa projetado neutro.
+  const row = (dot, label, v, ring, tone) => (
     <div className="flex items-center gap-2 whitespace-nowrap">
       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={ring ? { background: "#fff", boxShadow: `0 0 0 2.5px ${dot}` } : { background: dot }} />
-      <span>{label}: <b className="font-mono-num font-semibold">{money(v)}</b></span>
+      <span>{label}: <b className="font-mono-num font-semibold" style={{ color: tone === "in" ? "#86EFAC" : tone === "out" ? "#FCA5A5" : undefined }}>
+        {tone === "out" && v > 0 ? "−" : ""}{money(v)}
+      </b></span>
     </div>
   );
   return (
     <div className="rounded-xl px-3.5 py-2.5 text-xs leading-relaxed text-white shadow-xl" style={{ background: "#1B2A44" }} data-testid="fin-flow-tooltip">
       <p className="mb-1 text-[13px] font-bold">{p.label}</p>
-      {row(CHART.receber, "A Receber", p.entradas_cents)}
-      {row(CHART.pagar, "A Pagar", p.saidas_cents)}
+      {row(CHART.receber, "A Receber", p.entradas_cents, false, "in")}
+      {row(CHART.pagar, "A Pagar", p.saidas_cents, false, "out")}
       {row(CHART.caixa, "Caixa Projetado", p.saldo_final_cents, true)}
       {(p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <p className="mt-1 text-[11px] text-white/60">Inclui vencidos em aberto.</p>}
       {p.alerta && <p className="mt-1 font-semibold text-red-300">{p.alerta === "negativo" ? "Saldo projetado negativo" : "Abaixo do caixa mínimo"}</p>}

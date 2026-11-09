@@ -17,6 +17,7 @@ from budget_sync import budget_router
 from remessas import remessas_router
 from financeiro import fin_router, create_indexes as create_fin_indexes
 from fin_recebiveis import rec_router
+from fin_contatos import contacts_router, create_contact_indexes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ app.include_router(budget_router)
 app.include_router(remessas_router)
 app.include_router(fin_router)
 app.include_router(rec_router)
+app.include_router(contacts_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +160,7 @@ async def startup():
         # Financeiro: consultas por owner + vencimento/status/sequência e os índices
         # únicos que impedem recebível/lançamento duplicado (ver financeiro.py).
         await create_fin_indexes()
+        await create_contact_indexes()
     except Exception as e:
         logger.warning(f"Financeiro index creation: {e}")
     await seed_admin()

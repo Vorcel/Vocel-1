@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { DatePickerInput } from "@/components/DatePickerInput";
 import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { useFinance } from "@/context/FinanceContext";
-import { ACOES, MODULOS, addDays, apiError, changeValue, finApi, fmtDate, fmtTimestamp, money, todaySP } from "@/lib/financeiro";
-import { EmptyState, FinInput, FinSelect, KpiCard, PageHeader, Pager, Panel, TonePill } from "@/components/financeiro/ui";
+import { ACOES, MODULOS, addDays, apiError, changeValue, finApi, flowOfModule, fmtDate, fmtTimestamp, money, todaySP } from "@/lib/financeiro";
+import { EmptyState, FinInput, FinSelect, KpiCard, Money, PageHeader, Pager, Panel, TonePill } from "@/components/financeiro/ui";
 
 // Grupos do filtro "Tipo de ação" (cada um cobre várias ações do log).
 const GRUPOS = [
@@ -17,13 +17,17 @@ const GRUPOS = [
   ["lancamento_cancelado,lancamento_excluido", "Cancelamentos e exclusões"],
   ["solicitacao_enviada,solicitacao_retirada,recebivel_aprovado,recebivel_rejeitado,atualizacao_recebida,atualizacao_ignorada,recebivel_atualizado,execucao_atualizada", "Integração com a Execução"],
   ["saldo_ajustado,conta_criado,conta_editado,conta_inativado,conta_reativado,conta_excluido,cartao_criado,cartao_editado,cartao_inativado,cartao_reativado,cartao_excluido", "Bancos e cartões"],
+  ["cliente_criado,fornecedor_criado,cliente_fornecedor_criado,contato_editado,contato_inativado,contato_reativado,contato_excluido,contato_alterado", "Clientes e fornecedores"],
   ["categoria_criado,categoria_editado,categoria_inativado,categoria_reativado,categoria_excluido,forma_criado,forma_editado,forma_inativado,forma_reativado,forma_excluido", "Categorias e formas"],
 ];
+
+// Cor do valor do evento: baixas/criações seguem o fluxo do módulo (A Pagar
+// vermelho, A Receber verde); estornos, cancelamentos e saldos ficam neutros.
+const eventFlow = (h) => (/estorn|reaberto|cancel|exclu|saldo/.test(h.action) ? "neutral" : flowOfModule(h.module));
 
 function detail(h) {
   const m = h.metadata || {};
   const parts = [];
-  if (h.amount_cents != null && !h.changes?.length) parts.push(money(h.amount_cents));
   if (h.financial_date) parts.push(`Data financeira informada: ${fmtDate(h.financial_date)}`);
   if (m.count > 1) parts.push(`${m.count} lançamentos${m.scope === "next" ? " (este e próximos)" : m.scope === "all" ? " (sequência inteira)" : ""}`);
   if (m.preservados) parts.push(`${m.preservados} realizado(s) preservado(s)`);
@@ -123,7 +127,10 @@ export default function Historico() {
                         {h.changes?.length === 1
                           ? <>{h.changes[0].label}: {changeValue(h.changes[0].field, h.changes[0].before)} → <b>{changeValue(h.changes[0].field, h.changes[0].after)}</b></>
                           : h.changes?.length > 1 ? `${h.changes.length} campos alterados` : null}
-                        {detail(h) && <div className="truncate" title={detail(h)}>{detail(h)}</div>}
+                        {h.amount_cents != null && !h.changes?.length && (
+                          <Money cents={h.amount_cents} strong className="mr-1.5" flow={eventFlow(h)} />
+                        )}
+                        {detail(h) && <span className="block truncate" title={detail(h)}>{detail(h)}</span>}
                       </td>
                       <td><TonePill tone={h.origin === "Execução" ? "warning" : "muted"}>{h.origin}</TonePill></td>
                     </tr>

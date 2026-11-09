@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { FileUpload } from "@/components/FileUpload";
 import { PropostaIcon, PROPOSTA_COLOR, listPropostas } from "@/components/bids/PropostaIcon";
+import { ORCAMENTO_COLOR } from "@/components/bids/orcamentoShortcut";
 import { CountBadge } from "@/components/CountBadge";
 import { fileUrl, formatApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,7 @@ import { toast } from "sonner";
 
 export const COLORS = {
   edital: "#EF4444",        // vermelho
-  orcamento: "#059669",     // verde
+  orcamento: ORCAMENTO_COLOR, // verde #16A34A (o mesmo atalho em todas as telas)
   proposta: PROPOSTA_COLOR, // azul #0114FF (a mesma cor em todas as telas)
   nota_empenho: "#F97316",  // laranja
   nota_fiscal: "#7C3AED",   // roxo/violeta

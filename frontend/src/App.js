@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from "react
 import { AuthProvider } from "@/context/AuthContext";
 import { DataProvider } from "@/context/DataContext";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
+import { DocumentTitle } from "@/components/layout/VorcelMark";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
@@ -29,6 +30,7 @@ function App() {
   return (
     <div className="App">
       <BrowserRouter>
+        <DocumentTitle />
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />

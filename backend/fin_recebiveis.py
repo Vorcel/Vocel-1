@@ -32,6 +32,7 @@ from fin_core import (
     CANCELADO, PARCIAL, PENDENTE, RECEBER, RECEBIDO, in_transaction, log_event, new_id, parse_date,
     open_cents, to_cents, today_sp,
 )
+from fin_contatos import resolve_contact
 from financeiro import _entry_label, _entry_out, _resolve_refs
 from routes import TIMELINE_STEPS, _enrich_execution, ser
 
@@ -226,6 +227,7 @@ class ApproveInput(BaseModel):
     amount: Optional[Any] = None
     description: Optional[str] = None
     client_supplier: Optional[str] = None
+    contact_id: Optional[str] = None     # cliente cadastrado (opcional: sem ele, vale o órgão da licitação)
     category_id: Optional[str] = None
     payment_method_id: Optional[str] = None
     bank_account_id: Optional[str] = None
@@ -245,12 +247,15 @@ async def approve_request(request_id: str, body: ApproveInput, current=Depends(g
     refs = await _resolve_refs(owner, RECEBER, {"category_id": body.category_id, "payment_method_id": body.payment_method_id,
                                                 "bank_account_id": body.bank_account_id})
     sn = r.get("snapshot") or {}
+    # Cliente cadastrado escolhido na aprovação vira o vínculo; sem escolha, o
+    # recebível continua usando o órgão da licitação como texto (compatível).
+    contact = await resolve_contact(owner, RECEBER, body.contact_id) if body.contact_id else {
+        "contact_id": None, "client_supplier": (body.client_supplier or "").strip() or sn.get("orgao") or None}
     desc = (body.description or "").strip() or f"Recebimento – {_request_label(r)}"
     ts = now_iso()
     entry = {
         "id": new_id(), "owner_id": owner, "type": RECEBER, "description": desc,
-        "client_supplier": (body.client_supplier or "").strip() or sn.get("orgao") or None,
-        **refs, "notes": (body.notes or "").strip() or None,
+        **contact, **refs, "notes": (body.notes or "").strip() or None,
         "bid_id": r["bid_id"], "remessa_id": r.get("remessa_id"), "request_id": r["id"],
         "bid_label": " · ".join(p for p in (f"Pregão {sn['pregao']}" if sn.get("pregao") else "", sn.get("orgao") or "") if p) or None,
         "amount_cents": amount, "settled_cents": 0, "due_date": due, "status": PENDENTE, "mode": "avista",

@@ -47,10 +47,10 @@ export default function Overview() {
 
       {/* 1 — Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="fin-overview-cards">
-        <KpiCard testid="fin-kpi-receber" icon={ArrowDownToLine} tone="success" highlight label="A Receber no Período"
+        <KpiCard testid="fin-kpi-receber" icon={ArrowDownToLine} tone="success" highlight flow="in" label="A Receber no Período"
           value={money(ov?.a_receber_cents)} sub={`${ov?.a_receber_count ?? 0} lançamento(s) · ${period.label.toLowerCase()}`}
           onClick={() => navigate("/financeiro/receber")} />
-        <KpiCard testid="fin-kpi-pagar" icon={ArrowUpFromLine} tone="warning" label="A Pagar no Período"
+        <KpiCard testid="fin-kpi-pagar" icon={ArrowUpFromLine} tone="warning" flow="out" label="A Pagar no Período"
           value={money(ov?.a_pagar_cents)} sub={`${ov?.a_pagar_count ?? 0} lançamento(s) · ${period.label.toLowerCase()}`}
           onClick={() => navigate("/financeiro/pagar")} />
         <KpiCard testid="fin-kpi-saldo" icon={Scale} tone={(ov?.saldo_previsto_cents ?? 0) < 0 ? "danger" : "info"} label="Saldo Previsto"

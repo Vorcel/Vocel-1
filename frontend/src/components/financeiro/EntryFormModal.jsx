@@ -5,8 +5,10 @@ import { DatePickerInput } from "@/components/DatePickerInput";
 import { useData } from "@/context/DataContext";
 import { activeOptions, useFinance } from "@/context/FinanceContext";
 import {
-  FREQUENCIAS, MODOS, apiError, apiErrorCode, centsToInput, finApi, money, parseMoney, splitInstallments, todaySP,
+  FREQUENCIAS, MODOS, apiError, apiErrorCode, centsToInput, contatoServe, finApi, money, parseMoney, splitInstallments, todaySP,
 } from "@/lib/financeiro";
+import { ContactModal } from "./CadastroModals";
+import { ContactFieldLabel, ContactPicker } from "./ContactPicker";
 import { FinModal } from "./FinModal";
 import { TagPicker } from "./TagPicker";
 import { Field, FinButton, FinInput, FinSelect, FinTextarea, Segmented } from "./ui";
@@ -51,6 +53,14 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const { bids } = useData();
   const [entry, setEntry] = useState(entryProp);
   const [f, setF] = useState(() => initialState(mode, entryProp, defaults));
+  // Cliente/Fornecedor = SEMPRE um cadastro (contact_id). `contactText` é só o que
+  // está no campo; texto sem seleção bloqueia o salvar. Lançamento antigo com nome
+  // em texto livre (sem contact_id) mantém o texto até alguém vincular um cadastro.
+  const [contact, setContact] = useState(() => (entryProp?.contact_id ? { id: entryProp.contact_id, name: entryProp.client_supplier || "" } : null));
+  const [contactText, setContactText] = useState(() => (entryProp?.contact_id ? entryProp.client_supplier || "" : ""));
+  const legacyText = !entryProp?.contact_id && mode === "edit" ? entryProp?.client_supplier || "" : "";
+  const [dropLegacy, setDropLegacy] = useState(false);
+  const [quick, setQuick] = useState(null);            // cadastro rápido aberto { name }
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState("form");           // form | confirm (escopo / realizados)
@@ -66,6 +76,11 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   useEffect(() => {
     if (isEdit && entryProp?.id) finApi.lancamento(entryProp.id).then(setEntry).catch(() => {});
   }, [isEdit, entryProp?.id]);
+  // Cadastro atual do lançamento (papel/situação), mesmo se já estiver inativo.
+  useEffect(() => {
+    if (!entryProp?.contact_id) return;
+    finApi.contatos({ ids: entryProp.contact_id }).then((d) => { if (d.items[0]) setContact(d.items[0]); }).catch(() => {});
+  }, [entryProp?.contact_id]);
 
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v?.target ? v.target.value : v }));
   const cents = parseMoney(f.amount);
@@ -90,6 +105,11 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const validate = () => {
     const e = {};
     if (!f.description.trim()) e.description = "Informe a descrição.";
+    if (contactText.trim() && !contact) {
+      e.contact = `Selecione um ${f.type === "receber" ? "cliente" : "fornecedor"} cadastrado na lista — ou use "Cadastrar".`;
+    } else if (contact && !contatoServe(contact, f.type)) {
+      e.contact = `"${contact.name}" não está cadastrado como ${f.type === "receber" ? "cliente" : "fornecedor"}.`;
+    }
     if (!cents || cents <= 0) e.amount = "Informe um valor maior que zero.";
     else if (isEdit && cents < (entry?.settled_cents || 0)) e.amount = `Não pode ser menor que o já baixado (${money(entry.settled_cents)}).`;
     if (!f.due_date) e.due_date = "Informe a data.";
@@ -102,7 +122,9 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const changedFields = () => {
     const orig = initialState("edit", entry);
     const out = {};
-    for (const k of ["description", "client_supplier", "category_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id", "due_date"]) {
+    if ((contact?.id || null) !== (entry.contact_id || null)) out.contact_id = contact?.id || null;
+    else if (dropLegacy && legacyText) out.client_supplier = "";
+    for (const k of ["description", "category_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id", "due_date"]) {
       if ((f[k] || "") !== (orig[k] || "")) out[k] = f[k] || null;
     }
     if (cents !== entry.amount_cents) out.amount = (cents / 100).toFixed(2);
@@ -133,7 +155,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
     setSaving(true);
     try {
       const body = {
-        type: f.type, description: f.description.trim(), client_supplier: f.client_supplier || null,
+        type: f.type, description: f.description.trim(), contact_id: contact?.id || null,
         category_id: f.category_id || null, payment_method_id: f.payment_method_id || null,
         bank_account_id: f.bank_account_id || null, card_id: f.card_id || null, notes: f.notes || null,
         bid_id: f.bid_id || null, mode: f.mode, amount: (cents / 100).toFixed(2), due_date: f.due_date,
@@ -150,7 +172,8 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
 
   const title = isEdit ? "Editar lançamento" : mode === "duplicate" ? "Duplicar lançamento" : "Novo lançamento";
   const settledAfter = scope === "all" ? entry?.sequence_settled_all : scope === "next" ? entry?.sequence_settled_after : (settledSelf ? 1 : 0);
-  const pessoa = f.type === "receber" ? "Cliente / Órgão" : "Fornecedor";
+  const papel = f.type === "receber" ? "cliente" : "fornecedor";
+  const openQuick = (name = "") => setQuick({ name: name || (contact ? "" : contactText) });
 
   return (
     <FinModal open onClose={onClose} busy={saving} title={title} size="lg" testid="fin-entry-modal"
@@ -208,16 +231,33 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Tipo" className="sm:col-span-2">
-            <Segmented testid="fin-entry-type" value={f.type} onChange={(v) => setF((p) => ({ ...p, type: v, category_id: "" }))}
+            <Segmented testid="fin-entry-type" value={f.type} onChange={(v) => {
+              setF((p) => ({ ...p, type: v, category_id: "" }));
+              // Cadastro que não serve ao novo tipo (ex.: só Cliente em A Pagar) sai da seleção.
+              if (contact && !contatoServe(contact, v)) { setContact(null); setContactText(""); }
+            }}
               options={[{ value: "pagar", label: "A Pagar", disabled: isEdit }, { value: "receber", label: "A Receber", disabled: isEdit }]} />
           </Field>
           <Field label="Descrição" required error={errors.description} className="sm:col-span-2">
             <FinInput value={f.description} onChange={set("description")} invalid={!!errors.description} data-testid="fin-entry-description"
               placeholder={f.type === "receber" ? "Ex.: Recebimento – Pregão 90012/2026" : "Ex.: Fornecedor – Mercadoria do pregão"} />
           </Field>
-          <Field label={pessoa}>
-            <FinInput value={f.client_supplier} onChange={set("client_supplier")} data-testid="fin-entry-client" />
-          </Field>
+          {/* div (não <label>): o atalho "Cadastrar" no rótulo não pode virar o alvo do label */}
+          <div className="min-w-0" data-testid="fin-entry-contact-field">
+            <div className="mb-1.5 text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+              <ContactFieldLabel type={f.type} onCreate={() => openQuick()} />
+            </div>
+            <ContactPicker type={f.type} value={contact} onSelect={(c) => { setContact(c); setErrors((p) => ({ ...p, contact: undefined })); }}
+              text={contactText} onText={setContactText} invalid={!!errors.contact} onCreate={openQuick} testid="fin-entry-client" />
+            {errors.contact ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-danger)" }} data-testid="fin-entry-contact-error">{errors.contact}</span>
+              : contact?.ativo === false ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-warning)" }}>Cadastro inativo: mantido neste lançamento, mas não aparece em novas seleções.</span>
+              : legacyText && !contact && !dropLegacy ? (
+                <span className="mt-1 block text-xs" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-entry-contact-legacy">
+                  Registro antigo: “{legacyText}” (texto, sem cadastro). Selecione um {papel} para vincular ou{" "}
+                  <button type="button" className="font-semibold underline" onClick={() => setDropLegacy(true)}>remova o texto</button>.
+                </span>
+              ) : null}
+          </div>
           <Field label="Categoria">
             <FinSelect value={f.category_id} onChange={set("category_id")} data-testid="fin-entry-category">
               <option value="">Sem categoria</option>
@@ -294,6 +334,13 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             <FinTextarea value={f.notes} onChange={set("notes")} rows={2} data-testid="fin-entry-notes" />
           </Field>
         </div>
+      )}
+      {quick && (
+        <ContactModal quick defaultRole={papel} defaultName={quick.name} onClose={() => setQuick(null)}
+          onSaved={(c) => {
+            // Volta ao lançamento (nada do formulário se perde) com o novo cadastro já selecionado.
+            if (contatoServe(c, f.type)) { setContact(c); setContactText(c.name); setErrors((p) => ({ ...p, contact: undefined })); }
+          }} />
       )}
     </FinModal>
   );

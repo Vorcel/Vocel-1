@@ -8,8 +8,10 @@ import {
 import { fileUrl } from "@/lib/api";
 import { activeOptions, useFinance } from "@/context/FinanceContext";
 import { apiError, apiErrorCode, centsToInput, finApi, fmtDate, money, parseMoney, relativeTime } from "@/lib/financeiro";
+import { ContactModal } from "./CadastroModals";
+import { ContactFieldLabel, ContactPicker } from "./ContactPicker";
 import { FinConfirm, FinModal } from "./FinModal";
-import { EmptyState, Field, FinButton, FinInput, FinSelect, FinTextarea, TonePill } from "./ui";
+import { EmptyState, Field, FinButton, FinInput, FinSelect, FinTextarea, Money, TonePill } from "./ui";
 
 // Solicitações da Execução & Pós-Venda aguardando o Financeiro. Ficam SEPARADAS
 // dos recebíveis oficiais: só viram A Receber depois de "Aprovar".
@@ -54,7 +56,7 @@ export function ReceivableQueue({ items, loading, limit, compact }) {
                 </p>
                 {mudou && !compact && <p className="mt-0.5 text-xs font-medium" style={{ color: "var(--fin-warning)" }}>Valor na Execução agora: {money(r.valor_execucao_atual_cents)}</p>}
               </div>
-              <span className="font-mono-num shrink-0 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}>{money(r.amount_cents)}</span>
+              <Money cents={r.amount_cents} flow="in" strong className="shrink-0 text-sm" />
               <FinButton className="h-8 px-3 text-xs" onClick={() => setApprove(r)} data-testid={`fin-approve-${r.id}`}>Aprovar</FinButton>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -82,21 +84,33 @@ function ApproveModal({ request: r, onClose }) {
   const [f, setF] = useState({
     due_date: "", amount: centsToInput(r.amount_cents),
     description: `Recebimento – ${[sn.pregao && `Pregão ${sn.pregao}`, sn.remessa_nome].filter(Boolean).join(" · ") || (sn.objeto || "").slice(0, 50)}`,
-    client_supplier: sn.orgao || "", category_id: receita[0]?.id || "", payment_method_id: "", bank_account_id: "", notes: "",
+    category_id: receita[0]?.id || "", payment_method_id: "", bank_account_id: "", notes: "",
   });
+  // Cliente cadastrado é OPCIONAL na aprovação (nunca bloqueia a integração):
+  // sugerido só quando há UM cliente ativo com o nome idêntico ao órgão; sem
+  // seleção, o recebível usa o nome do órgão da licitação, como antes.
+  const [contact, setContact] = useState(null);
+  const [contactText, setContactText] = useState("");
+  const [suggested, setSuggested] = useState(false);
+  const [quick, setQuick] = useState(null);
   const [err, setErr] = useState({});
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!sn.orgao) return;
+    finApi.sugestaoContato(sn.orgao).then((c) => { if (c) { setContact(c); setContactText(c.name); setSuggested(true); } }).catch(() => {});
+  }, [sn.orgao]);
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v?.target ? v.target.value : v }));
   const submit = async () => {
     const cents = parseMoney(f.amount);
     const e = {};
     if (!f.due_date) e.due_date = "Obrigatório: informe o vencimento/previsão.";
     if (!cents || cents <= 0) e.amount = "Informe um valor maior que zero.";
+    if (contactText.trim() && !contact) e.contact = "Selecione um cliente cadastrado na lista — ou deixe vazio para usar o órgão da licitação.";
     setErr(e);
     if (Object.keys(e).length) return;
     setSaving(true);
     try {
-      await finApi.aprovar(r.id, { ...f, amount: (cents / 100).toFixed(2), category_id: f.category_id || null,
+      await finApi.aprovar(r.id, { ...f, amount: (cents / 100).toFixed(2), contact_id: contact?.id || null, category_id: f.category_id || null,
         payment_method_id: f.payment_method_id || null, bank_account_id: f.bank_account_id || null });
       toast.success("Recebível aprovado — já entra em A Receber e no fluxo");
       onClose();
@@ -122,7 +136,7 @@ function ApproveModal({ request: r, onClose }) {
         {info("UASG", sn.uasg)}
         <div className="col-span-2 sm:col-span-3">{info("Objeto", sn.objeto)}</div>
         {info("Remessa", sn.remessa_nome)}
-        {info("Valor solicitado", money(r.amount_cents))}
+        {info("Valor solicitado", <Money cents={r.amount_cents} flow="in" />)}
         {info("Enviado por", `${r.sent_by_name || "—"} · ${relativeTime(r.sent_at)}`)}
         {sn.empenhos?.length > 0 && <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>Empenho</p>{files(sn.empenhos)}</div>}
         {sn.notas_fiscais?.length > 0 && <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>Nota fiscal</p>{files(sn.notas_fiscais)}</div>}
@@ -142,7 +156,18 @@ function ApproveModal({ request: r, onClose }) {
           <FinInput value={f.amount} onChange={set("amount")} inputMode="decimal" data-testid="fin-approve-amount" invalid={!!err.amount} />
         </Field>
         <Field label="Descrição" className="sm:col-span-2"><FinInput value={f.description} onChange={set("description")} /></Field>
-        <Field label="Cliente / Órgão"><FinInput value={f.client_supplier} onChange={set("client_supplier")} /></Field>
+        <div className="min-w-0" data-testid="fin-approve-contact-field">
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+            <ContactFieldLabel type="receber" onCreate={() => setQuick({ name: contact ? "" : contactText || sn.orgao || "" })} testid="fin-approve-contact-quick" />
+          </div>
+          <ContactPicker type="receber" value={contact} onSelect={(c) => { setContact(c); setSuggested(false); setErr((p) => ({ ...p, contact: undefined })); }}
+            text={contactText} onText={setContactText} invalid={!!err.contact} testid="fin-approve-contact"
+            onCreate={(t) => setQuick({ name: t || sn.orgao || "" })} />
+          <span className="mt-1 block text-xs" style={{ color: err.contact ? "var(--fin-danger)" : "var(--fin-ink-3)" }}>
+            {err.contact || (suggested ? "Sugerido: cliente com o mesmo nome do órgão. Confira antes de aprovar."
+              : !contact ? `Opcional. Sem cliente cadastrado, o recebível usa o órgão${sn.orgao ? ` “${sn.orgao}”` : ""}.` : "")}
+          </span>
+        </div>
         <Field label="Categoria">
           <FinSelect value={f.category_id} onChange={set("category_id")}>
             <option value="">Sem categoria</option>
@@ -163,6 +188,10 @@ function ApproveModal({ request: r, onClose }) {
         </Field>
         <Field label="Observação" className="sm:col-span-2"><FinTextarea rows={2} value={f.notes} onChange={set("notes")} /></Field>
       </div>
+      {quick && (
+        <ContactModal quick defaultRole="cliente" defaultName={quick.name} onClose={() => setQuick(null)}
+          onSaved={(c) => { if (c.role !== "fornecedor") { setContact(c); setContactText(c.name); setSuggested(false); setErr((p) => ({ ...p, contact: undefined })); } }} />
+      )}
     </FinModal>
   );
 }
@@ -212,7 +241,7 @@ export function ExecutionUpdates({ updates }) {
           <p className="mt-1 truncate text-xs" style={{ color: "var(--fin-ink-2)" }} title={u.description}>{u.description} · vence {fmtDate(u.due_date)}</p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: "var(--fin-ink-2)" }}>
             <span>Valor anterior: <b className="font-mono-num">{money(u.valor_anterior_cents)}</b></span>
-            <span>Novo valor: <b className="font-mono-num" style={{ color: "var(--fin-ink)" }}>{money(u.valor_novo_cents)}</b></span>
+            <span>Novo valor: <Money cents={u.valor_novo_cents} flow="in" strong /></span>
             {u.entry_status === "recebido" && <TonePill tone="success">já recebido</TonePill>}
           </div>
           <div className="mt-2 flex gap-2">

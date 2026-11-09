@@ -6,7 +6,7 @@ import { SortArrows } from "@/components/table/SortArrows";
 import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useFinance } from "@/context/FinanceContext";
-import { MODOS, apiError, finApi, fmtDate, money, periodPresets, todaySP } from "@/lib/financeiro";
+import { MODOS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, todaySP } from "@/lib/financeiro";
 import { EntryRowActions } from "./EntryActions";
 import { TagPicker } from "./TagPicker";
 import { Amount, CategoryChip, EmptyState, EntryStatus, FinButton, FinInput, FinSelect, Pager, TagChips, TonePill } from "./ui";
@@ -157,10 +157,16 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
           </thead>
           <tbody style={{ opacity: loading ? 0.55 : 1 }}>
             {data.items.map((e) => {
-              const atrasado = e.status_efetivo === "atrasado";
+              // Destaque da LINHA pelo saldo em aberto: atrasado > vence hoje > normal
+              // (um fundo só; quitado/cancelado nunca destaca).
+              const alerta = dueAlert(e, today);
               return (
-                <tr key={e.id} data-testid={`fin-row-${e.id}`}>
-                  <td className="font-mono-num whitespace-nowrap" style={{ color: atrasado ? "var(--fin-danger)" : "var(--fin-ink-2)", fontWeight: atrasado ? 600 : 400 }}>{fmtDate(e.due_date)}</td>
+                <tr key={e.id} data-testid={`fin-row-${e.id}`} data-alert={alerta || undefined}
+                  className={alerta === "atrasado" ? "fin-row-late" : alerta === "hoje" ? "fin-row-today" : undefined}>
+                  <td className="font-mono-num whitespace-nowrap"
+                    style={{ color: alerta === "atrasado" ? "var(--fin-danger)" : alerta === "hoje" ? "var(--fin-warning)" : "var(--fin-ink-2)", fontWeight: alerta ? 600 : 400 }}>
+                    {fmtDate(e.due_date)}
+                  </td>
                   <td className="max-w-[260px]">
                     <div className="truncate font-medium" style={{ color: "var(--fin-ink)" }} title={e.description}>{e.description}</div>
                     {(e.client_supplier || e.bid_label || e.tag_ids?.length > 0) && (

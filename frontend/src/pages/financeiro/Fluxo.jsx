@@ -6,7 +6,7 @@ import { useFinance } from "@/context/FinanceContext";
 import { apiError, finApi, money } from "@/lib/financeiro";
 import { CashFlowChart } from "@/components/financeiro/CashFlowChart";
 import { BankLogo } from "@/components/financeiro/icons";
-import { EmptyState, FinSelect, KpiCard, PageHeader, Panel } from "@/components/financeiro/ui";
+import { EmptyState, FinSelect, KpiCard, Money, PageHeader, Panel } from "@/components/financeiro/ui";
 
 const VIEWS = [
   { key: "mes-3", g: "mes", n: 3, label: "Próximos 3 meses" },
@@ -41,8 +41,8 @@ export default function Fluxo() {
       <PageHeader icon={ChartColumnIncreasing} title="Fluxo de Caixa" subtitle="Projeção consolidada: saldo dos bancos + recebíveis − contas a pagar." />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard testid="fin-flow-saldo" icon={Wallet} tone="info" highlight label="Saldo bancário atual" value={money(data?.saldo_atual_cents)} sub={conta ? "Conta selecionada" : `${contasAtivas.length} conta(s) ativa(s)`} />
-        <KpiCard testid="fin-flow-entradas" icon={ArrowDownToLine} tone="success" label="Entradas previstas" value={money(entradas)} sub={v.label} />
-        <KpiCard testid="fin-flow-saidas" icon={ArrowUpFromLine} tone="warning" label="Saídas previstas" value={money(saidas)} sub={v.label} />
+        <KpiCard testid="fin-flow-entradas" icon={ArrowDownToLine} tone="success" flow="in" label="Entradas previstas" value={money(entradas)} sub={v.label} />
+        <KpiCard testid="fin-flow-saidas" icon={ArrowUpFromLine} tone="warning" flow="out" label="Saídas previstas" value={money(saidas)} sub={v.label} />
         <KpiCard testid="fin-flow-final" icon={ChartColumnIncreasing} tone={final < 0 ? "danger" : "success"} label="Caixa final projetado" value={money(final)} sub={per.length ? `ao fim de ${per[per.length - 1].label}` : ""} />
       </div>
 
@@ -73,8 +73,8 @@ export default function Fluxo() {
                       {i === 0 && (p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <span className="ml-1 text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>(inclui vencidos)</span>}
                     </td>
                     <td className="font-mono-num text-right" style={{ color: "var(--fin-ink-2)" }}>{money(p.saldo_inicial_cents)}</td>
-                    <td className="font-mono-num text-right" style={{ color: "var(--fin-success)" }}>{money(p.entradas_cents)}</td>
-                    <td className="font-mono-num text-right" style={{ color: "var(--fin-ink-2)" }}>{money(p.saidas_cents)}</td>
+                    <td className="text-right"><Money cents={p.entradas_cents} flow="in" /></td>
+                    <td className="text-right"><Money cents={p.saidas_cents} flow="out" signed={false} /></td>
                     <td className="font-mono-num text-right font-semibold" style={{ color: p.alerta ? "var(--fin-danger)" : "var(--fin-ink)" }}>{money(p.saldo_final_cents)}</td>
                   </tr>
                 ))}

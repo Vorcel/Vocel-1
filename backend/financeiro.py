@@ -36,6 +36,7 @@ from pymongo.errors import DuplicateKeyError
 
 from auth import get_current_user
 from db import db, now_iso
+from fin_contatos import resolve_contact
 from fin_core import (
     ATRASADO, CANCELADO, MAX_OCCURRENCES, MODES, OPEN, OPEN_EXPR, PAGAR, PARCIAL, PENDENTE, RECEBER,
     RECEBIDO, SETTLED, SP_TZ, TYPES, brl, days_between, diff, effective_status, in_transaction, log_event,
@@ -348,7 +349,7 @@ ENTRY_LABELS = {
 }
 # Mudança em um único campo ganha uma ação específica no histórico.
 SINGLE_FIELD_ACTION = {
-    "amount_cents": "valor_alterado", "due_date": "vencimento_alterado", "category_name": "categoria_alterada",
+    "client_supplier": "contato_alterado", "amount_cents": "valor_alterado", "due_date": "vencimento_alterado", "category_name": "categoria_alterada",
     "payment_method_name": "forma_alterada", "account_name": "banco_alterado", "card_name": "cartao_alterado",
 }
 NAME_FIELD = {"category_id": "category_name", "payment_method_id": "payment_method_name",
@@ -357,6 +358,16 @@ NAME_FIELD = {"category_id": "category_name", "payment_method_id": "payment_meth
 
 def _module(tipo: str) -> str:
     return "pagar" if tipo == PAGAR else "receber"
+
+
+def _entry_labels(tipo: str) -> dict:
+    # No histórico o vínculo aparece como "Fornecedor" (A Pagar) ou "Cliente" (A Receber).
+    return {**ENTRY_LABELS, "client_supplier": "Fornecedor" if tipo == PAGAR else "Cliente"}
+
+
+def _free_text_contact_error(tipo: str) -> HTTPException:
+    papel = "fornecedor" if tipo == PAGAR else "cliente"
+    return HTTPException(status_code=400, detail=f"Selecione um {papel} cadastrado (texto livre não é aceito).")
 
 
 def _entry_label(e: dict) -> str:
@@ -423,7 +434,8 @@ async def _bid_label(owner: str, bid_id: Optional[str]) -> Optional[str]:
 class EntryInput(BaseModel):
     type: str
     description: str
-    client_supplier: Optional[str] = None
+    client_supplier: Optional[str] = None   # legado: novos lançamentos usam contact_id
+    contact_id: Optional[str] = None
     category_id: Optional[str] = None
     payment_method_id: Optional[str] = None
     bank_account_id: Optional[str] = None
@@ -486,6 +498,9 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
             dates = occurrence_dates(first, n, body.frequency or "mensal")
 
     refs = await _resolve_refs(owner, body.type, body.model_dump(include=set(ENTRY_REF_FIELDS)))
+    if (body.client_supplier or "").strip() and not body.contact_id:
+        raise _free_text_contact_error(body.type)
+    contact = await resolve_contact(owner, body.type, body.contact_id)
     bid_label = await _bid_label(owner, body.bid_id)
     tags = await _resolve_tags(owner, body.tag_ids)
     duplicated = None
@@ -498,8 +513,7 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     for i, (v, d) in enumerate(zip(values, dates)):
         docs.append({
             "id": new_id(), "owner_id": owner, "type": body.type, "description": desc,
-            "client_supplier": (body.client_supplier or "").strip() or None,
-            **refs, **tags,
+            **contact, **refs, **tags,
             "notes": (body.notes or "").strip() or None,
             "bid_id": body.bid_id or None, "bid_label": bid_label,
             "amount_cents": v, "settled_cents": 0, "due_date": d, "status": PENDENTE,
@@ -661,7 +675,8 @@ async def _scope_entries(owner: str, e: dict, scope: str) -> list:
 
 class EntryUpdate(BaseModel):
     description: Optional[str] = None
-    client_supplier: Optional[str] = None
+    client_supplier: Optional[str] = None   # só aceito vazio (remove texto legado)
+    contact_id: Optional[str] = None
     category_id: Optional[str] = None
     payment_method_id: Optional[str] = None
     bank_account_id: Optional[str] = None
@@ -690,9 +705,14 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         if not (body.description or "").strip():
             raise HTTPException(status_code=400, detail="Informe a descrição.")
         patch["description"] = body.description.strip()
-    for f in ("client_supplier", "notes"):
-        if f in sent:
-            patch[f] = (getattr(body, f) or "").strip() or None
+    if "notes" in sent:
+        patch["notes"] = (body.notes or "").strip() or None
+    if "contact_id" in sent:
+        patch.update(await resolve_contact(owner, e["type"], body.contact_id, e.get("contact_id")))
+    elif "client_supplier" in sent:
+        if (body.client_supplier or "").strip():
+            raise _free_text_contact_error(e["type"])
+        patch.update({"contact_id": None, "client_supplier": None})
     patch.update(await _resolve_refs(owner, e["type"], {f: getattr(body, f) for f in ENTRY_REF_FIELDS if f in sent}, e))
     if "bid_id" in sent and (body.bid_id or None) != e.get("bid_id"):
         patch["bid_id"] = body.bid_id or None
@@ -722,7 +742,7 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
     after_view = {**e, **patch}
     if delta_days:
         after_view["due_date"] = shift_days(e["due_date"], delta_days)
-    changes = diff(before_view, after_view, ENTRY_LABELS)
+    changes = diff(before_view, after_view, _entry_labels(e["type"]))
     if not changes:
         return {"updated": 0, "skipped_settled": 0}
     ts = now_iso()
@@ -742,10 +762,15 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
                 upd["due_date"] = shift_days(x["due_date"], delta_days)
             await db.fin_entries.update_one({"_id": x["_id"]}, {"$set": {**upd, "updated_at": ts, "updated_by": current["id"]},
                                                                 "$inc": {"version": 1}}, session=s)
+        contato = {}
+        if "contact_id" in patch and patch["contact_id"] != e.get("contact_id"):
+            # Troca de cliente/fornecedor: IDs + nomes (antes -> depois) para auditoria.
+            contato = {"contato_antes": {"id": e.get("contact_id"), "nome": e.get("client_supplier")},
+                       "contato_depois": {"id": patch["contact_id"], "nome": patch["client_supplier"]}}
         await log_event(current, action, module=module, entity_type="sequencia" if seq else "lancamento",
                         entity_id=e["sequence_id"] if seq else e["id"], entity_label=_entry_label(e),
                         changes=changes, amount_cents=after_view.get("amount_cents"),
-                        metadata={"scope": body.scope, "count": len(ids), "ids": ids[:50],
+                        metadata={**contato, "scope": body.scope, "count": len(ids), "ids": ids[:50],
                                   "preservados": len(realizados) if not body.include_settled else 0,
                                   "inclui_realizados": bool(body.include_settled and realizados)}, session=s)
     await in_transaction(tx)

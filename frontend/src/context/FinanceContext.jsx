@@ -16,7 +16,6 @@ export function FinanceProvider({ children }) {
   const [cadLoaded, setCadLoaded] = useState(false);
   const [version, setVersion] = useState(0);
   const [pendentes, setPendentes] = useState({ solicitacoes: 0, atualizacoes: 0 });
-  const [mobileNav, setMobileNav] = useState(false);
   const [form, setForm] = useState(null);       // { mode: new|edit|duplicate, entry?, defaults? }
   const [action, setAction] = useState(null);   // { kind: settle|detail|cancel|delete|reopen, entry }
 
@@ -48,7 +47,6 @@ export function FinanceProvider({ children }) {
 
   const value = {
     cad, cadLoaded, byId, refreshCadastros, version, bump, pendentes, refreshPendentes,
-    openMobileNav: () => setMobileNav(true), mobileNav, setMobileNav,
     novoLancamento: (defaults) => setForm({ mode: "new", defaults }),
     editarLancamento: (entry) => setForm({ mode: "edit", entry }),
     duplicarLancamento: (entry) => setForm({ mode: "duplicate", entry }),

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Navigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  CreditCard, Eye, EyeOff, Landmark, MoreVertical, PencilLine, Plus, Power, Settings, SlidersHorizontal, Tag, Tags as TagsIcon, Trash2, Wallet,
+  CreditCard, Eye, EyeOff, Landmark, MoreVertical, PencilLine, Plus, Power, Search, Settings, SlidersHorizontal, Tag, Tags as TagsIcon, Trash2,
+  Users, Wallet,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -10,14 +11,20 @@ import {
 import { fileUrl } from "@/lib/api";
 import { useData } from "@/context/DataContext";
 import { useFinance } from "@/context/FinanceContext";
-import { TIPOS_CONTA, apiError, centsToInput, finApi, money, parseMoney } from "@/lib/financeiro";
+import {
+  PAPEIS, PESSOAS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, fmtDocument, maskPhone, money, parseMoney,
+} from "@/lib/financeiro";
 import { BankLogo, FinIcon, institutionName } from "@/components/financeiro/icons";
-import { AccountModal, CardModal, CategoryModal, PaymentMethodModal, SaldoModal, TagModal, useCadastroDelete } from "@/components/financeiro/CadastroModals";
-import { EmptyState, Field, FinButton, FinInput, PageHeader, Segmented, TonePill } from "@/components/financeiro/ui";
+import {
+  AccountModal, CardModal, CategoryModal, ContactModal, PaymentMethodModal, SaldoModal, TagModal, useCadastroDelete,
+} from "@/components/financeiro/CadastroModals";
+import { FinConfirm } from "@/components/financeiro/FinModal";
+import { EmptyState, Field, FinButton, FinInput, PageHeader, Pager, Segmented, TonePill } from "@/components/financeiro/ui";
 
 const SECOES = [
   { key: "categorias", label: "Categorias", icon: Tag, desc: "Classificação de receitas e despesas." },
   { key: "tags", label: "Tags", icon: TagsIcon, desc: "Marcadores livres dos lançamentos." },
+  { key: "clientes-fornecedores", label: "Clientes e Fornecedores", icon: Users, desc: "Quem você paga e de quem recebe." },
   { key: "contas", label: "Contas e cartões", icon: Landmark, desc: "Contas bancárias e cartões de crédito." },
   { key: "formas", label: "Formas de pagamento", icon: Wallet, desc: "Pix, boleto, transferência…" },
   { key: "preferencias", label: "Preferências", icon: SlidersHorizontal, desc: "Alertas do fluxo de caixa." },
@@ -45,6 +52,7 @@ export default function Configuracoes() {
           {atual.key === "contas" && <ContasCartoes />}
           {atual.key === "formas" && <Formas />}
           {atual.key === "tags" && <TagsSection />}
+          {atual.key === "clientes-fornecedores" && <ClientesFornecedores />}
           {atual.key === "preferencias" && <Preferencias />}
         </section>
       </div>
@@ -182,6 +190,110 @@ function TagsSection() {
       {!list.length && <EmptyState icon={TagsIcon} title="Nenhuma tag cadastrada">Crie tags aqui ou direto no formulário do lançamento.</EmptyState>}
       {modal && <TagModal item={modal.item} onClose={() => setModal(null)} />}
       {dialog}
+    </>
+  );
+}
+
+// ---------------- Clientes e Fornecedores ----------------
+// Listagem paginada no servidor (a base pode crescer); cadastro/edição no
+// ContactModal — o MESMO usado no cadastro rápido do lançamento.
+function ClientesFornecedores() {
+  const [qText, setQText] = useState("");
+  const [q, setQ] = useState("");
+  const [role, setRole] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [del, setDel] = useState(null);          // { item, inUse? }
+  const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => { const t = setTimeout(() => setQ(qText.trim()), 300); return () => clearTimeout(t); }, [qText]);
+  useEffect(() => { setPage(1); }, [q, role, showInactive]);
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    finApi.contatos({ q: q || undefined, role: role || undefined, include_inactive: showInactive, page, page_size: 15 })
+      .then((d) => alive && setData(d)).catch((e) => toast.error(apiError(e))).finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, [q, role, showInactive, page, reload]);
+  const refresh = () => setReload((n) => n + 1);
+
+  const toggleAtivo = async (c) => {
+    try { await finApi.editarContato(c.id, { ativo: c.ativo === false }); toast.success(c.ativo === false ? "Cadastro reativado" : "Cadastro inativado"); refresh(); }
+    catch (e) { toast.error(apiError(e)); }
+  };
+  const runDelete = async () => {
+    setBusy(true);
+    try {
+      if (del.inUse) { await finApi.editarContato(del.item.id, { ativo: false }); toast.success("Cadastro inativado"); }
+      else { await finApi.excluirContato(del.item.id); toast.success("Cadastro excluído"); }
+      setDel(null); refresh();
+    } catch (e) {
+      if (apiErrorCode(e) === "in_use") setDel({ ...del, inUse: e.response.data.detail.count });
+      else toast.error(apiError(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <SectionHead title="Clientes e Fornecedores" subtitle="Cadastros usados nos lançamentos: fornecedores em A Pagar, clientes em A Receber."
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Novo cadastro" testid="fin-new-contact" />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--fin-ink-3)" }} />
+          <FinInput value={qText} onChange={(e) => setQText(e.target.value)} placeholder="Buscar por nome, CPF/CNPJ ou e-mail..." className="pl-9" data-testid="fin-contact-search" />
+        </div>
+        <Segmented size="sm" value={role} onChange={setRole} testid="fin-contact-filter"
+          options={[{ value: "", label: "Todos" }, { value: "cliente", label: "Clientes" }, { value: "fornecedor", label: "Fornecedores" }, { value: "ambos", label: "Cliente e Fornecedor" }]} />
+      </div>
+      <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--fin-border)" }}>
+        <table className="fin-table w-full min-w-[760px]" data-testid="fin-contact-list">
+          <thead><tr><th>Razão Social / Nome</th><th>CPF/CNPJ</th><th>Tipo</th><th>Telefone</th><th>E-mail</th><th>Status</th><th className="w-12" /></tr></thead>
+          <tbody style={{ opacity: loading ? 0.55 : 1 }}>
+            {data.items.map((c) => (
+              <tr key={c.id} data-testid={`fin-contact-row-${c.id}`} style={{ opacity: c.ativo === false ? 0.65 : 1 }}>
+                <td className="max-w-[280px]">
+                  <div className="truncate font-medium" style={{ color: "var(--fin-ink)" }} title={c.name}>{c.name}</div>
+                  <div className="text-xs" style={{ color: "var(--fin-ink-3)" }}>{PESSOAS[c.person_type]}</div>
+                </td>
+                <td className="font-mono-num whitespace-nowrap text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{fmtDocument(c.document)}</td>
+                <td><TonePill tone={c.role === "ambos" ? "info" : c.role === "fornecedor" ? "warning" : "success"}>{PAPEIS[c.role]}</TonePill></td>
+                <td className="whitespace-nowrap text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{c.phone ? maskPhone(c.phone) : "—"}</td>
+                <td className="max-w-[200px] truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }} title={c.email || ""}>{c.email || "—"}</td>
+                <td>{c.ativo === false ? <TonePill tone="muted">Inativo</TonePill> : <TonePill tone="success">Ativo</TonePill>}</td>
+                <td>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--fin-muted-soft)]" style={{ color: "var(--fin-ink-2)" }} data-testid={`fin-contact-menu-${c.id}`} title="Ações">
+                        <MoreVertical size={17} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setModal({ item: c })} data-testid={`fin-contact-edit-${c.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => toggleAtivo(c)} data-testid={`fin-contact-toggle-${c.id}`}><Power size={15} className="mr-2" /> {c.ativo === false ? "Reativar" : "Inativar"}</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setDel({ item: c })} className="text-alert focus:text-alert" data-testid={`fin-contact-delete-${c.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!loading && !data.items.length && (
+          <EmptyState icon={Users} title={q || role ? "Nenhum cadastro encontrado" : "Nenhum cliente ou fornecedor cadastrado"}>
+            {q || role ? "Ajuste a busca ou o filtro." : "Cadastre aqui ou direto no formulário do lançamento."}
+          </EmptyState>
+        )}
+      </div>
+      <Pager page={page} pageSize={15} total={data.total} onPage={setPage} />
+      {modal && <ContactModal item={modal.item} onClose={() => setModal(null)} onSaved={refresh} />}
+      <FinConfirm open={!!del} onClose={() => setDel(null)} loading={busy} danger={!del?.inUse} testid="fin-contact-delete"
+        title={del?.inUse ? "Cadastro vinculado" : `Excluir "${del?.item?.name}"?`}
+        description={del?.inUse ? `"${del.item.name}" está vinculado a ${del.inUse} registro(s) e não pode ser excluído sem quebrar o histórico. Inative-o para tirá-lo das novas seleções.` : "Esta ação não pode ser desfeita."}
+        confirmLabel={del?.inUse ? "Inativar" : "Excluir"} onConfirm={runDelete} />
     </>
   );
 }

@@ -1,11 +1,14 @@
 import { useRef, useState } from "react";
-import { CreditCard, ImagePlus, Landmark, Loader2, Palette, Tag, Tags, Trash2, Wallet } from "lucide-react";
+import { CreditCard, ImagePlus, Landmark, Loader2, Palette, Tag, Tags, Trash2, UserRound, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { DatePickerInput } from "@/components/DatePickerInput";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import api, { fileUrl } from "@/lib/api";
 import { useFinance } from "@/context/FinanceContext";
-import { BANDEIRAS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, money, parseMoney, todaySP } from "@/lib/financeiro";
+import {
+  BANDEIRAS, PAPEIS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, maskCep, maskDocument, maskPhone, money, onlyDigits,
+  parseMoney, todaySP, validCnpj, validCpf,
+} from "@/lib/financeiro";
 import { BANK_PRESETS, BankLogo, FinIcon, ICONS, ICON_LABELS } from "./icons";
 import { FinConfirm, FinModal } from "./FinModal";
 import { Field, FinButton, FinInput, FinSelect, FinTextarea, Segmented } from "./ui";
@@ -332,4 +335,150 @@ export function useCadastroDelete() {
       confirmLabel={target?.inUse ? "Inativar" : "Excluir"} onConfirm={run} />
   );
   return { askDelete: (kind, item) => setTarget({ kind, item }), dialog };
+}
+
+// ---------------- Clientes e Fornecedores ----------------
+// UM modal para tudo: Configurações › Clientes e Fornecedores (criar/editar) e o
+// cadastro rápido de dentro do lançamento/aprovação. `defaultRole` pré-seleciona
+// o papel do contexto (A Pagar = fornecedor, A Receber = cliente) e `onSaved`
+// devolve o cadastro salvo para quem abriu (o lançamento já o seleciona).
+const PAPEL_OPCOES = [
+  { value: "cliente", label: "Cliente", hint: "Aparece em A Receber" },
+  { value: "fornecedor", label: "Fornecedor", hint: "Aparece em A Pagar" },
+  { value: "ambos", label: "Cliente e Fornecedor", hint: "Aparece nos dois" },
+];
+const UFS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
+
+function contactForm(item, defaultRole, defaultName) {
+  const a = item?.address || {};
+  return {
+    person_type: item?.person_type || "pj",
+    name: item?.name || defaultName || "",
+    document: item?.document ? maskDocument(item.document, item.person_type) : "",
+    email: item?.email || "",
+    phone: item?.phone ? maskPhone(item.phone) : "",
+    notes: item?.notes || "",
+    role: item?.role || defaultRole || "",
+    ativo: item?.ativo ?? true,
+    cep: a.cep || "", logradouro: a.logradouro || "", numero: a.numero || "", complemento: a.complemento || "",
+    bairro: a.bairro || "", cidade: a.cidade || "", uf: a.uf || "",
+  };
+}
+
+export function ContactModal({ item, defaultRole, defaultName, onClose, onSaved, quick }) {
+  const [f, setF] = useState(() => contactForm(item, defaultRole, defaultName));
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const set = (k) => (v) => setF((p) => ({ ...p, [k]: v?.target ? v.target.value : v }));
+  const pf = f.person_type === "pf";
+
+  const validate = () => {
+    const e = {};
+    if (!f.name.trim()) e.name = pf ? "Informe o nome." : "Informe a razão social.";
+    const doc = onlyDigits(f.document);
+    if (doc && !(pf ? validCpf(doc) : validCnpj(doc))) e.document = pf ? "CPF inválido." : "CNPJ inválido.";
+    if (f.email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())) e.email = "E-mail inválido.";
+    if (f.cep && onlyDigits(f.cep).length !== 8) e.cep = "CEP com 8 dígitos.";
+    if (!f.role) e.role = "Escolha o tipo de cadastro.";
+    setErrors(e);
+    return !Object.keys(e).length;
+  };
+
+  const submit = async () => {
+    if (!validate()) return;
+    const body = {
+      person_type: f.person_type, name: f.name.trim(), document: onlyDigits(f.document) || null,
+      email: f.email.trim() || null, phone: onlyDigits(f.phone) || null, notes: f.notes.trim() || null,
+      role: f.role, ativo: f.ativo,
+      address: { cep: f.cep, logradouro: f.logradouro, numero: f.numero, complemento: f.complemento, bairro: f.bairro, cidade: f.cidade, uf: f.uf },
+    };
+    setSaving(true);
+    try {
+      const saved = item?.id ? await finApi.editarContato(item.id, body) : await finApi.criarContato(body);
+      toast.success(item?.id ? "Alterações salvas" : `${PAPEIS[saved.role]} cadastrado`);
+      onSaved?.(saved);
+      onClose();
+    } catch (e) {
+      const msg = apiError(e);
+      if (apiErrorCode(e) === "duplicate_document") setErrors((p) => ({ ...p, document: msg }));
+      toast.error(msg);
+    } finally { setSaving(false); }
+  };
+
+  const title = item?.id ? "Editar cadastro" : quick && defaultRole === "fornecedor" ? "Cadastrar fornecedor"
+    : quick && defaultRole === "cliente" ? "Cadastrar cliente" : "Novo cliente / fornecedor";
+  return (
+    <FinModal open onClose={onClose} busy={saving} size="lg" icon={UserRound} title={title} testid="fin-contact-modal"
+      description={quick ? "Ao salvar, você volta ao formulário com este cadastro já selecionado." : undefined}
+      footer={footer(onClose, saving, submit)}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-6">
+        <Field label="Pessoa" className="sm:col-span-6">
+          <Segmented testid="fin-contact-person" value={f.person_type}
+            onChange={(v) => setF((p) => ({ ...p, person_type: v, document: maskDocument(p.document, v) }))}
+            options={[{ value: "pj", label: "Pessoa Jurídica" }, { value: "pf", label: "Pessoa Física" }]} />
+        </Field>
+        <Field label={pf ? "Nome" : "Razão Social"} required error={errors.name} className="sm:col-span-4">
+          <FinInput value={f.name} onChange={set("name")} invalid={!!errors.name} autoFocus data-testid="fin-contact-name"
+            aria-required="true" placeholder={pf ? "Nome completo" : "Razão social da empresa"} />
+        </Field>
+        <Field label={pf ? "CPF" : "CNPJ"} error={errors.document} className="sm:col-span-2">
+          <FinInput value={f.document} onChange={(e) => set("document")(maskDocument(e.target.value, f.person_type))} invalid={!!errors.document}
+            inputMode="numeric" placeholder={pf ? "000.000.000-00" : "00.000.000/0000-00"} data-testid="fin-contact-document" />
+        </Field>
+
+        <fieldset className="sm:col-span-6" data-testid="fin-contact-role">
+          <legend className="mb-1.5 block text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+            Tipo de cadastro<span style={{ color: "var(--fin-danger)" }}> *</span>
+          </legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup">
+            {PAPEL_OPCOES.map((o) => {
+              const on = f.role === o.value;
+              return (
+                <label key={o.value} className="flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm transition-colors"
+                  style={{ borderColor: on ? "var(--fin-primary)" : errors.role ? "var(--fin-danger)" : "var(--fin-border)", background: on ? "var(--fin-primary-soft)" : "transparent" }}>
+                  <input type="radio" name="fin-contact-role" value={o.value} checked={on} onChange={() => set("role")(o.value)}
+                    className="h-4 w-4 shrink-0 accent-[var(--fin-primary)]" data-testid={`fin-contact-role-${o.value}`} />
+                  <span className="min-w-0">
+                    <span className="block font-semibold" style={{ color: "var(--fin-ink)" }}>{o.label}</span>
+                    <span className="block text-xs" style={{ color: "var(--fin-ink-3)" }}>{o.hint}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {errors.role && <span className="mt-1 block text-xs" style={{ color: "var(--fin-danger)" }}>{errors.role}</span>}
+        </fieldset>
+
+        <Field label="E-mail" error={errors.email} className="sm:col-span-4">
+          <FinInput type="email" value={f.email} onChange={set("email")} invalid={!!errors.email} placeholder="contato@empresa.com.br" data-testid="fin-contact-email" />
+        </Field>
+        <Field label="Telefone" className="sm:col-span-2">
+          <FinInput value={f.phone} onChange={(e) => set("phone")(maskPhone(e.target.value))} inputMode="tel" placeholder="(00) 00000-0000" data-testid="fin-contact-phone" />
+        </Field>
+
+        <p className="-mb-2 text-[13px] font-semibold sm:col-span-6" style={{ color: "var(--fin-ink)" }}>Endereço</p>
+        <Field label="CEP" error={errors.cep} className="sm:col-span-2">
+          <FinInput value={f.cep} onChange={(e) => set("cep")(maskCep(e.target.value))} inputMode="numeric" placeholder="00000-000" invalid={!!errors.cep} data-testid="fin-contact-cep" />
+        </Field>
+        <Field label="Logradouro" className="sm:col-span-4"><FinInput value={f.logradouro} onChange={set("logradouro")} placeholder="Rua, avenida…" /></Field>
+        <Field label="Número" className="sm:col-span-2"><FinInput value={f.numero} onChange={set("numero")} /></Field>
+        <Field label="Complemento" className="sm:col-span-4"><FinInput value={f.complemento} onChange={set("complemento")} placeholder="Sala, bloco…" /></Field>
+        <Field label="Bairro" className="sm:col-span-2"><FinInput value={f.bairro} onChange={set("bairro")} /></Field>
+        <Field label="Cidade" className="sm:col-span-3"><FinInput value={f.cidade} onChange={set("cidade")} /></Field>
+        <Field label="UF" className="sm:col-span-1">
+          <FinSelect value={f.uf} onChange={set("uf")} data-testid="fin-contact-uf">
+            <option value="">—</option>
+            {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </FinSelect>
+        </Field>
+
+        <Field label="Observações" className="sm:col-span-6">
+          <FinTextarea value={f.notes} onChange={set("notes")} rows={2} data-testid="fin-contact-notes" />
+        </Field>
+        <div className="sm:col-span-6">
+          <AtivoToggle value={f.ativo} onChange={(ativo) => setF({ ...f, ativo })} label="Inativo sai das novas seleções; continua nos lançamentos antigos." />
+        </div>
+      </div>
+    </FinModal>
+  );
 }
