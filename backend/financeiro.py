@@ -68,18 +68,32 @@ KINDS = {
     "conta": "Conta bancária",
     "cartao": "Cartão",
     "tag": "Tag",
+    "dre_grupo": "Grupo DRE",
+    "subcategoria": "Subcategoria",
 }
+# Grupos DRE: o TIPO define em que bloco da DRE o grupo entra (as linhas
+# calculadas — Receita Líquida, Lucro Bruto… — são fixas no código e nunca
+# recebem lançamentos). O usuário decide qual categoria vai para qual grupo.
+DRE_TIPOS = ("receita", "deducao", "custo", "despesa", "outra_receita", "outra_despesa", "tributo")
+DEFAULT_DRE_GRUPOS = [
+    ("Receita Bruta", "receita"), ("Deduções da Receita", "deducao"), ("Custos", "custo"),
+    ("Despesas Administrativas", "despesa"), ("Despesas Comerciais", "despesa"), ("Despesas com Pessoal", "despesa"),
+    ("Despesas Financeiras", "despesa"), ("Outras Receitas", "outra_receita"), ("Outras Despesas", "outra_despesa"),
+    ("Tributos sobre o Resultado", "tributo"),
+]
 CATEGORY_TYPES = ("receita", "despesa")
 ACCOUNT_TYPES = ("corrente", "poupanca", "pagamento", "investimento", "caixa")
 # Campos editáveis por tipo de cadastro (o resto é ignorado).
 KIND_FIELDS = {
-    "categoria": ("nome", "tipo", "icone", "cor", "ativo"),
+    "categoria": ("nome", "tipo", "icone", "cor", "ativo", "dre_grupo_id"),
     "forma": ("nome", "icone", "ativo"),
     "conta": ("nome", "instituicao", "titular", "tipo_conta", "agencia", "numero", "logo_preset",
               "logo_file_id", "ativo", "observacao"),
     "cartao": ("nome", "instituicao", "bandeira", "final", "fechamento_dia", "vencimento_dia", "limite",
                "conta_id", "logo_preset", "imagem_file_id", "ativo", "observacao"),
     "tag": ("nome", "cor", "ativo"),
+    "dre_grupo": ("nome", "tipo", "ativo", "ordem"),
+    "subcategoria": ("nome", "categoria_id", "herda_grupo", "dre_grupo_id", "ativo"),
 }
 FIELD_LABELS = {
     "nome": "Nome", "tipo": "Tipo", "icone": "Ícone", "cor": "Cor", "ativo": "Ativo",
@@ -87,6 +101,7 @@ FIELD_LABELS = {
     "numero": "Conta", "logo_preset": "Logo", "logo_file_id": "Logo (imagem)", "observacao": "Observação",
     "bandeira": "Bandeira", "final": "Final", "fechamento_dia": "Fechamento", "vencimento_dia": "Vencimento",
     "limite_cents": "Limite", "conta_id": "Conta associada", "imagem_file_id": "Imagem do cartão",
+    "dre_grupo_nome": "Grupo DRE", "categoria_nome": "Categoria", "herda_grupo": "Usa o grupo da categoria", "ordem": "Ordem",
 }
 
 # Cadastros mínimos criados UMA vez por usuário (formas de pagamento comuns e
@@ -117,6 +132,20 @@ async def _ensure_defaults(owner: str) -> None:
     await db.fin_cadastros.insert_many(docs)
 
 
+async def ensure_dre_defaults(owner: str) -> None:
+    """Estrutura inicial recomendada da DRE, criada UMA vez por usuário (o
+    usuário renomeia, reordena, inativa ou cria grupos). Nenhuma categoria é
+    associada automaticamente: a classificação é decisão do usuário."""
+    res = await db.fin_settings.update_one({"owner_id": owner, "dre_seeded": {"$ne": True}},
+                                           {"$set": {"dre_seeded": True, "dre_seeded_at": now_iso()}})
+    if not res.modified_count:
+        return
+    ts = now_iso()
+    await db.fin_cadastros.insert_many([
+        {"id": new_id(), "owner_id": owner, "kind": "dre_grupo", "nome": n, "tipo": t, "ativo": True, "ordem": k,
+         "created_at": ts, "updated_at": ts} for k, (n, t) in enumerate(DEFAULT_DRE_GRUPOS)])
+
+
 async def _account_balances(owner: str, ids: Optional[list] = None) -> dict:
     """Saldo atual de cada conta = saldo informado + baixas (fin_settlements ativas)
     registradas DEPOIS do ajuste."""
@@ -142,10 +171,14 @@ async def _account_balances(owner: str, ids: Optional[list] = None) -> dict:
 async def _usage(owner: str, item_id: str) -> int:
     n = await db.fin_entries.count_documents({"owner_id": owner, "$or": [
         {"category_id": item_id}, {"payment_method_id": item_id}, {"bank_account_id": item_id},
-        {"card_id": item_id}, {"tag_ids": item_id}]})
+        {"card_id": item_id}, {"tag_ids": item_id}, {"subcategory_id": item_id}, {"dre_group_id": item_id}]})
     n += await db.fin_settlements.count_documents({"owner_id": owner, "$or": [
         {"bank_account_id": item_id}, {"payment_method_id": item_id}]})
     n += await db.fin_cadastros.count_documents({"owner_id": owner, "kind": "cartao", "conta_id": item_id})
+    # Grupo DRE usado por categoria/subcategoria; categoria com subcategorias.
+    n += await db.fin_cadastros.count_documents({"owner_id": owner, "$or": [
+        {"kind": {"$in": ["categoria", "subcategoria"]}, "dre_grupo_id": item_id},
+        {"kind": "subcategoria", "categoria_id": item_id}]})
     return n
 
 
@@ -153,9 +186,10 @@ async def _usage(owner: str, item_id: str) -> int:
 async def list_cadastros(current=Depends(get_current_user)):
     owner = _owner(current)
     await _ensure_defaults(owner)
-    docs = await db.fin_cadastros.find({"owner_id": owner}).sort([("ordem", 1), ("created_at", 1)]).to_list(2000)
+    await ensure_dre_defaults(owner)
+    docs = await db.fin_cadastros.find({"owner_id": owner}).sort([("ordem", 1), ("created_at", 1)]).to_list(5000)
     saldos = await _account_balances(owner)
-    out = {"categoria": [], "forma": [], "conta": [], "cartao": [], "tag": []}
+    out = {"categoria": [], "forma": [], "conta": [], "cartao": [], "tag": [], "dre_grupo": [], "subcategoria": []}
     for d in docs:
         item = _clean(d)
         if d["kind"] == "conta":
@@ -189,6 +223,18 @@ class CadastroInput(BaseModel):
     # Só na criação da conta: saldo inicial e a data a que ele se refere.
     saldo: Optional[Any] = None
     saldo_data: Optional[str] = None
+    # DRE
+    dre_grupo_id: Optional[str] = None
+    categoria_id: Optional[str] = None
+    herda_grupo: Optional[bool] = None
+    ordem: Optional[int] = None
+    # Mudança de grupo DRE de categoria/subcategoria já usada: True reclassifica
+    # os lançamentos existentes; False/None vale só para lançamentos novos.
+    reclassificar: Optional[bool] = None
+
+
+def _cad_module(kind: str) -> str:
+    return "bancos" if kind in ("conta", "cartao") else "dre" if kind == "dre_grupo" else "config"
 
 
 def _check_kind(kind: str) -> str:
@@ -197,7 +243,8 @@ def _check_kind(kind: str) -> str:
     return kind
 
 
-async def _validated_fields(owner: str, kind: str, body: CadastroInput, creating: bool) -> dict:
+async def _validated_fields(owner: str, kind: str, body: CadastroInput, creating: bool,
+                            current: Optional[dict] = None) -> dict:
     sent = body.model_fields_set
     data = {}
     for f in KIND_FIELDS[kind]:
@@ -227,6 +274,30 @@ async def _validated_fields(owner: str, kind: str, body: CadastroInput, creating
     for f in ("logo_file_id", "imagem_file_id"):
         if data.get(f) and not await db.files.find_one({"id": data[f], "owner_id": owner, "is_deleted": False}):
             raise HTTPException(status_code=400, detail="Imagem não encontrada.")
+    if kind == "dre_grupo" and (creating or "tipo" in data):
+        if data.get("tipo") not in DRE_TIPOS:
+            raise HTTPException(status_code=400, detail="Tipo do grupo DRE inválido.")
+    if kind in ("categoria", "subcategoria") and "dre_grupo_id" in data:
+        gid = data["dre_grupo_id"] or None
+        data["dre_grupo_id"], data["dre_grupo_nome"] = gid, None
+        if gid:
+            g = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "dre_grupo", "id": gid})
+            if not g:
+                raise HTTPException(status_code=400, detail="Grupo DRE não encontrado.")
+            unchanged = current is not None and current.get("dre_grupo_id") == gid
+            if g.get("ativo") is False and not unchanged:
+                raise HTTPException(status_code=400, detail=f"O grupo DRE \"{g['nome']}\" está inativo.")
+            data["dre_grupo_nome"] = g["nome"]
+    if kind == "subcategoria":
+        if creating and not data.get("categoria_id"):
+            raise HTTPException(status_code=400, detail="Informe a categoria da subcategoria.")
+        if "categoria_id" in data:
+            cat = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "categoria", "id": data["categoria_id"]})
+            if not cat:
+                raise HTTPException(status_code=400, detail="Categoria não encontrada.")
+            data["categoria_nome"] = cat["nome"]
+        if creating and data.get("herda_grupo") is None:
+            data["herda_grupo"] = True
     return data
 
 
@@ -246,14 +317,46 @@ async def create_cadastro(kind: str, body: CadastroInput, current=Depends(get_cu
 
     async def tx(s):
         await db.fin_cadastros.insert_one(doc, session=s)
-        await log_event(current, f"{kind}_criado", module="bancos" if kind in ("conta", "cartao") else "config",
+        await log_event(current, f"{kind}_criado", module=_cad_module(kind),
                         entity_type=kind, entity_id=doc["id"], entity_label=doc["nome"],
-                        amount_cents=doc.get("saldo_inicial_cents"), session=s)
+                        amount_cents=doc.get("saldo_inicial_cents"),
+                        metadata={k: doc[k] for k in ("tipo", "dre_grupo_nome", "categoria_nome") if doc.get(k)} or None,
+                        session=s)
     await in_transaction(tx)
     item = _clean(doc)
     if kind == "conta":
         item["saldo_atual_cents"] = doc["saldo_inicial_cents"]
     return item
+
+
+async def _effective_group(owner: str, sub: Optional[dict], cat: Optional[dict]) -> Optional[str]:
+    """Grupo DRE efetivo: a subcategoria com override usa o próprio; senão herda o da categoria."""
+    if sub and sub.get("herda_grupo") is False:
+        return sub.get("dre_grupo_id") or None
+    return (cat or {}).get("dre_grupo_id") or None
+
+
+async def _group_names(owner: str) -> dict:
+    return {g["id"]: g["nome"] async for g in db.fin_cadastros.find({"owner_id": owner, "kind": "dre_grupo"}, {"id": 1, "nome": 1})}
+
+
+async def _reclassify(owner: str, kind: str, item: dict, session=None) -> int:
+    """Reaplica a regra ATUAL de grupo DRE aos lançamentos já existentes da
+    categoria (exceto subcategorias com grupo próprio) ou da subcategoria."""
+    names = await _group_names(owner)
+    if kind == "categoria":
+        overrides = [x["id"] async for x in db.fin_cadastros.find(
+            {"owner_id": owner, "kind": "subcategoria", "categoria_id": item["id"], "herda_grupo": False}, {"id": 1})]
+        gid = item.get("dre_grupo_id") or None
+        res = await db.fin_entries.update_many(
+            {"owner_id": owner, "category_id": item["id"], "subcategory_id": {"$nin": overrides}},
+            {"$set": {"dre_group_id": gid, "dre_group_name": names.get(gid)}}, session=session)
+        return res.modified_count
+    cat = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "categoria", "id": item.get("categoria_id")})
+    gid = await _effective_group(owner, item, cat)
+    res = await db.fin_entries.update_many({"owner_id": owner, "subcategory_id": item["id"]},
+                                           {"$set": {"dre_group_id": gid, "dre_group_name": names.get(gid)}}, session=session)
+    return res.modified_count
 
 
 @fin_router.put("/cadastros/{kind}/{item_id}")
@@ -263,7 +366,7 @@ async def update_cadastro(kind: str, item_id: str, body: CadastroInput, current=
     before = await db.fin_cadastros.find_one({"owner_id": owner, "kind": kind, "id": item_id})
     if not before:
         raise HTTPException(status_code=404, detail=f"{KINDS[kind]} não encontrada")
-    data = await _validated_fields(owner, kind, body, creating=False)
+    data = await _validated_fields(owner, kind, body, creating=False, current=before)
     if kind == "cartao" and data.get("conta_id") == item_id:
         data.pop("conta_id")
     changes = diff(before, data, FIELD_LABELS)
@@ -271,17 +374,37 @@ async def update_cadastro(kind: str, item_id: str, body: CadastroInput, current=
         return _clean(before)
     action = f"{kind}_inativado" if data.get("ativo") is False and before.get("ativo", True) else (
         f"{kind}_reativado" if data.get("ativo") is True and before.get("ativo") is False else f"{kind}_editado")
+    after = {**before, **data}
+    grupo_mudou = False
+    if kind in ("categoria", "subcategoria"):
+        cat_b = cat_a = None
+        if kind == "subcategoria":
+            cat_b = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "categoria", "id": before.get("categoria_id")})
+            cat_a = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "categoria", "id": after.get("categoria_id")})
+            grupo_mudou = await _effective_group(owner, before, cat_b) != await _effective_group(owner, after, cat_a)
+        else:
+            grupo_mudou = (before.get("dre_grupo_id") or None) != (after.get("dre_grupo_id") or None)
+    reclass = {"count": 0}
 
     async def tx(s):
         await db.fin_cadastros.update_one({"_id": before["_id"]}, {"$set": {**data, "updated_at": now_iso()}}, session=s)
-        await log_event(current, action, module="bancos" if kind in ("conta", "cartao") else "config",
+        await log_event(current, action, module=_cad_module(kind),
                         entity_type=kind, entity_id=item_id, entity_label=data.get("nome") or before.get("nome", ""),
-                        changes=changes, session=s)
+                        changes=changes, metadata={"reclassificar": bool(body.reclassificar)} if grupo_mudou else None,
+                        session=s)
+        if grupo_mudou and body.reclassificar:
+            # Só com escolha explícita do usuário: o histórico não é reescrito em silêncio.
+            reclass["count"] = await _reclassify(owner, kind, after, session=s)
+            await log_event(current, "dre_reclassificado", module="dre", entity_type=kind, entity_id=item_id,
+                            entity_label=after.get("nome", ""), metadata={
+                                "lancamentos": reclass["count"], "grupo_antes": before.get("dre_grupo_nome"),
+                                "grupo_depois": after.get("dre_grupo_nome")}, session=s)
     await in_transaction(tx)
     doc = await db.fin_cadastros.find_one({"_id": before["_id"]})
     item = _clean(doc)
     if kind == "conta":
         item["saldo_atual_cents"] = (await _account_balances(owner, [item_id])).get(item_id, 0)
+    item["reclassificados"] = reclass["count"]
     return item
 
 
@@ -301,7 +424,7 @@ async def delete_cadastro(kind: str, item_id: str, current=Depends(get_current_u
 
     async def tx(s):
         await db.fin_cadastros.delete_one({"_id": doc["_id"]}, session=s)
-        await log_event(current, f"{kind}_excluido", module="bancos" if kind in ("conta", "cartao") else "config",
+        await log_event(current, f"{kind}_excluido", module=_cad_module(kind),
                         entity_type=kind, entity_id=item_id, entity_label=doc.get("nome", ""), session=s)
     await in_transaction(tx)
     return {"ok": True}
@@ -347,11 +470,13 @@ ENTRY_LABELS = {
     "due_date": "Vencimento", "notes": "Observação", "bid_label": "Licitação",
     "category_name": "Categoria", "payment_method_name": "Forma de pagamento",
     "account_name": "Banco/conta", "card_name": "Cartão", "tag_names": "Tags",
+    "subcategory_name": "Subcategoria", "dre_group_name": "Grupo DRE", "competence_date": "Competência",
 }
 # Mudança em um único campo ganha uma ação específica no histórico.
 SINGLE_FIELD_ACTION = {
     "client_supplier": "contato_alterado", "amount_cents": "valor_alterado", "due_date": "vencimento_alterado", "category_name": "categoria_alterada",
     "payment_method_name": "forma_alterada", "account_name": "banco_alterado", "card_name": "cartao_alterado",
+    "competence_date": "competencia_alterada", "subcategory_name": "subcategoria_alterada",
 }
 NAME_FIELD = {"category_id": "category_name", "payment_method_id": "payment_method_name",
               "bank_account_id": "account_name", "card_id": "card_name"}
@@ -474,6 +599,30 @@ async def _resolve_tags(owner: str, tag_ids: Optional[list], current_ids: Option
     return {"tag_ids": ids, "tag_names": [found[t]["nome"] for t in ids]}
 
 
+async def resolve_classification(owner: str, category_id: Optional[str], subcategory_id: Optional[str],
+                                 current_entry: Optional[dict] = None) -> dict:
+    """Subcategoria (opcional, da MESMA categoria) + grupo DRE derivado — o
+    grupo nunca é campo do formulário: vem da subcategoria (override) ou da
+    categoria, e fica gravado no lançamento (snapshot) para a DRE."""
+    sub = None
+    if subcategory_id:
+        sub = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "subcategoria", "id": subcategory_id})
+        if not sub or sub.get("categoria_id") != category_id:
+            raise HTTPException(status_code=400, detail="Subcategoria não pertence à categoria escolhida.")
+        unchanged = current_entry is not None and current_entry.get("subcategory_id") == subcategory_id
+        if sub.get("ativo") is False and not unchanged:
+            raise HTTPException(status_code=400, detail=f"A subcategoria \"{sub['nome']}\" está inativa.")
+    cat = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "categoria", "id": category_id}) if category_id else None
+    gid = await _effective_group(owner, sub, cat)
+    gname = None
+    if gid:
+        g = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "dre_grupo", "id": gid}, {"nome": 1})
+        gname = g["nome"] if g else None
+        gid = gid if g else None
+    return {"subcategory_id": sub["id"] if sub else None, "subcategory_name": sub["nome"] if sub else None,
+            "dre_group_id": gid, "dre_group_name": gname}
+
+
 async def _bid_label(owner: str, bid_id: Optional[str]) -> Optional[str]:
     if not bid_id:
         return None
@@ -508,6 +657,11 @@ class EntryInput(BaseModel):
     client_token: Optional[str] = None   # idempotência contra clique duplo
     duplicated_from: Optional[str] = None
     tag_ids: Optional[list] = None
+    subcategory_id: Optional[str] = None
+    # Competência (DRE). Vazia = o próprio vencimento de cada ocorrência.
+    # Parcelado: a mesma competência em todas as parcelas (uma compra/venda);
+    # recorrente: cada ocorrência desloca junto com o vencimento.
+    competence_date: Optional[str] = None
 
 
 def _entry_out(e: dict, today: str) -> dict:
@@ -568,6 +722,15 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     tags = await _resolve_tags(owner, body.tag_ids)
     if not tags["tag_ids"]:
         raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
+    classif = await resolve_classification(owner, body.category_id, body.subcategory_id)
+    comp0 = parse_date(body.competence_date, "data de competência") if body.competence_date else None
+    if comp0 and body.mode == "parcelado":
+        comps = [comp0] * len(dates)
+    elif comp0:
+        off = days_between(first, comp0)
+        comps = [shift_days(d, off) for d in dates]
+    else:
+        comps = [None] * len(dates)
     duplicated = None
     if body.duplicated_from:
         duplicated = await db.fin_entries.find_one({"owner_id": owner, "id": body.duplicated_from})
@@ -578,7 +741,7 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     for i, (v, d) in enumerate(zip(values, dates)):
         docs.append({
             "id": new_id(), "owner_id": owner, "type": body.type, "description": desc,
-            **contact, **refs, **tags,
+            **contact, **refs, **tags, **classif, "competence_date": comps[i],
             "notes": (body.notes or "").strip() or None,
             "bid_id": body.bid_id or None, "bid_label": bid_label,
             "amount_cents": v, "settled_cents": 0, "due_date": d, "status": PENDENTE,
@@ -626,7 +789,8 @@ SORTS = {"due_date": "due_date", "amount": "amount_cents", "status": "status", "
 def _entries_query(owner: str, *, type: Optional[str], status: Optional[str], category_id: Optional[str],
                    payment_method_id: Optional[str], account_id: Optional[str], q: Optional[str],
                    date_from: Optional[str], date_to: Optional[str], mode: Optional[str],
-                   date_field: str, today: str, card_ids: Optional[list] = None, tag_ids: Optional[str] = None) -> dict:
+                   date_field: str, today: str, card_ids: Optional[list] = None, tag_ids: Optional[str] = None,
+                   subcategory_id: Optional[str] = None) -> dict:
     query: dict = {"owner_id": owner}
     if type in TYPES:
         query["type"] = type
@@ -644,6 +808,8 @@ def _entries_query(owner: str, *, type: Optional[str], status: Optional[str], ca
         query["status"] = {"$ne": CANCELADO}
     if category_id:
         query["category_id"] = category_id
+    if subcategory_id:
+        query["subcategory_id"] = subcategory_id
     if payment_method_id:
         query["payment_method_id"] = payment_method_id
     if account_id:
@@ -679,6 +845,7 @@ async def list_entries(
     payment_method_id: Optional[str] = None, account_id: Optional[str] = None, q: Optional[str] = None,
     date_from: Optional[str] = None, date_to: Optional[str] = None, mode: Optional[str] = None,
     date_field: str = "due_date", sequence_id: Optional[str] = None, tag_ids: Optional[str] = None,
+    subcategory_id: Optional[str] = None,
     page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=200),
     sort: str = "due_date", dir: str = "asc", current=Depends(get_current_user),
 ):
@@ -691,7 +858,7 @@ async def list_entries(
                            payment_method_id=payment_method_id, account_id=account_id, q=q,
                            date_from=date_from, date_to=date_to, mode=mode,
                            date_field="settled_date" if date_field == "settled_date" else "due_date",
-                           today=today, card_ids=card_ids, tag_ids=tag_ids)
+                           today=today, card_ids=card_ids, tag_ids=tag_ids, subcategory_id=subcategory_id)
     if sequence_id:
         query["sequence_id"] = sequence_id
     key = SORTS.get(sort, "due_date")
@@ -752,6 +919,8 @@ class EntryUpdate(BaseModel):
     amount: Optional[Any] = None
     due_date: Optional[str] = None
     tag_ids: Optional[list] = None
+    subcategory_id: Optional[str] = None
+    competence_date: Optional[str] = None
     scope: str = "one"                  # one | next | all
     include_settled: bool = False       # incluir pagos/recebidos na alteração (confirmado pelo usuário)
     version: Optional[int] = None       # concorrência otimista do lançamento editado
@@ -794,6 +963,19 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         patch["amount_cents"] = to_cents(body.amount)
     if "tag_ids" in sent:
         patch.update(await _resolve_tags(owner, body.tag_ids, e.get("tag_ids")))
+    if "category_id" in sent or "subcategory_id" in sent:
+        # Trocar a categoria limpa a subcategoria antiga (nunca fica ID incompatível).
+        cat_final = patch.get("category_id", e.get("category_id"))
+        if "subcategory_id" in sent:
+            sub_final = body.subcategory_id or None
+        else:
+            sub_final = e.get("subcategory_id") if cat_final == e.get("category_id") else None
+        classif = await resolve_classification(owner, cat_final, sub_final, e)
+        if cat_final == e.get("category_id") and sub_final == e.get("subcategory_id"):
+            classif = {k: v for k, v in classif.items() if k.startswith("subcategory")}  # sem mudança real: grupo gravado fica
+        patch.update(classif)
+    if "competence_date" in sent:
+        patch["competence_date"] = parse_date(body.competence_date, "data de competência") if body.competence_date else None
     # Categoria e tag obrigatórias também na edição: registro antigo sem elas
     # precisa recebê-las antes de salvar qualquer alteração (sem migração).
     if not patch.get("category_id", e.get("category_id")):
@@ -839,6 +1021,8 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
                 upd["status"] = settled_status(x["type"]) if upd["amount_cents"] == x["settled_cents"] else PARCIAL
             if delta_days:
                 upd["due_date"] = shift_days(x["due_date"], delta_days)
+                if "competence_date" not in patch and x.get("competence_date") and x.get("mode") != "parcelado":
+                    upd["competence_date"] = shift_days(x["competence_date"], delta_days)
             await db.fin_entries.update_one({"_id": x["_id"]}, {"$set": {**upd, "updated_at": ts, "updated_by": current["id"]},
                                                                 "$inc": {"version": 1}}, session=s)
         if "description" in patch and patch["description"] != e.get("description"):
@@ -1113,7 +1297,11 @@ async def _sum_by_type(match: dict) -> dict:
     return out
 
 
-def _period(date_from: Optional[str], date_to: Optional[str]) -> tuple:
+def _period(date_from: Optional[str], date_to: Optional[str], open_range: bool = False) -> tuple:
+    # open_range: limite não informado = sem limite (período "Todos os vencimentos"
+    # ou personalizado com uma ponta só — o mesmo critério da tabela).
+    if open_range:
+        return (parse_date(date_from) if date_from else "0000-01-01", parse_date(date_to) if date_to else "9999-12-31")
     today = date.fromisoformat(today_sp())
     start = parse_date(date_from) if date_from else today.replace(day=1).isoformat()
     if date_to:
@@ -1125,13 +1313,18 @@ def _period(date_from: Optional[str], date_to: Optional[str]) -> tuple:
 
 
 @fin_router.get("/visao-geral")
-async def overview(date_from: Optional[str] = None, date_to: Optional[str] = None, current=Depends(get_current_user)):
+async def overview(date_from: Optional[str] = None, date_to: Optional[str] = None, open_range: bool = False,
+                   current=Depends(get_current_user)):
     owner = _owner(current)
     today = today_sp()
-    start, end = _period(date_from, date_to)
+    # O período vem do filtro da TABELA da Visão Geral (fonte única): cards e
+    # tabela usam o mesmo intervalo de vencimento. Status rápido não entra aqui.
+    start, end = _period(date_from, date_to, open_range)
     # Saldo EM ABERTO (pendentes + parciais): o que já foi pago/recebido não conta de novo.
     periodo = await _sum_by_type({"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$gte": start, "$lte": end}})
-    vencidas = await _sum_by_type({"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$lt": today}})
+    # Vencidas DENTRO do período: vencimento no período e antes de hoje.
+    venc_fim = min(end, shift_days(today, -1))
+    vencidas = await _sum_by_type({"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$gte": start, "$lte": venc_fim}})
     pend = await db.fin_requests.aggregate([{"$match": {"owner_id": owner, "status": "pendente"}},
                                             {"$group": {"_id": None, "n": {"$sum": 1}, "t": {"$sum": "$amount_cents"}}}]).to_list(1)
     return {

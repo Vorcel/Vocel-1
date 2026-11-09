@@ -33,7 +33,7 @@ from fin_core import (
     open_cents, to_cents, today_sp,
 )
 from fin_contatos import resolve_contact
-from financeiro import _entry_label, _entry_out, _resolve_refs
+from financeiro import _entry_label, _entry_out, _resolve_refs, resolve_classification
 from routes import TIMELINE_STEPS, _enrich_execution, ser
 
 rec_router = APIRouter(prefix="/api/fin/recebiveis", tags=["financeiro-recebiveis"])
@@ -247,6 +247,8 @@ async def approve_request(request_id: str, body: ApproveInput, current=Depends(g
     refs = await _resolve_refs(owner, RECEBER, {"category_id": body.category_id, "payment_method_id": body.payment_method_id,
                                                 "bank_account_id": body.bank_account_id})
     sn = r.get("snapshot") or {}
+    # Grupo DRE derivado da categoria escolhida (competência = vencimento, padrão).
+    classif = await resolve_classification(owner, body.category_id, None) if body.category_id else {}
     # Cliente cadastrado escolhido na aprovação vira o vínculo; sem escolha, o
     # recebível continua usando o órgão da licitação como texto (compatível).
     contact = await resolve_contact(owner, RECEBER, body.contact_id) if body.contact_id else {
@@ -255,7 +257,7 @@ async def approve_request(request_id: str, body: ApproveInput, current=Depends(g
     ts = now_iso()
     entry = {
         "id": new_id(), "owner_id": owner, "type": RECEBER, "description": desc,
-        **contact, **refs, "notes": (body.notes or "").strip() or None,
+        **contact, **refs, **classif, "notes": (body.notes or "").strip() or None,
         "bid_id": r["bid_id"], "remessa_id": r.get("remessa_id"), "request_id": r["id"],
         "bid_label": " · ".join(p for p in (f"Pregão {sn['pregao']}" if sn.get("pregao") else "", sn.get("orgao") or "") if p) or None,
         "amount_cents": amount, "settled_cents": 0, "due_date": due, "status": PENDENTE, "mode": "avista",

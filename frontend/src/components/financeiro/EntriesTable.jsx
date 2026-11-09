@@ -6,7 +6,7 @@ import { SortArrows } from "@/components/table/SortArrows";
 import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useFinance } from "@/context/FinanceContext";
-import { MODOS, QUICK_FILTERS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, todaySP } from "@/lib/financeiro";
+import { MODOS, QUICK_FILTERS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, periodRange, todaySP } from "@/lib/financeiro";
 import { EntryRowActions } from "./EntryActions";
 import { TagPicker } from "./TagPicker";
 import { Amount, CategoryChip, EmptyState, EntryStatus, FinButton, FinInput, FinSelect, Pager, TagChips, TonePill } from "./ui";
@@ -28,7 +28,10 @@ function useDebounced(value, ms = 350) {
 // `quickFilters` (Visão Geral): botões Todos / Em aberto / Pago / Vencido no
 // lugar do select de status, começando SEMPRE em "Em aberto" (não persiste).
 // Filtram só esta tabela — cards e gráfico da página não mudam.
-export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", title, toolbarExtra, quickFilters = false }) {
+// Período: interno, ou CONTROLADO pela página (`period`/`onPeriodChange` +
+// `custom`/`onCustomChange`) — na Visão Geral o mesmo estado alimenta os cards.
+export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", title, toolbarExtra, quickFilters = false,
+  period: periodProp, onPeriodChange, custom: customProp, onCustomChange }) {
   const { cad, version, novoLancamento } = useFinance();
   const today = todaySP();
   const presets = useMemo(() => periodPresets(today), [today]);
@@ -38,16 +41,19 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
   const [qText, setQText] = useState("");
   const q = useDebounced(qText);
   const [status, setStatus] = useState(quickFilters ? "aberto" : "");
-  const [period, setPeriod] = useState(defaultPeriod);
-  const [custom, setCustom] = useState({ from: "", to: "" });
+  const [periodInt, setPeriodInt] = useState(defaultPeriod);
+  const [customInt, setCustomInt] = useState({ from: "", to: "" });
+  const period = periodProp ?? periodInt;
+  const setPeriod = onPeriodChange || setPeriodInt;
+  const custom = customProp ?? customInt;
+  const setCustom = onCustomChange || setCustomInt;
   const EMPTY_ADV = { type: "", category_id: "", payment_method_id: "", account_id: "", mode: "", tag_ids: [] };
   const [adv, setAdv] = useState(EMPTY_ADV);
   const [showAdv, setShowAdv] = useState(false);
   const [data, setData] = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
 
-  const range = period === "todos" ? {} : period === "custom" ? { date_from: custom.from || undefined, date_to: custom.to || undefined }
-    : (() => { const p = presets.find((x) => x.key === period); return p ? { date_from: p.from, date_to: p.to } : {}; })();
+  const { open: _open, ...range } = periodRange(period, custom, presets);
   const params = {
     type: type || adv.type || undefined, status: status || undefined, q: q || undefined, ...range,
     category_id: adv.category_id || undefined, payment_method_id: adv.payment_method_id || undefined,

@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { NavLink, Navigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  CreditCard, Eye, EyeOff, Landmark, MoreVertical, PencilLine, Plus, Power, Search, Settings, SlidersHorizontal, Tag, Tags as TagsIcon, Trash2,
-  Users, Wallet,
+  AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, CreditCard, Eye, EyeOff, Landmark, Layers, ListTree, Lock, MoreVertical,
+  PencilLine, Plus, Power, Search, Settings, SlidersHorizontal, Tag, Tags as TagsIcon, Trash2, Users, Wallet,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -12,17 +12,19 @@ import { fileUrl } from "@/lib/api";
 import { useData } from "@/context/DataContext";
 import { useFinance } from "@/context/FinanceContext";
 import {
-  PAPEIS, PESSOAS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, fmtDocument, maskPhone, money, parseMoney,
+  DRE_TIPO_LABEL, PAPEIS, PESSOAS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, fmtDocument, maskPhone, money, parseMoney,
 } from "@/lib/financeiro";
 import { BankLogo, FinIcon, institutionName } from "@/components/financeiro/icons";
 import {
-  AccountModal, CardModal, CategoryModal, ContactModal, PaymentMethodModal, SaldoModal, TagModal, useCadastroDelete,
+  AccountModal, CardModal, CategoryModal, ContactModal, DreGroupModal, PaymentMethodModal, SaldoModal, SubcategoryModal, TagModal,
+  useCadastroDelete,
 } from "@/components/financeiro/CadastroModals";
 import { FinConfirm } from "@/components/financeiro/FinModal";
 import { EmptyState, Field, FinButton, FinInput, PageHeader, Pager, Segmented, TonePill } from "@/components/financeiro/ui";
 
 const SECOES = [
   { key: "categorias", label: "Categorias", icon: Tag, desc: "Classificação de receitas e despesas." },
+  { key: "estrutura-dre", label: "Estrutura da DRE", icon: Layers, desc: "Grupos e linhas da DRE gerencial." },
   { key: "tags", label: "Tags", icon: TagsIcon, desc: "Marcadores livres dos lançamentos." },
   { key: "clientes-fornecedores", label: "Clientes e Fornecedores", icon: Users, desc: "Quem você paga e de quem recebe." },
   { key: "contas", label: "Contas e cartões", icon: Landmark, desc: "Contas bancárias e cartões de crédito." },
@@ -49,6 +51,7 @@ export default function Configuracoes() {
         </nav>
         <section className="fin-card min-w-0 p-5 sm:p-6" data-testid={`fin-settings-section-${atual.key}`}>
           {atual.key === "categorias" && <Categorias />}
+          {atual.key === "estrutura-dre" && <EstruturaDre />}
           {atual.key === "contas" && <ContasCartoes />}
           {atual.key === "formas" && <Formas />}
           {atual.key === "tags" && <TagsSection />}
@@ -105,33 +108,195 @@ const rowCls = "flex items-center gap-3 border-b py-3 last:border-0";
 const Inactive = ({ item }) => item.ativo === false ? <TonePill tone="muted">Inativo</TonePill> : null;
 
 function Categorias() {
-  const { cad } = useFinance();
+  const { cad, byId } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [tipo, setTipo] = useState("todas");
   const [modal, setModal] = useState(null);
+  const [subModal, setSubModal] = useState(null);   // { category, item? }
+  const [open, setOpen] = useState({});            // categorias com subcategorias expandidas
   const { askDelete, dialog } = useCadastroDelete();
   const list = cad.categoria.filter((c) => (showInactive || c.ativo !== false) && (tipo === "todas" || c.tipo === tipo));
+  const subsOf = (id) => (cad.subcategoria || []).filter((x) => x.categoria_id === id && (showInactive || x.ativo !== false));
+  const semGrupo = cad.categoria.filter((c) => c.ativo !== false && !c.dre_grupo_id).length;
   return (
     <>
-      <SectionHead title="Categorias" subtitle="Usadas para classificar lançamentos a pagar (despesas) e a receber (receitas)."
+      <SectionHead title="Categorias" subtitle="Classificam lançamentos a pagar (despesas) e a receber (receitas). O Grupo DRE define onde cada uma entra na DRE."
         showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Nova categoria" testid="fin-new-category" />
       <Segmented size="sm" value={tipo} onChange={setTipo} options={[{ value: "todas", label: "Todas" }, { value: "receita", label: "Receitas" }, { value: "despesa", label: "Despesas" }]} className="mb-2" />
+      {semGrupo > 0 && (
+        <p className="mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: "var(--fin-warning-soft)", color: "var(--fin-warning)" }} data-testid="fin-cat-sem-grupo">
+          <AlertTriangle size={14} /> {semGrupo} categoria(s) ativa(s) sem Grupo DRE: seus lançamentos aparecem como "Não classificado" na DRE.
+        </p>
+      )}
       <ul data-testid="fin-category-list">
-        {list.map((c) => (
-          <li key={c.id} className={rowCls} style={{ borderColor: "var(--fin-border)", opacity: c.ativo === false ? 0.6 : 1 }}>
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: `${c.cor}1F`, color: c.cor }}><FinIcon name={c.icone} size={18} /></span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium" style={{ color: "var(--fin-ink)" }}>{c.nome}</p>
-              <p className="text-xs" style={{ color: "var(--fin-ink-3)" }}>Tipo: {c.tipo === "receita" ? "Receita" : "Despesa"}</p>
-            </div>
-            <Inactive item={c} />
-            <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.cor }} />
-            <RowMenu item={c} kind="categoria" onEdit={() => setModal({ item: c })} askDelete={askDelete} />
-          </li>
-        ))}
+        {list.map((c) => {
+          const subs = subsOf(c.id);
+          const exp = !!open[c.id];
+          const grupo = c.dre_grupo_id ? (byId[c.dre_grupo_id]?.nome || c.dre_grupo_nome) : null;
+          return (
+            <li key={c.id} className="border-b last:border-0" style={{ borderColor: "var(--fin-border)" }} data-testid={`fin-category-${c.id}`}>
+              <div className="flex items-center gap-3 py-3" style={{ opacity: c.ativo === false ? 0.6 : 1 }}>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: `${c.cor}1F`, color: c.cor }}><FinIcon name={c.icone} size={18} /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium" style={{ color: "var(--fin-ink)" }}>{c.nome}</p>
+                  <p className="flex flex-wrap items-center gap-x-1.5 text-xs" style={{ color: "var(--fin-ink-3)" }}>
+                    <span>{c.tipo === "receita" ? "Receita" : "Despesa"}</span>·
+                    {grupo ? <span>DRE: {grupo}</span> : <span style={{ color: "var(--fin-warning)" }}>Sem grupo DRE</span>}
+                    {subs.length > 0 && (
+                      <>·<button type="button" onClick={() => setOpen((o) => ({ ...o, [c.id]: !exp }))} data-testid={`fin-cat-subs-toggle-${c.id}`}
+                        className="inline-flex items-center gap-0.5 font-semibold hover:underline" style={{ color: "var(--fin-primary)" }}>
+                        {exp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}{subs.length} subcategoria(s)
+                      </button></>
+                    )}
+                  </p>
+                </div>
+                <Inactive item={c} />
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.cor }} />
+                <RowMenu item={c} kind="categoria" onEdit={() => setModal({ item: c })} askDelete={askDelete}
+                  extra={<DropdownMenuItem onClick={() => { setSubModal({ category: c }); setOpen((o) => ({ ...o, [c.id]: true })); }} data-testid={`fin-cat-new-sub-${c.id}`}>
+                    <ListTree size={15} className="mr-2" /> Nova subcategoria</DropdownMenuItem>} />
+              </div>
+              {exp && subs.length > 0 && (
+                <ul className="mb-3 ml-[52px] rounded-lg border" style={{ borderColor: "var(--fin-border)" }} data-testid={`fin-cat-subs-${c.id}`}>
+                  {subs.map((x) => {
+                    const g = x.herda_grupo === false ? (byId[x.dre_grupo_id]?.nome || x.dre_grupo_nome) : null;
+                    return (
+                      <li key={x.id} className="flex items-center gap-2 border-b px-3 py-2 text-sm last:border-0" style={{ borderColor: "var(--fin-border)", opacity: x.ativo === false ? 0.6 : 1 }}>
+                        <span className="min-w-0 flex-1 truncate" style={{ color: "var(--fin-ink)" }}>{x.nome}</span>
+                        <span className="hidden text-xs sm:inline" style={{ color: "var(--fin-ink-3)" }}>{g ? `DRE: ${g} (próprio)` : "herda o grupo"}</span>
+                        <Inactive item={x} />
+                        <RowMenu item={x} kind="subcategoria" onEdit={() => setSubModal({ category: c, item: x })} askDelete={askDelete} />
+                      </li>
+                    );
+                  })}
+                  <li className="px-3 py-1.5">
+                    <button type="button" onClick={() => setSubModal({ category: c })} className="inline-flex items-center gap-1 text-xs font-semibold hover:underline" style={{ color: "var(--fin-primary)" }}>
+                      <Plus size={13} /> Nova subcategoria
+                    </button>
+                  </li>
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {!list.length && <EmptyState icon={Tag} title="Nenhuma categoria" />}
       {modal && <CategoryModal item={modal.item} onClose={() => setModal(null)} />}
+      {subModal && <SubcategoryModal category={subModal.category} item={subModal.item} onClose={() => setSubModal(null)} />}
+      {dialog}
+    </>
+  );
+}
+
+// Estrutura da DRE: blocos e linhas calculadas FIXOS (protegidos); o usuário
+// organiza os grupos de cada bloco (criar, renomear, ordenar, inativar) e pode
+// renomear as linhas calculadas — a fórmula nunca muda.
+function EstruturaDre() {
+  const { cad, bump } = useFinance();
+  const [showInactive, setShowInactive] = useState(false);
+  const [modal, setModal] = useState(null);
+  const [titles, setTitles] = useState(null);
+  const [editTitle, setEditTitle] = useState(null);   // { key, value }
+  const [busy, setBusy] = useState(false);
+  const { askDelete, dialog } = useCadastroDelete();
+  useEffect(() => { finApi.dreTitulos().then((d) => setTitles(d.titles)).catch(() => {}); }, []);
+  const grupos = (cad.dre_grupo || []).filter((g) => showInactive || g.ativo !== false);
+  const usoCat = (gid) => cad.categoria.filter((c) => c.dre_grupo_id === gid).length;
+  const mover = async (g, dir) => {
+    const irmaos = (cad.dre_grupo || []).filter((x) => x.tipo === g.tipo);
+    const i = irmaos.findIndex((x) => x.id === g.id);
+    const o = irmaos[i + dir];
+    if (!o) return;
+    setBusy(true);
+    try {
+      // Troca de posição: ordens distintas garantidas mesmo se iguais antes.
+      const a = g.ordem ?? i, b = o.ordem ?? i + dir;
+      await finApi.editarCadastro("dre_grupo", g.id, { ordem: a === b ? b + dir : b });
+      await finApi.editarCadastro("dre_grupo", o.id, { ordem: a });
+      bump();
+    } catch (e) { toast.error(apiError(e)); } finally { setBusy(false); }
+  };
+  const salvarTitulo = async () => {
+    try {
+      const d = await finApi.dreSalvarTitulos({ [editTitle.key]: editTitle.value });
+      setTitles(d.titles); setEditTitle(null); toast.success("Título atualizado");
+    } catch (e) { toast.error(apiError(e)); }
+  };
+  const BLOCOS = [
+    { tipos: ["receita"], title: "Receita Bruta", sinal: "" },
+    { tipos: ["deducao"], title: "Deduções da Receita", sinal: "(−)" },
+    { calc: "receita_liquida" },
+    { tipos: ["custo"], title: "Custos", sinal: "(−)" },
+    { calc: "lucro_bruto" },
+    { tipos: ["despesa"], title: "Despesas Operacionais", sinal: "(−)" },
+    { calc: "resultado_operacional" },
+    { tipos: ["outra_receita", "outra_despesa"], title: "Outras Receitas e Despesas", sinal: "(+/−)" },
+    { calc: "resultado_antes" },
+    { tipos: ["tributo"], title: "Tributos sobre o Resultado", sinal: "(−)" },
+    { calc: "resultado_liquido" },
+  ];
+  return (
+    <>
+      <SectionHead title="Estrutura da DRE" subtitle="Grupos que recebem categorias e linhas calculadas da DRE gerencial."
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Novo grupo" testid="fin-new-dre-group" />
+      <div className="space-y-3" data-testid="fin-dre-structure">
+        {BLOCOS.map((b) => b.calc ? (
+          <div key={b.calc} className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink)" }}
+            data-testid={`fin-dre-calc-${b.calc}`}>
+            <span style={{ color: "var(--fin-ink-3)" }}>=</span>
+            {editTitle?.key === b.calc ? (
+              <span className="flex flex-1 items-center gap-1.5">
+                <FinInput value={editTitle.value} onChange={(e) => setEditTitle({ ...editTitle, value: e.target.value })} className="h-8 max-w-xs" autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && salvarTitulo()} data-testid="fin-dre-title-input" />
+                <FinButton className="h-8 text-xs" onClick={salvarTitulo}>Salvar</FinButton>
+                <FinButton variant="ghost" className="h-8 text-xs" onClick={() => setEditTitle(null)}>Cancelar</FinButton>
+              </span>
+            ) : (
+              <>
+                <span className="flex-1">{titles?.[b.calc] || "…"}</span>
+                <span className="hidden items-center gap-1 text-xs font-normal sm:flex" style={{ color: "var(--fin-ink-3)" }}><Lock size={12} /> Linha calculada</span>
+                <button type="button" onClick={() => setEditTitle({ key: b.calc, value: titles?.[b.calc] || "" })} title="Renomear"
+                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--fin-surface)]" style={{ color: "var(--fin-ink-2)" }} data-testid={`fin-dre-title-edit-${b.calc}`}>
+                  <PencilLine size={14} />
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div key={b.title} className="rounded-lg border" style={{ borderColor: "var(--fin-border)" }}>
+            <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--fin-border)", color: "var(--fin-ink-3)" }}>
+              <span className="flex-1">{b.sinal} {b.title}</span>
+              <button type="button" onClick={() => setModal({ defaultTipo: b.tipos[0] })} className="inline-flex items-center gap-1 normal-case tracking-normal hover:underline" style={{ color: "var(--fin-primary)" }}>
+                <Plus size={13} /> Grupo
+              </button>
+            </div>
+            <ul>
+              {b.tipos.flatMap((t) => grupos.filter((g) => g.tipo === t)).map((g) => {
+                const irmaos = (cad.dre_grupo || []).filter((x) => x.tipo === g.tipo);
+                const idx = irmaos.findIndex((x) => x.id === g.id);
+                const n = usoCat(g.id);
+                return (
+                  <li key={g.id} className="flex items-center gap-2 border-b px-3 py-2 text-sm last:border-0" style={{ borderColor: "var(--fin-border)", opacity: g.ativo === false ? 0.6 : 1 }}
+                    data-testid={`fin-dre-group-${g.id}`}>
+                    <span className="min-w-0 flex-1 truncate" style={{ color: "var(--fin-ink)" }}>{g.nome}</span>
+                    {b.tipos.length > 1 && <TonePill tone={g.tipo === "outra_receita" ? "success" : "danger"}>{DRE_TIPO_LABEL[g.tipo]}</TonePill>}
+                    <span className="hidden text-xs sm:inline" style={{ color: "var(--fin-ink-3)" }}>{n} categoria(s)</span>
+                    <Inactive item={g} />
+                    <button type="button" disabled={busy || idx <= 0} onClick={() => mover(g, -1)} title="Subir" className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--fin-muted-soft)] disabled:opacity-30" style={{ color: "var(--fin-ink-2)" }}><ArrowUp size={14} /></button>
+                    <button type="button" disabled={busy || idx >= irmaos.length - 1} onClick={() => mover(g, 1)} title="Descer" className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--fin-muted-soft)] disabled:opacity-30" style={{ color: "var(--fin-ink-2)" }}><ArrowDown size={14} /></button>
+                    <RowMenu item={g} kind="dre_grupo" onEdit={() => setModal({ item: g })} askDelete={askDelete} />
+                  </li>
+                );
+              })}
+              {!b.tipos.some((t) => grupos.some((g) => g.tipo === t)) && <li className="px-3 py-2 text-xs" style={{ color: "var(--fin-ink-3)" }}>Nenhum grupo neste bloco.</li>}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs" style={{ color: "var(--fin-ink-3)" }}>
+        As linhas calculadas somam os blocos acima delas e não recebem lançamentos. Para levar uma categoria à DRE, escolha o Grupo DRE dela em Categorias.
+      </p>
+      {modal && <DreGroupModal item={modal.item} defaultTipo={modal.defaultTipo} onClose={() => setModal(null)} />}
       {dialog}
     </>
   );

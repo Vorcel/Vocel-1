@@ -1,12 +1,12 @@
-import { useRef, useState } from "react";
-import { CreditCard, ImagePlus, Landmark, Loader2, Palette, Tag, Tags, Trash2, UserRound, Wallet } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CreditCard, ImagePlus, Landmark, Layers, ListTree, Loader2, Palette, ShieldAlert, Tag, Tags, Trash2, UserRound, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { DatePickerInput } from "@/components/DatePickerInput";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import api, { fileUrl } from "@/lib/api";
-import { useFinance } from "@/context/FinanceContext";
+import { activeOptions, useFinance } from "@/context/FinanceContext";
 import {
-  BANDEIRAS, PAPEIS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, maskCep, maskDocument, maskPhone, money, onlyDigits,
+  BANDEIRAS, DRE_TIPOS, DRE_TIPO_LABEL, PAPEIS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, maskCep, maskDocument, maskPhone, money, onlyDigits,
   parseMoney, todaySP, validCnpj, validCpf,
 } from "@/lib/financeiro";
 import { BANK_PRESETS, BankLogo, FinIcon, ICONS, ICON_LABELS } from "./icons";
@@ -102,8 +102,9 @@ function useSave(kind, item, onClose) {
   const save = async (body) => {
     setSaving(true);
     try {
-      if (item?.id) await finApi.editarCadastro(kind, item.id, body); else await finApi.criarCadastro(kind, body);
+      const r = item?.id ? await finApi.editarCadastro(kind, item.id, body) : await finApi.criarCadastro(kind, body);
       toast.success(item?.id ? "Alterações salvas" : "Cadastro criado");
+      if (r?.reclassificados) toast.info(`${r.reclassificados} lançamento(s) reclassificado(s) na DRE.`);
       bump();
       onClose();
     } catch (e) { toast.error(apiError(e)); } finally { setSaving(false); }
@@ -128,11 +129,66 @@ const footer = (onClose, saving, onSave) => (<>
   <FinButton onClick={onSave} loading={saving} data-testid="fin-cad-save">Salvar</FinButton>
 </>);
 
+// Select de Grupo DRE (só grupos ativos + o atual), agrupado pelo tipo/bloco da DRE.
+export function DreGroupSelect({ value, onChange, testid = "fin-cad-dre-grupo", emptyLabel = "Sem grupo (não classificado na DRE)" }) {
+  const { cad } = useFinance();
+  const opts = activeOptions(cad.dre_grupo, value);
+  return (
+    <FinSelect value={value || ""} onChange={(e) => onChange(e.target.value)} data-testid={testid}>
+      <option value="">{emptyLabel}</option>
+      {DRE_TIPOS.map((t) => {
+        const gs = opts.filter((g) => g.tipo === t.value);
+        return gs.length ? (
+          <optgroup key={t.value} label={t.label}>
+            {gs.map((g) => <option key={g.id} value={g.id}>{`${g.nome}${g.ativo === false ? " (inativo)" : ""}`}</option>)}
+          </optgroup>
+        ) : null;
+      })}
+    </FinSelect>
+  );
+}
+
+// Mudança de grupo DRE num cadastro JÁ usado: o usuário escolhe se reclassifica
+// o histórico ou se vale só para lançamentos novos (nada é reescrito em silêncio).
+// Padrão: sem grupo antes -> reclassificar (classifica o que estava pendente);
+// com grupo antes -> só novos.
+function useReclassChoice({ entityId, countParams, groupBefore, groupAfter, label }) {
+  const [count, setCount] = useState(null);
+  const [choice, setChoice] = useState(null);
+  const changed = !!entityId && (groupBefore || "") !== (groupAfter || "");
+  const key = JSON.stringify(countParams || {});
+  useEffect(() => {
+    if (!changed) return;
+    finApi.lancamentos({ ...JSON.parse(key), page_size: 1 }).then((d) => setCount(d.total)).catch(() => setCount(0));
+  }, [changed, key]);
+  useEffect(() => { if (changed && count != null && choice == null) setChoice(groupBefore ? "novos" : "todos"); }, [changed, count, choice, groupBefore]);
+  const needed = changed && count > 0;
+  const ui = needed ? (
+    <div className="rounded-lg p-3 text-sm" style={{ background: "var(--fin-warning-soft)" }} data-testid="fin-reclass-choice">
+      <p className="flex items-center gap-2 font-semibold" style={{ color: "var(--fin-warning)" }}><ShieldAlert size={16} /> Grupo DRE alterado</p>
+      <p className="mt-1 text-xs" style={{ color: "var(--fin-ink-2)" }}>{label(count)} Aplicar a mudança em:</p>
+      <div className="mt-2 space-y-1.5">
+        {[["novos", "Somente lançamentos novos (o histórico continua como está)"], ["todos", "Reclassificar também os lançamentos existentes"]].map(([v, l]) => (
+          <label key={v} className="flex w-fit max-w-full cursor-pointer items-center gap-2 text-xs font-medium" style={{ color: "var(--fin-ink)" }}>
+            <input type="radio" name="fin-reclass" checked={choice === v} onChange={() => setChoice(v)} data-testid={`fin-reclass-${v}`} /> {l}
+          </label>
+        ))}
+      </div>
+    </div>
+  ) : null;
+  return { ui, reclassificar: needed ? choice === "todos" : undefined };
+}
+
 export function CategoryModal({ item, onClose }) {
-  const [f, setF] = useState({ nome: item?.nome || "", tipo: item?.tipo || "despesa", icone: item?.icone || "Tag", cor: item?.cor || "#059669", ativo: item?.ativo ?? true });
+  const [f, setF] = useState({ nome: item?.nome || "", tipo: item?.tipo || "despesa", icone: item?.icone || "Tag", cor: item?.cor || "#059669", ativo: item?.ativo ?? true, dre_grupo_id: item?.dre_grupo_id || "" });
   const [err, setErr] = useState("");
   const { saving, save } = useSave("categoria", item, onClose);
-  const submit = () => { if (!f.nome.trim()) { setErr("Informe o nome."); return; } save(f); };
+  const reclass = useReclassChoice({ entityId: item?.id, countParams: { category_id: item?.id }, groupBefore: item?.dre_grupo_id, groupAfter: f.dre_grupo_id,
+    label: (n) => `Esta categoria tem ${n} lançamento(s).` });
+  const submit = () => {
+    if (!f.nome.trim()) { setErr("Informe o nome."); return; }
+    save({ ...f, dre_grupo_id: f.dre_grupo_id || null, ...(reclass.reclassificar != null ? { reclassificar: reclass.reclassificar } : {}) });
+  };
   return (
     <FinModal open onClose={onClose} busy={saving} size="sm" icon={Tag} title={item ? "Editar categoria" : "Nova categoria"} testid="fin-category-modal" footer={footer(onClose, saving, submit)}>
       <div className="space-y-4">
@@ -140,9 +196,73 @@ export function CategoryModal({ item, onClose }) {
         <Field label="Tipo" required>
           <Segmented value={f.tipo} onChange={(tipo) => setF({ ...f, tipo })} testid="fin-cad-tipo" options={[{ value: "receita", label: "Receita" }, { value: "despesa", label: "Despesa" }]} />
         </Field>
+        <Field label="Grupo DRE" hint="Onde esta categoria entra na DRE. As subcategorias herdam este grupo.">
+          <DreGroupSelect value={f.dre_grupo_id} onChange={(dre_grupo_id) => setF({ ...f, dre_grupo_id })} />
+        </Field>
+        {reclass.ui}
         <Field label="Ícone"><IconPicker value={f.icone} onChange={(icone) => setF({ ...f, icone })} /></Field>
         <Field label="Cor"><ColorPicker value={f.cor} onChange={(cor) => setF({ ...f, cor })} /></Field>
         <AtivoToggle value={f.ativo} onChange={(ativo) => setF({ ...f, ativo })} label="Disponível para novos lançamentos." />
+      </div>
+    </FinModal>
+  );
+}
+
+export function SubcategoryModal({ item, category, onClose }) {
+  const { byId } = useFinance();
+  const cat = category || byId[item?.categoria_id];
+  const [f, setF] = useState({ nome: item?.nome || "", ativo: item?.ativo ?? true, herda_grupo: item?.herda_grupo ?? true, dre_grupo_id: item?.dre_grupo_id || "" });
+  const [err, setErr] = useState("");
+  const { saving, save } = useSave("subcategoria", item, onClose);
+  const eff = (x) => (x.herda_grupo === false ? x.dre_grupo_id || "" : cat?.dre_grupo_id || "");
+  const reclass = useReclassChoice({ entityId: item?.id, countParams: { category_id: cat?.id, subcategory_id: item?.id },
+    groupBefore: item ? eff(item) : "", groupAfter: eff(f), label: (n) => `Esta subcategoria tem ${n} lançamento(s).` });
+  const submit = () => {
+    if (!f.nome.trim()) { setErr("Informe o nome."); return; }
+    if (!f.herda_grupo && !f.dre_grupo_id) { setErr("Escolha o grupo DRE ou use o da categoria."); return; }
+    save({ nome: f.nome, ativo: f.ativo, herda_grupo: f.herda_grupo, dre_grupo_id: f.herda_grupo ? null : (f.dre_grupo_id || null),
+      ...(item ? {} : { categoria_id: cat?.id }), ...(reclass.reclassificar != null ? { reclassificar: reclass.reclassificar } : {}) });
+  };
+  const grupoCat = cat?.dre_grupo_id ? byId[cat.dre_grupo_id]?.nome || cat.dre_grupo_nome : null;
+  return (
+    <FinModal open onClose={onClose} busy={saving} size="sm" icon={ListTree} testid="fin-subcategory-modal" footer={footer(onClose, saving, submit)}
+      title={item ? "Editar subcategoria" : "Nova subcategoria"} description={cat ? `Categoria: ${cat.nome}` : undefined}>
+      <div className="space-y-4">
+        <Field label="Nome" required error={err}><FinInput value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Ex.: Google Workspace" data-testid="fin-cad-nome" autoFocus /></Field>
+        <div>
+          <label className="flex w-fit max-w-full cursor-pointer items-center gap-2 text-sm font-medium" style={{ color: "var(--fin-ink)" }}>
+            <input type="checkbox" checked={f.herda_grupo} onChange={(e) => setF({ ...f, herda_grupo: e.target.checked })} data-testid="fin-sub-herda" />
+            Usar o grupo DRE da categoria
+          </label>
+          <p className="mt-1 text-xs" style={{ color: "var(--fin-ink-3)" }}>
+            {f.herda_grupo ? `Entra em: ${grupoCat || "— (a categoria ainda não tem grupo DRE)"}` : "Grupo DRE só desta subcategoria:"}
+          </p>
+          {!f.herda_grupo && (
+            <div className="mt-2"><DreGroupSelect value={f.dre_grupo_id} onChange={(dre_grupo_id) => setF({ ...f, dre_grupo_id })} testid="fin-sub-dre-grupo" emptyLabel="Selecione…" /></div>
+          )}
+        </div>
+        {reclass.ui}
+        <AtivoToggle value={f.ativo} onChange={(ativo) => setF({ ...f, ativo })} label="Disponível para novos lançamentos." />
+      </div>
+    </FinModal>
+  );
+}
+
+export function DreGroupModal({ item, defaultTipo, onClose }) {
+  const [f, setF] = useState({ nome: item?.nome || "", tipo: item?.tipo || defaultTipo || "despesa", ativo: item?.ativo ?? true });
+  const [err, setErr] = useState("");
+  const { saving, save } = useSave("dre_grupo", item, onClose);
+  const submit = () => { if (!f.nome.trim()) { setErr("Informe o nome."); return; } save(f); };
+  return (
+    <FinModal open onClose={onClose} busy={saving} size="sm" icon={Layers} title={item ? "Editar grupo DRE" : "Novo grupo DRE"} testid="fin-dre-group-modal" footer={footer(onClose, saving, submit)}>
+      <div className="space-y-4">
+        <Field label="Nome" required error={err}><FinInput value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Ex.: Despesas com Tecnologia" data-testid="fin-cad-nome" autoFocus /></Field>
+        <Field label="Tipo" required hint={`Entra no bloco: ${DRE_TIPOS.find((t) => t.value === f.tipo)?.bloco}.`}>
+          <FinSelect value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })} data-testid="fin-dre-group-tipo">
+            {DRE_TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </FinSelect>
+        </Field>
+        <AtivoToggle value={f.ativo} onChange={(ativo) => setF({ ...f, ativo })} label={`Inativo sai das novas seleções; continua na DRE onde já tem valor (${DRE_TIPO_LABEL[f.tipo]}).`} />
       </div>
     </FinModal>
   );

@@ -17,6 +17,7 @@ from budget_sync import budget_router
 from remessas import remessas_router
 from financeiro import fin_router, create_indexes as create_fin_indexes
 from fin_recebiveis import rec_router
+from fin_dre import dre_router
 from fin_contatos import contacts_router, create_contact_indexes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -35,6 +36,7 @@ app.include_router(analytics_router)
 app.include_router(budget_router)
 app.include_router(remessas_router)
 app.include_router(fin_router)
+app.include_router(dre_router)
 app.include_router(rec_router)
 app.include_router(contacts_router)
 

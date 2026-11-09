@@ -358,6 +358,9 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
                   ? <>{e.client_supplier}{!e.contact_id && <span className="block text-[11px] font-normal" style={{ color: "var(--fin-ink-3)" }}>texto antigo, sem cadastro</span>}</>
                   : "—")}
                 {row("Categoria", <CategoryChip id={e.category_id} name={e.category_name} />)}
+                {e.subcategory_id && row("Subcategoria", name(e.subcategory_id, e.subcategory_name))}
+                {row("Grupo DRE", e.dre_group_id ? name(e.dre_group_id, e.dre_group_name) : <span style={{ color: "var(--fin-warning)" }}>Não classificado</span>)}
+                {row("Competência (DRE)", fmtDate(e.competence_date || e.due_date))}
                 {e.tag_ids?.length > 0 && row("Tags", <TagChips ids={e.tag_ids} names={e.tag_names} max={10} className="justify-end" />)}
                 {row("Forma de pagamento", formaLabel(e, byId) || "—")}
                 {e.bank_account_id && row(e.type === "pagar" ? "Banco / conta" : "Conta de recebimento", name(e.bank_account_id, e.account_name))}

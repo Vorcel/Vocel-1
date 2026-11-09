@@ -86,12 +86,64 @@ export function periodPresets(today) {
   const [m1a, m1b] = monthBounds(today, 1);
   return [
     { key: "mes", label: "Este mês", from: m0a, to: m0b },
+    { key: "mes_passado", label: "Mês passado", from: monthBounds(today, -1)[0], to: monthBounds(today, -1)[1] },
     { key: "prox_mes", label: "Próximo mês", from: m1a, to: m1b },
     { key: "30d", label: "Próximos 30 dias", from: today, to: addDays(today, 30) },
     { key: "90d", label: "Próximos 90 dias", from: today, to: addDays(today, 90) },
     { key: "ano", label: "Este ano", from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` },
   ];
 }
+
+// Intervalo de um período escolhido nos filtros ("todos", preset ou "custom").
+// FONTE ÚNICA: a tabela e os cards da Visão Geral usam exatamente este cálculo.
+// `open` = algum limite ausente significa "sem limite" (nunca "mês atual").
+export function periodRange(key, custom, presets) {
+  if (key === "todos") return { open: true };
+  if (key === "custom") return { date_from: custom?.from || undefined, date_to: custom?.to || undefined, open: true };
+  const p = presets.find((x) => x.key === key);
+  return p ? { date_from: p.from, date_to: p.to } : { open: true };
+}
+
+// Períodos da DRE (competência). Trimestre = trimestre civil atual.
+export function drePresets(today) {
+  const [m0a, m0b] = monthBounds(today, 0);
+  const [m1a, m1b] = monthBounds(today, -1);
+  const q = Math.floor((Number(today.slice(5, 7)) - 1) / 3);
+  const qa = `${today.slice(0, 4)}-${pad(q * 3 + 1)}-01`;
+  const qb = monthBounds(`${today.slice(0, 4)}-${pad(q * 3 + 3)}-01`, 0)[1];
+  return [
+    { key: "mes", label: "Este mês", from: m0a, to: m0b },
+    { key: "mes_passado", label: "Mês passado", from: m1a, to: m1b },
+    { key: "trimestre", label: "Trimestre", from: qa, to: qb },
+    { key: "ano", label: "Ano", from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` },
+  ];
+}
+// Rótulo curto de um período: "Nov/26" (mês cheio) ou "01/11/26–15/11/26".
+const MES_CURTO = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+export function periodLabel(from, to) {
+  if (!from || !to) return "";
+  const [a, b] = [monthBounds(from, 0), monthBounds(to, 0)];
+  const yy = (iso) => iso.slice(2, 4);
+  if (from === a[0] && to === b[1]) {
+    const m1 = `${MES_CURTO[Number(from.slice(5, 7)) - 1]}/${yy(from)}`;
+    const m2 = `${MES_CURTO[Number(to.slice(5, 7)) - 1]}/${yy(to)}`;
+    return m1 === m2 ? m1 : `${m1}–${m2}`;
+  }
+  const f = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${yy(iso)}`;
+  return `${f(from)}–${f(to)}`;
+}
+
+// Tipos de Grupo DRE (definem o bloco da DRE em que o grupo entra).
+export const DRE_TIPOS = [
+  { value: "receita", label: "Receita", bloco: "Receita Bruta" },
+  { value: "deducao", label: "Dedução", bloco: "Deduções da Receita" },
+  { value: "custo", label: "Custo", bloco: "Custos" },
+  { value: "despesa", label: "Despesa", bloco: "Despesas Operacionais" },
+  { value: "outra_receita", label: "Outra Receita", bloco: "Outras Receitas e Despesas" },
+  { value: "outra_despesa", label: "Outra Despesa", bloco: "Outras Receitas e Despesas" },
+  { value: "tributo", label: "Tributo", bloco: "Tributos sobre o Resultado" },
+];
+export const DRE_TIPO_LABEL = Object.fromEntries(DRE_TIPOS.map((t) => [t.value, t.label]));
 
 // ---------------- status (fonte única no frontend) ----------------
 // `status_efetivo` vem do backend: pendente | atrasado | pago | recebido | cancelado
@@ -229,13 +281,25 @@ export const ACOES = {
   execucao_atualizada: { label: "Execução atualizada", tone: "info" },
   saldo_ajustado: { label: "Saldo ajustado", tone: "info" },
 };
-for (const [k, nome] of Object.entries({ categoria: "Categoria", forma: "Forma de pagamento", conta: "Conta", cartao: "Cartão", tag: "Tag" })) {
+for (const [k, nome] of Object.entries({ categoria: "Categoria", forma: "Forma de pagamento", conta: "Conta", cartao: "Cartão", tag: "Tag", subcategoria: "Subcategoria" })) {
   ACOES[`${k}_criado`] = { label: `${nome} criada`, tone: "info" };
   ACOES[`${k}_editado`] = { label: `${nome} editada`, tone: "warning" };
   ACOES[`${k}_inativado`] = { label: `${nome} inativada`, tone: "muted" };
   ACOES[`${k}_reativado`] = { label: `${nome} reativada`, tone: "info" };
   ACOES[`${k}_excluido`] = { label: `${nome} excluída`, tone: "danger" };
 }
+// DRE
+Object.assign(ACOES, {
+  dre_grupo_criado: { label: "Grupo DRE criado", tone: "info" },
+  dre_grupo_editado: { label: "Grupo DRE editado", tone: "warning" },
+  dre_grupo_inativado: { label: "Grupo DRE inativado", tone: "muted" },
+  dre_grupo_reativado: { label: "Grupo DRE reativado", tone: "info" },
+  dre_grupo_excluido: { label: "Grupo DRE excluído", tone: "danger" },
+  dre_reclassificado: { label: "Reclassificação na DRE", tone: "warning" },
+  dre_estrutura_editada: { label: "Estrutura da DRE editada", tone: "warning" },
+  competencia_alterada: { label: "Competência alterada", tone: "warning" },
+  subcategoria_alterada: { label: "Subcategoria alterada", tone: "warning" },
+});
 // Clientes e Fornecedores (fin_contacts)
 Object.assign(ACOES, {
   cliente_criado: { label: "Cliente criado", tone: "info" },
@@ -248,7 +312,7 @@ Object.assign(ACOES, {
   contato_alterado: { label: "Cliente/Fornecedor alterado", tone: "warning" },
 });
 
-export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", config: "Configurações", execucao: "Execução" };
+export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", dre: "DRE", config: "Configurações", execucao: "Execução" };
 
 // Valor legível de um campo alterado no histórico.
 export function changeValue(field, v) {
@@ -327,6 +391,11 @@ export const finApi = {
   lancamento: (id) => api.get(`/fin/lancamentos/${id}`).then((r) => r.data),
   criar: (body) => api.post("/fin/lancamentos", body).then((r) => r.data),
   editar: (id, body) => api.put(`/fin/lancamentos/${id}`, body).then((r) => r.data),
+  dre: (params) => api.get("/fin/dre", { params }).then((r) => r.data),
+  dreLancamentos: (params) => api.get("/fin/dre/lancamentos", { params }).then((r) => r.data),
+  dreClassificarPendentes: () => api.post("/fin/dre/classificar-pendentes").then((r) => r.data),
+  dreTitulos: () => api.get("/fin/dre/titulos").then((r) => r.data),
+  dreSalvarTitulos: (titles) => api.put("/fin/dre/titulos", { titles }).then((r) => r.data),
   descricoesRecentes: () => api.get("/fin/descricoes-recentes").then((r) => r.data.items || []),
   baixar: (id, body) => api.post(`/fin/lancamentos/${id}/baixar`, body).then((r) => r.data),
   baixas: (id) => api.get(`/fin/lancamentos/${id}/baixas`).then((r) => r.data),

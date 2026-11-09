@@ -27,7 +27,7 @@ function initialState(mode, entry, defaults) {
   const base = {
     type: "pagar", description: "", client_supplier: "", category_id: "", payment_method_id: "", bank_account_id: "",
     card_id: "", notes: "", bid_id: "", mode: "avista", amount: "", installments: "2", frequency: "mensal", due_date: todaySP(),
-    tag_ids: [],
+    tag_ids: [], subcategory_id: "", competence_date: "",
   };
   if (!entry) return { ...base, ...(defaults || {}) };
   // Editar: o próprio registro. Duplicar: só os dados reutilizáveis — nada de
@@ -44,6 +44,9 @@ function initialState(mode, entry, defaults) {
     notes: entry.notes || "",
     bid_id: entry.bid_id || "",
     tag_ids: entry.tag_ids || [],
+    subcategory_id: entry.subcategory_id || "",
+    // Duplicar: a cópia volta a seguir o vencimento.
+    competence_date: mode === "edit" ? (entry.competence_date || "") : "",
     mode: mode === "edit" ? entry.mode : "avista",
     amount: centsToInput(entry.amount_cents),
     due_date: entry.due_date || todaySP(),
@@ -66,6 +69,9 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState("form");           // form | confirm (escopo / realizados)
+  // Competência (DRE) acompanha o vencimento até a pessoa mudar o campo.
+  // Lançamento antigo sem competência = usa o vencimento (mesma regra do backend).
+  const [compTouched, setCompTouched] = useState(() => !!(mode === "edit" && entryProp?.competence_date && entryProp.competence_date !== entryProp.due_date));
   const [scope, setScope] = useState("one");
   const [includeSettled, setIncludeSettled] = useState(false);
   const token = useRef(uid());
@@ -109,6 +115,9 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const origPay = useMemo(() => (isEdit && entryProp ? initialState("edit", entryProp) : null), [isEdit, entryProp]);
   // Em registro antigo, banco só é cobrado se a pessoa mexer na forma/banco.
   const payTouched = !origPay || paymentValue(f) !== paymentValue(origPay) || (f.bank_account_id || "") !== (origPay.bank_account_id || "");
+  const subOptions = f.category_id ? activeOptions(cad.subcategoria, f.subcategory_id, (x) => x.categoria_id === f.category_id)
+    .filter((x) => x.categoria_id === f.category_id) : [];
+  const competence = compTouched ? f.competence_date : f.due_date;
   const catOptions = activeOptions(cad.categoria, f.category_id, (c) => c.tipo === (f.type === "receber" ? "receita" : "despesa"));
   const bidOptions = useMemo(() => [...(bids || [])].sort((a, b) => (b.data_disputa || "").localeCompare(a.data_disputa || "")), [bids]);
 
@@ -138,9 +147,14 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
     const out = {};
     if ((contact?.id || null) !== (entry.contact_id || null)) out.contact_id = contact?.id || null;
     else if (dropLegacy && legacyText) out.client_supplier = "";
-    for (const k of ["description", "category_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id", "due_date"]) {
+    for (const k of ["description", "category_id", "subcategory_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id", "due_date"]) {
       if ((f[k] || "") !== (orig[k] || "")) out[k] = f[k] || null;
     }
+    // Competência: compara a competência EFETIVA (sem campo = vencimento).
+    // Registro antigo sem competência só ganha o campo se a pessoa mexer nele.
+    const compOrig = entry.competence_date || entry.due_date;
+    const compNew = compTouched ? (f.competence_date || f.due_date) : f.due_date;
+    if (compNew !== compOrig && (compTouched || entry.competence_date)) out.competence_date = compNew;
     if (cents !== entry.amount_cents) out.amount = (cents / 100).toFixed(2);
     const a = [...(f.tag_ids || [])].sort().join();
     const b = [...(orig.tag_ids || [])].sort().join();
@@ -173,6 +187,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
         category_id: f.category_id || null, payment_method_id: f.payment_method_id || null,
         bank_account_id: f.bank_account_id || null, card_id: f.card_id || null, notes: f.notes || null,
         bid_id: f.bid_id || null, mode: f.mode, amount: (cents / 100).toFixed(2), due_date: f.due_date,
+        subcategory_id: f.subcategory_id || null, competence_date: compTouched ? (f.competence_date || null) : null,
         installments: f.mode === "avista" ? null : n, frequency: f.mode === "recorrente" ? f.frequency : null,
         client_token: token.current, duplicated_from: mode === "duplicate" ? entry.id : null, tag_ids: f.tag_ids,
       };
@@ -274,11 +289,24 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
           </div>
           <Field label="Categoria" required error={errors.category}>
             <FinSelect value={f.category_id} invalid={!!errors.category} data-testid="fin-entry-category"
-              onChange={(e) => { set("category_id")(e); setErrors((p) => ({ ...p, category: undefined })); }}>
+              onChange={(e) => {
+                // Trocar a categoria limpa a subcategoria (nunca fica ID de outra categoria).
+                const v = e.target.value;
+                setF((p) => ({ ...p, category_id: v, subcategory_id: "" }));
+                setErrors((p) => ({ ...p, category: undefined }));
+              }}>
               <option value="" disabled>Selecione…</option>
               {catOptions.map((c) => <option key={c.id} value={c.id}>{`${c.nome}${c.ativo === false ? " (inativa)" : ""}`}</option>)}
             </FinSelect>
           </Field>
+          {subOptions.length > 0 && (
+            <Field label="Subcategoria (opcional)" className="sm:col-start-2">
+              <FinSelect value={f.subcategory_id} onChange={set("subcategory_id")} data-testid="fin-entry-subcategory">
+                <option value="">Nenhuma</option>
+                {subOptions.map((x) => <option key={x.id} value={x.id}>{`${x.nome}${x.ativo === false ? " (inativa)" : ""}`}</option>)}
+              </FinSelect>
+            </Field>
+          )}
 
           {!isEdit && (
             <Field label="Modo de lançamento" className="sm:col-span-2">
@@ -294,6 +322,16 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
           </Field>
           <Field label={!isEdit && f.mode !== "avista" ? "Primeiro vencimento" : "Vencimento"} required error={errors.due_date}>
             <DatePickerInput value={f.due_date} onChange={set("due_date")} testid="fin-entry-due" invalid={!!errors.due_date} />
+          </Field>
+          <Field label="Competência (DRE)"
+            hint={compTouched ? (
+              <>Mês em que a {f.type === "receber" ? "receita" : "despesa"} aconteceu.{" "}
+                <button type="button" className="font-semibold underline" onClick={() => { setCompTouched(false); setF((p) => ({ ...p, competence_date: "" })); }}
+                  data-testid="fin-entry-competence-reset">Usar o vencimento</button></>
+            ) : (!isEdit && f.mode === "parcelado" ? "Igual ao 1º vencimento. Mude se a compra/venda foi em outro mês (vale para todas as parcelas)."
+              : "Igual ao vencimento. Mude se a receita/despesa pertence a outro mês.")}>
+            <DatePickerInput value={competence} testid="fin-entry-competence"
+              onChange={(v) => { setCompTouched(true); setF((p) => ({ ...p, competence_date: v })); }} />
           </Field>
           {!isEdit && f.mode !== "avista" && (
             <Field label={f.mode === "parcelado" ? "Quantidade de parcelas" : "Quantidade de ocorrências"} required error={errors.installments}>

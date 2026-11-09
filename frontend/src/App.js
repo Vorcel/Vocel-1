@@ -17,6 +17,7 @@ import Overview from "@/pages/financeiro/Overview";
 import { Pagar, Receber } from "@/pages/financeiro/PagarReceber";
 import Fluxo from "@/pages/financeiro/Fluxo";
 import Bancos from "@/pages/financeiro/Bancos";
+import Dre from "@/pages/financeiro/Dre";
 import Historico from "@/pages/financeiro/Historico";
 import Configuracoes from "@/pages/financeiro/Configuracoes";
 
@@ -63,6 +64,7 @@ function App() {
                 <Route path="receber" element={<Receber />} />
                 <Route path="fluxo" element={<Fluxo />} />
                 <Route path="bancos" element={<Bancos />} />
+                <Route path="dre" element={<Dre />} />
                 <Route path="historico" element={<Historico />} />
                 <Route path="configuracoes" element={<Configuracoes />} />
                 <Route path="configuracoes/:secao" element={<Configuracoes />} />

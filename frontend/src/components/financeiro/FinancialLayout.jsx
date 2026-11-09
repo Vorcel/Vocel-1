@@ -1,6 +1,6 @@
 import { Outlet } from "react-router-dom";
 import {
-  ArrowDownToLine, ArrowUpFromLine, ChartColumnIncreasing, History, Landmark, LayoutDashboard, Settings,
+  ArrowDownToLine, ArrowUpFromLine, ChartColumnIncreasing, FileBarChart, History, Landmark, LayoutDashboard, Settings,
 } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -12,6 +12,7 @@ const NAV = [
   { to: "/financeiro/receber", label: "A Receber", icon: ArrowDownToLine, testid: "fin-nav-receivables", badge: true },
   { to: "/financeiro/fluxo", label: "Fluxo de Caixa", icon: ChartColumnIncreasing, testid: "fin-nav-cashflow" },
   { to: "/financeiro/bancos", label: "Bancos", icon: Landmark, testid: "fin-nav-banks" },
+  { to: "/financeiro/dre", label: "DRE", icon: FileBarChart, testid: "fin-nav-dre" },
   { to: "/financeiro/historico", label: "Histórico", icon: History, testid: "fin-nav-history" },
   { to: "/financeiro/configuracoes", label: "Configurações", icon: Settings, testid: "fin-nav-settings" },
 ];

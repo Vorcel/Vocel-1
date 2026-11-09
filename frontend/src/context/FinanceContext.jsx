@@ -9,7 +9,7 @@ import { EntryActionModals } from "@/components/financeiro/EntryActions";
 // `version` sobe a cada gravação: as páginas recarregam seus dados por ele.
 const FinanceContext = createContext(null);
 
-const EMPTY = { categoria: [], forma: [], conta: [], cartao: [], tag: [] };
+const EMPTY = { categoria: [], forma: [], conta: [], cartao: [], tag: [], dre_grupo: [], subcategoria: [] };
 
 export function FinanceProvider({ children }) {
   const [cad, setCad] = useState(EMPTY);
