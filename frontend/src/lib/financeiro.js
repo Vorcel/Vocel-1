@@ -123,6 +123,34 @@ export function entryStatus(e) {
 }
 export const isOpenEntry = (e) => e.status === "pendente" || e.status === "parcial";
 
+// Formas que NÃO pedem Banco/Conta no lançamento (espelho de FORMAS_SEM_CONTA
+// no backend). Pix, Boleto, Transferência e formas novas pedem. A forma genérica
+// "Cartão" não aparece mais: os cartões cadastrados entram direto na seleção.
+const norm = (t) => (t || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+const FORMAS_SEM_CONTA = new Set(["dinheiro", "especie", "outro", "outros", "cartao", "cartao de credito", "credito"]);
+const FORMAS_CARTAO = new Set(["cartao", "cartao de credito", "credito"]);
+export const formaExigeConta = (forma) => !!forma && !FORMAS_SEM_CONTA.has(norm(forma.nome));
+export const isFormaCartaoGenerica = (forma) => !!forma && FORMAS_CARTAO.has(norm(forma.nome));
+export const cardLabel = (c) => (c ? `${c.nome}${c.final ? ` •••• ${c.final}` : ""}` : "");
+// Valor único da seleção "Forma de pagamento": "f:<forma>" | "c:<cartão>" | "".
+export const paymentValue = (f) => (f.card_id ? `c:${f.card_id}` : f.payment_method_id ? `f:${f.payment_method_id}` : "");
+// Troca de forma LIMPA o que ficou incompatível (sem banco escondido):
+// cartão => sem forma e sem banco; forma sem conta => sem banco; Pix etc. => sem cartão.
+export function applyPaymentChoice(state, value, formas) {
+  if (!value) return { ...state, payment_method_id: "", card_id: "", bank_account_id: "" };
+  const [k, id] = [value.slice(0, 1), value.slice(2)];
+  if (k === "c") return { ...state, payment_method_id: "", card_id: id, bank_account_id: "" };
+  const forma = (formas || []).find((x) => x.id === id);
+  return { ...state, payment_method_id: id, card_id: "", bank_account_id: formaExigeConta(forma) ? state.bank_account_id : "" };
+}
+// Filtro rápido da tabela da Visão Geral -> status da API.
+export const QUICK_FILTERS = [
+  { key: "todos", label: "Todos", status: "", color: null },
+  { key: "aberto", label: "Em aberto", status: "aberto", color: "var(--fin-info)" },
+  { key: "pago", label: "Pago", status: "realizado", color: "var(--fin-success)" },
+  { key: "vencido", label: "Vencido", status: "atrasado", color: "var(--fin-danger)" },
+];
+
 export const TIPOS = { pagar: "A Pagar", receber: "A Receber" };
 export const MODOS = { avista: "À vista", parcelado: "Parcelado", recorrente: "Recorrente" };
 export const FREQUENCIAS = [
@@ -299,6 +327,7 @@ export const finApi = {
   lancamento: (id) => api.get(`/fin/lancamentos/${id}`).then((r) => r.data),
   criar: (body) => api.post("/fin/lancamentos", body).then((r) => r.data),
   editar: (id, body) => api.put(`/fin/lancamentos/${id}`, body).then((r) => r.data),
+  descricoesRecentes: () => api.get("/fin/descricoes-recentes").then((r) => r.data.items || []),
   baixar: (id, body) => api.post(`/fin/lancamentos/${id}/baixar`, body).then((r) => r.data),
   baixas: (id) => api.get(`/fin/lancamentos/${id}/baixas`).then((r) => r.data),
   estornarBaixa: (id, sid, body) => api.post(`/fin/lancamentos/${id}/baixas/${sid}/estornar`, body).then((r) => r.data),

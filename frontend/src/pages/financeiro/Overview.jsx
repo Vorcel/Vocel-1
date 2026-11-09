@@ -63,7 +63,7 @@ export default function Overview() {
       {/* 2 — Lançamentos (tabela completa) */}
       <Panel className="mt-5" icon={ListOrdered} title="Lançamentos" testid="fin-overview-entries"
         subtitle="Contas a pagar e a receber, parcelas e recorrências.">
-        <EntriesTable pageKey="lancamentos" />
+        <EntriesTable pageKey="lancamentos" quickFilters />
       </Panel>
 
       {/* 3 — Fluxo Previsto (Ref10) + fila de aprovação ao lado */}

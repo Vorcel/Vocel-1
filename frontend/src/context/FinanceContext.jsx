@@ -18,6 +18,7 @@ export function FinanceProvider({ children }) {
   const [pendentes, setPendentes] = useState({ solicitacoes: 0, atualizacoes: 0 });
   const [form, setForm] = useState(null);       // { mode: new|edit|duplicate, entry?, defaults? }
   const [action, setAction] = useState(null);   // { kind: settle|detail|cancel|delete|reopen, entry }
+  const [recentDescriptions, setRecentDescriptions] = useState([]);   // memória do campo Descrição (backend, por usuário)
 
   const refreshCadastros = useCallback(async () => {
     const data = await finApi.cadastros();
@@ -31,13 +32,17 @@ export function FinanceProvider({ children }) {
       setPendentes({ solicitacoes: s.length, atualizacoes: a.length });
     } catch { /* contador é acessório */ }
   }, []);
+  const refreshDescriptions = useCallback(() => {
+    finApi.descricoesRecentes().then(setRecentDescriptions).catch(() => { /* sugestão é acessória */ });
+  }, []);
   const bump = useCallback(() => {
     setVersion((v) => v + 1);
     refreshPendentes();
     refreshCadastros();
-  }, [refreshPendentes, refreshCadastros]);
+    refreshDescriptions();
+  }, [refreshPendentes, refreshCadastros, refreshDescriptions]);
 
-  useEffect(() => { refreshCadastros(); refreshPendentes(); }, [refreshCadastros, refreshPendentes]);
+  useEffect(() => { refreshCadastros(); refreshPendentes(); refreshDescriptions(); }, [refreshCadastros, refreshPendentes, refreshDescriptions]);
 
   const byId = useMemo(() => {
     const m = {};
@@ -46,7 +51,7 @@ export function FinanceProvider({ children }) {
   }, [cad]);
 
   const value = {
-    cad, cadLoaded, byId, refreshCadastros, version, bump, pendentes, refreshPendentes,
+    cad, cadLoaded, byId, refreshCadastros, version, bump, pendentes, refreshPendentes, recentDescriptions,
     novoLancamento: (defaults) => setForm({ mode: "new", defaults }),
     editarLancamento: (entry) => setForm({ mode: "edit", entry }),
     duplicarLancamento: (entry) => setForm({ mode: "duplicate", entry }),

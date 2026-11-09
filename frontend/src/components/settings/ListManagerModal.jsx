@@ -358,7 +358,7 @@ export function ListManagerModal({ tipo, open, onOpenChange, modoInicial = "edit
                 </div>
 
                 {cfg.comGrafico && (
-                  <label className="flex cursor-pointer items-start gap-3">
+                  <label className="flex w-fit max-w-full cursor-pointer items-start gap-3">
                     <Switch
                       checked={form.grafico}
                       onCheckedChange={(v) => set("grafico", v)}
@@ -374,7 +374,7 @@ export function ListManagerModal({ tipo, open, onOpenChange, modoInicial = "edit
                   </label>
                 )}
 
-                <label className="flex cursor-pointer items-start gap-3">
+                <label className="flex w-fit max-w-full cursor-pointer items-start gap-3">
                   <Switch
                     checked={form.ativo}
                     onCheckedChange={(v) => set("ativo", v)}

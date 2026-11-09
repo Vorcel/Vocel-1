@@ -26,6 +26,7 @@ porque o saldo é sempre derivado das baixas ativas.
 Previsões (cards, fluxo, vencidas) usam sempre o SALDO EM ABERTO
 (amount_cents − settled_cents) de lançamentos pendentes ou parciais."""
 import re
+import unicodedata
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 
@@ -355,6 +356,63 @@ SINGLE_FIELD_ACTION = {
 NAME_FIELD = {"category_id": "category_name", "payment_method_id": "payment_method_name",
               "bank_account_id": "account_name", "card_id": "card_name"}
 
+# Formas que NÃO pedem banco/conta no lançamento (o resto — Pix, Boleto,
+# Transferência e formas novas do usuário — pede). Cartão de crédito não é forma:
+# o lançamento aponta direto para o cartão cadastrado (`card_id`).
+FORMAS_SEM_CONTA = {"dinheiro", "especie", "outro", "outros", "cartao", "cartao de credito", "credito"}
+RECENT_DESCRIPTIONS = 15
+
+
+def _norm(txt: str) -> str:
+    t = unicodedata.normalize("NFKD", txt or "")
+    return " ".join("".join(c for c in t if not unicodedata.combining(c)).lower().split())
+
+
+def forma_exige_conta(forma: Optional[dict]) -> bool:
+    return bool(forma) and _norm(forma.get("nome", "")) not in FORMAS_SEM_CONTA
+
+
+async def _payment_fields(owner: str, tipo: str, pm_id: Optional[str], bank_id: Optional[str],
+                          card_id: Optional[str]) -> dict:
+    """Forma de pagamento coerente — nunca guarda vínculo escondido incompatível:
+    cartão => sem forma e sem banco; forma sem conta (Dinheiro/Outro) ou nenhuma
+    forma => sem banco; Pix/Boleto/Transferência => banco obrigatório."""
+    pm_id, bank_id, card_id = pm_id or None, bank_id or None, card_id or None
+    if card_id:
+        if tipo != PAGAR:
+            raise HTTPException(status_code=400, detail="Cartão de crédito só pode ser usado em A Pagar.")
+        return {"payment_method": "credit_card", "payment_method_id": None, "bank_account_id": None, "card_id": card_id}
+    if not pm_id:
+        return {"payment_method": None, "payment_method_id": None, "bank_account_id": None, "card_id": None}
+    forma = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "forma", "id": pm_id})
+    if not forma:
+        raise HTTPException(status_code=400, detail="Forma de pagamento não encontrada.")
+    if forma_exige_conta(forma):
+        if not bank_id:
+            raise HTTPException(status_code=400, detail=f"Selecione o banco/conta ({forma['nome']}).")
+    else:
+        bank_id = None
+    return {"payment_method": "forma", "payment_method_id": pm_id, "bank_account_id": bank_id, "card_id": None}
+
+
+async def _remember_description(owner: str, desc: str, session=None) -> None:
+    """Memória das últimas descrições do usuário (sem duplicata; a repetida sobe
+    para o topo). Só sugestão: o campo continua texto livre."""
+    desc = (desc or "").strip()
+    if not desc:
+        return
+    cfg = await db.fin_settings.find_one({"owner_id": owner}, {"recent_descriptions": 1}, session=session) or {}
+    key = _norm(desc)
+    items = [desc] + [d for d in (cfg.get("recent_descriptions") or []) if _norm(d) != key]
+    await db.fin_settings.update_one({"owner_id": owner}, {"$set": {"recent_descriptions": items[:RECENT_DESCRIPTIONS]}},
+                                     upsert=True, session=session)
+
+
+@fin_router.get("/descricoes-recentes")
+async def recent_descriptions(current=Depends(get_current_user)):
+    cfg = await db.fin_settings.find_one({"owner_id": _owner(current)}, {"recent_descriptions": 1}) or {}
+    return {"items": (cfg.get("recent_descriptions") or [])[:RECENT_DESCRIPTIONS]}
+
 
 def _module(tipo: str) -> str:
     return "pagar" if tipo == PAGAR else "receber"
@@ -497,12 +555,19 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
             values = [amount] * n
             dates = occurrence_dates(first, n, body.frequency or "mensal")
 
-    refs = await _resolve_refs(owner, body.type, body.model_dump(include=set(ENTRY_REF_FIELDS)))
+    if not body.category_id:
+        raise HTTPException(status_code=400, detail="Selecione uma categoria.")
+    pay = await _payment_fields(owner, body.type, body.payment_method_id, body.bank_account_id, body.card_id)
+    refs = await _resolve_refs(owner, body.type, {"category_id": body.category_id,
+                                                  **{k: pay[k] for k in ("payment_method_id", "bank_account_id", "card_id")}})
+    refs["payment_method"] = pay["payment_method"]
     if (body.client_supplier or "").strip() and not body.contact_id:
         raise _free_text_contact_error(body.type)
     contact = await resolve_contact(owner, body.type, body.contact_id)
     bid_label = await _bid_label(owner, body.bid_id)
     tags = await _resolve_tags(owner, body.tag_ids)
+    if not tags["tag_ids"]:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
     duplicated = None
     if body.duplicated_from:
         duplicated = await db.fin_entries.find_one({"owner_id": owner, "id": body.duplicated_from})
@@ -528,6 +593,7 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
 
     async def tx(s):
         await db.fin_entries.insert_many(docs, session=s)
+        await _remember_description(owner, desc, session=s)
         total = sum(values)
         meta = {"mode": body.mode, "count": len(docs), "ids": [d["id"] for d in docs][:50]}
         if duplicated:
@@ -713,7 +779,14 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         if (body.client_supplier or "").strip():
             raise _free_text_contact_error(e["type"])
         patch.update({"contact_id": None, "client_supplier": None})
-    patch.update(await _resolve_refs(owner, e["type"], {f: getattr(body, f) for f in ENTRY_REF_FIELDS if f in sent}, e))
+    ref_data = {f: getattr(body, f) for f in ENTRY_REF_FIELDS if f in sent}
+    if {"payment_method_id", "bank_account_id", "card_id"} & sent:
+        # Forma/banco/cartão mexidos: o conjunto FINAL tem que ser coerente (sem banco escondido).
+        merged = {f: (getattr(body, f) if f in sent else e.get(f)) for f in ("payment_method_id", "bank_account_id", "card_id")}
+        pay = await _payment_fields(owner, e["type"], merged["payment_method_id"], merged["bank_account_id"], merged["card_id"])
+        ref_data.update({k: pay[k] for k in ("payment_method_id", "bank_account_id", "card_id")})
+        patch["payment_method"] = pay["payment_method"]
+    patch.update(await _resolve_refs(owner, e["type"], ref_data, e))
     if "bid_id" in sent and (body.bid_id or None) != e.get("bid_id"):
         patch["bid_id"] = body.bid_id or None
         patch["bid_label"] = await _bid_label(owner, body.bid_id) if body.bid_id else None
@@ -721,6 +794,12 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         patch["amount_cents"] = to_cents(body.amount)
     if "tag_ids" in sent:
         patch.update(await _resolve_tags(owner, body.tag_ids, e.get("tag_ids")))
+    # Categoria e tag obrigatórias também na edição: registro antigo sem elas
+    # precisa recebê-las antes de salvar qualquer alteração (sem migração).
+    if not patch.get("category_id", e.get("category_id")):
+        raise HTTPException(status_code=400, detail="Selecione uma categoria.")
+    if not patch.get("tag_ids", e.get("tag_ids")):
+        raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
     delta_days = 0
     if "due_date" in sent:
         new_due = parse_date(body.due_date, "data de vencimento")
@@ -762,6 +841,8 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
                 upd["due_date"] = shift_days(x["due_date"], delta_days)
             await db.fin_entries.update_one({"_id": x["_id"]}, {"$set": {**upd, "updated_at": ts, "updated_by": current["id"]},
                                                                 "$inc": {"version": 1}}, session=s)
+        if "description" in patch and patch["description"] != e.get("description"):
+            await _remember_description(owner, patch["description"], session=s)
         contato = {}
         if "contact_id" in patch and patch["contact_id"] != e.get("contact_id"):
             # Troca de cliente/fornecedor: IDs + nomes (antes -> depois) para auditoria.
@@ -806,8 +887,18 @@ async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_cur
     if valor > aberto:
         raise HTTPException(status_code=400, detail=f"O valor ({brl(valor)}) é maior que o saldo em aberto ({brl(aberto)}).")
     data_fin = parse_date(body.date, "data do pagamento" if e["type"] == PAGAR else "data do recebimento")
-    refs = await _resolve_refs(owner, e["type"], {"bank_account_id": body.bank_account_id,
-                                                  "payment_method_id": body.payment_method_id})
+    # A baixa é a movimentação REAL do dinheiro: a conta é obrigatória para
+    # QUALQUER forma original (inclusive cartão e dinheiro). A forma NÃO é
+    # escolhida de novo — é a do lançamento (`body.payment_method_id` é ignorado).
+    if not body.bank_account_id:
+        raise HTTPException(status_code=400, detail="Selecione a conta utilizada no pagamento." if e["type"] == PAGAR
+                            else "Selecione a conta em que o recebimento entrou.")
+    refs = await _resolve_refs(owner, e["type"], {"bank_account_id": body.bank_account_id})
+    forma_original = e.get("card_name") if e.get("card_id") else e.get("payment_method_name")
+    if e.get("card_id") and forma_original:
+        cartao = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "cartao", "id": e["card_id"]}, {"final": 1})
+        if cartao and cartao.get("final"):
+            forma_original = f"{forma_original} •••• {cartao['final']}"
     restante = aberto - valor
     quitado = restante == 0
     novo_status = settled_status(e["type"]) if quitado else PARCIAL
@@ -815,7 +906,9 @@ async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_cur
     settlement = {
         "id": new_id(), "owner_id": owner, "entry_id": e["id"], "type": e["type"], "amount_cents": valor,
         "financial_date": data_fin, "bank_account_id": refs.get("bank_account_id"), "account_name": refs.get("account_name"),
-        "payment_method_id": refs.get("payment_method_id"), "payment_method_name": refs.get("payment_method_name"),
+        # Forma ORIGINAL do lançamento (snapshot informativo; a baixa não a altera).
+        "payment_method_id": e.get("payment_method_id"), "payment_method_name": forma_original,
+        "card_id": e.get("card_id"),
         "notes": (body.notes or "").strip() or None, "description": e.get("description"),
         "created_by": current["id"], "created_by_name": current.get("name"), "created_at": ts, "reversed": False,
     }
@@ -837,7 +930,8 @@ async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_cur
                         entity_type="lancamento", entity_id=e["id"], entity_label=_entry_label(e), amount_cents=valor,
                         financial_date=data_fin,
                         changes=[{"field": "open_cents", "label": "Saldo em aberto", "before": aberto, "after": restante}],
-                        metadata={"conta": refs.get("account_name"), "forma": refs.get("payment_method_name"),
+                        metadata={"conta": refs.get("account_name"), "bank_account_id": refs.get("bank_account_id"),
+                                  "forma": forma_original,
                                   "observacao": settlement["notes"], "settlement_id": settlement["id"],
                                   "valor_original": e["amount_cents"]}, session=s)
     await in_transaction(tx)

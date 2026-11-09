@@ -3,6 +3,7 @@ import { Check, Loader2, Plus, Search, UserRound, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { PAPEIS, finApi, fmtDocument } from "@/lib/financeiro";
 import { cn } from "@/lib/utils";
+import { keepScroll } from "./ui";
 
 const PAPEL_DO_TIPO = { pagar: "fornecedor", receber: "cliente" };
 
@@ -27,7 +28,7 @@ export function ContactPicker({ type, value, onSelect, text, onText, invalid, on
     let alive = true;
     setLoading(true);
     const t = setTimeout(() => {
-      finApi.contatos({ q: query || undefined, type, page_size: 8 })
+      finApi.contatos({ q: query || undefined, type, page_size: 50 })
         .then((d) => { if (alive) { setItems(d.items); setActive(0); } })
         .catch(() => alive && setItems([]))
         .finally(() => alive && setLoading(false));
@@ -84,15 +85,16 @@ export function ContactPicker({ type, value, onSelect, text, onText, invalid, on
           )}
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" sideOffset={4} collisionPadding={12}
+      <PopoverContent align="start" sideOffset={4} collisionPadding={12} {...keepScroll}
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => { if (e.target === inputRef.current) e.preventDefault(); }}
         className="fin-scope w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-24px)] p-1.5"
         style={{ background: "var(--fin-surface)", borderColor: "var(--fin-border)" }}>
-        <ul role="listbox" className="max-h-60 overflow-y-auto" data-testid={`${testid}-list`}>
+        <ul role="listbox" className="max-h-[min(280px,45vh)] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]" data-testid={`${testid}-list`}>
           {items.map((c, i) => (
             <li key={c.id} role="option" aria-selected={value?.id === c.id}>
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => choose(c)} onMouseEnter={() => setActive(i)}
+                ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
                 data-testid={`${testid}-opt-${c.id}`}
                 className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm"
                 style={{ background: i === active ? "var(--fin-muted-soft)" : "transparent", color: "var(--fin-ink)" }}>

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useFinance } from "@/context/FinanceContext";
 import { apiError, finApi } from "@/lib/financeiro";
+import { ChipSelect, keepScroll } from "./ui";
 
 // Seleção múltipla de tags (cadastro central em Configurações › Tags).
 // Busca, remoção e — no formulário — criação rápida de uma tag nova, que entra
@@ -55,7 +56,7 @@ export function TagPicker({ value = [], onChange, allowCreate = false, placehold
           <ChevronDown size={15} className="ml-auto shrink-0" style={{ color: "var(--fin-ink-3)" }} />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="fin-scope w-[280px] p-2" style={{ background: "var(--fin-surface)" }} align="start">
+      <PopoverContent className="fin-scope w-[280px] p-2" style={{ background: "var(--fin-surface)" }} align="start" {...keepScroll}>
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tag..." data-testid={`${testid}-search`}
           onKeyDown={(e) => { if (e.key === "Enter" && allowCreate && q.trim() && !exact) { e.preventDefault(); criar(); } }}
           className="mb-1.5 h-9 w-full rounded-md border px-2.5 text-sm outline-none focus:border-[var(--fin-primary)]"
@@ -85,5 +86,53 @@ export function TagPicker({ value = [], onChange, allowCreate = false, placehold
         )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+// Tags no formulário do lançamento: SEMPRE visíveis em botões (seleção
+// múltipla, mesmo visual do Modo de lançamento). Só tags ativas (+ as que o
+// lançamento antigo já tinha). Muitas tags => "Ver mais". "+ Nova tag" cria no
+// mesmo cadastro central (Configurações › Tags).
+export function TagSelect({ value = [], onChange, invalid, testid = "fin-tag-select" }) {
+  const { cad, refreshCadastros } = useFinance();
+  const [novo, setNovo] = useState(null);   // null | texto da nova tag
+  const [busy, setBusy] = useState(false);
+  const options = (cad.tag || [])
+    .filter((t) => t.ativo !== false || value.includes(t.id))
+    .map((t) => ({ value: t.id, label: `${t.nome}${t.ativo === false ? " (inativa)" : ""}`, color: t.cor || "#64748B" }));
+  const criar = async () => {
+    const nome = (novo || "").trim();
+    if (!nome) { setNovo(null); return; }
+    const existente = (cad.tag || []).find((t) => t.nome.toLowerCase() === nome.toLowerCase() && t.ativo !== false);
+    if (existente) { if (!value.includes(existente.id)) onChange([...value, existente.id]); setNovo(null); return; }
+    setBusy(true);
+    try {
+      const t = await finApi.criarCadastro("tag", { nome, cor: "#2563EB" });
+      await refreshCadastros();
+      onChange([...value, t.id]);
+      setNovo(null);
+      toast.success(`Tag "${nome}" criada`);
+    } catch (e) { toast.error(apiError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <ChipSelect multiple value={value} onChange={onChange} options={options} invalid={invalid} testid={testid}
+      emptyText={novo == null ? "Nenhuma tag cadastrada." : undefined}
+      extra={novo == null ? (
+        <button type="button" onClick={() => setNovo("")} data-testid={`${testid}-new`}
+          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold hover:underline" style={{ color: "var(--fin-primary)" }}>
+          <Plus size={13} /> Nova tag
+        </button>
+      ) : (
+        <span className="inline-flex items-center gap-1">
+          <input autoFocus value={novo} onChange={(e) => setNovo(e.target.value)} disabled={busy} placeholder="Nome da tag" data-testid={`${testid}-new-input`}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); criar(); } }}
+            className="h-8 w-36 rounded-md border px-2 text-sm outline-none focus:border-[var(--fin-primary)]"
+            style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface)", color: "var(--fin-ink)" }} />
+          <button type="button" onClick={criar} disabled={busy} title="Criar tag" data-testid={`${testid}-new-save`}
+            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--fin-primary-soft)]" style={{ color: "var(--fin-primary)" }}><Check size={15} /></button>
+          <button type="button" onClick={() => setNovo(null)} disabled={busy} title="Cancelar"
+            className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--fin-surface)]" style={{ color: "var(--fin-ink-3)" }}><X size={15} /></button>
+        </span>
+      )} />
   );
 }

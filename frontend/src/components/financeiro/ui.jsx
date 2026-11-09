@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, LogOut, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Check, Loader2, LogOut, Moon, Sun } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -204,16 +205,40 @@ export function CategoryChip({ id, name }) {
   );
 }
 
-export function Field({ label, required, hint, error, children, className }) {
+// Hitbox: o <label> do Field ocupa a linha inteira da grade, e o navegador
+// repassa qualquer clique no label ao PRIMEIRO controle dentro dele — por isso
+// clicar no branco ao lado do "Modo de lançamento" marcava "À vista", e ao lado
+// do upload abria o seletor de arquivo. Regra: só o TEXTO do rótulo (foca o
+// campo, acessível) e o próprio controle respondem; o vazio do label não.
+const FIELD_INTERACTIVE = 'button, input, select, textarea, a[href], [role="button"], [role="combobox"], [role="option"], [role="switch"], [tabindex]';
+function blockEmptyLabelClick(e) {
+  const t = e.target;
+  if (!(t instanceof Element)) return;
+  // Busca só DENTRO do label: o Dialog em volta tem tabindex="-1" e casaria.
+  const inside = (sel) => { const hit = t.closest(sel); return !!hit && e.currentTarget.contains(hit); };
+  if (inside(FIELD_INTERACTIVE)) return;   // clique no próprio controle: comportamento normal
+  if (inside("[data-field-caption]")) {
+    // Texto do rótulo só FOCA campo de digitação/seleção. Se o 1º controle é um
+    // botão (Segmented "Tipo", upload, cor…), o rótulo não pode acioná-lo.
+    const ctl = e.currentTarget.control;
+    const focusable = ctl && (ctl.tagName === "SELECT" || ctl.tagName === "TEXTAREA"
+      || (ctl.tagName === "INPUT" && !["button", "submit", "reset", "checkbox", "radio", "file", "color", "image"].includes(ctl.type)));
+    if (focusable) return;
+  }
+  e.preventDefault();   // cancela só a ativação do label; o clique continua propagando
+}
+
+// `as="div"` para campos de botões (chips), sem controle único a associar.
+export function Field({ label, required, hint, error, children, className, as: Tag = "label", testid }) {
   return (
-    <label className={cn("block min-w-0", className)}>
-      <span className="mb-1.5 block text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+    <Tag className={cn("block min-w-0", className)} data-testid={testid} onClick={Tag === "label" ? blockEmptyLabelClick : undefined}>
+      <span data-field-caption className="mb-1.5 block w-fit max-w-full text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
         {label}{required && <span style={{ color: "var(--fin-danger)" }}> *</span>}
       </span>
       {children}
       {error ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-danger)" }}>{error}</span>
         : hint ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-ink-3)" }}>{hint}</span> : null}
-    </label>
+    </Tag>
   );
 }
 
@@ -269,6 +294,63 @@ export function Segmented({ value, onChange, options, testid, className, size = 
     </div>
   );
 }
+
+// Seleção por botões visíveis no MESMO visual do Segmented (Modo de lançamento),
+// mas quebrando linha. `multiple`: Tags (vários); sem: Conta utilizada (um só).
+// value: id (único) ou [ids] (múltiplo). options: [{ value, label, icon?, color? }]
+// `collapsedRows`: com muitas opções mostra só as primeiras + "Ver mais".
+export function ChipSelect({ value, onChange, options, multiple, testid, invalid, maxCollapsed = 12, extra, emptyText }) {
+  const [expanded, setExpanded] = useState(false);
+  const selected = multiple ? (value || []) : (value ? [value] : []);
+  const isSel = (v) => selected.includes(v);
+  // Selecionadas sempre aparecem, mesmo além do limite recolhido.
+  const visible = expanded || options.length <= maxCollapsed ? options
+    : options.filter((o, i) => i < maxCollapsed || isSel(o.value));
+  const hidden = options.length - visible.length;
+  const toggle = (v) => {
+    if (multiple) onChange(isSel(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+    else onChange(isSel(v) ? "" : v);
+  };
+  return (
+    <div role={multiple ? "group" : "radiogroup"} aria-invalid={invalid || undefined} data-testid={testid}
+      className="flex flex-wrap items-center gap-1 rounded-lg p-1"
+      style={{ background: "var(--fin-muted-soft)", outline: invalid ? "1px solid var(--fin-danger)" : "none" }}>
+      {visible.map((o) => {
+        const active = isSel(o.value);
+        return (
+          <button key={o.value} type="button" role={multiple ? "checkbox" : "radio"} aria-checked={active}
+            data-testid={testid ? `${testid}-${o.value}` : undefined} data-selected={active || undefined}
+            onClick={() => toggle(o.value)} title={o.title}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors"
+            style={active ? { background: "var(--fin-surface)", color: "var(--fin-primary)", boxShadow: "0 1px 2px rgba(0,0,0,0.08), inset 0 0 0 1px var(--fin-primary)" }
+              : { color: "var(--fin-ink-2)" }}>
+            {o.icon}
+            {!o.icon && o.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: o.color }} />}
+            <span className="truncate">{o.label}</span>
+            {active && multiple && <Check size={13} className="shrink-0" />}
+          </button>
+        );
+      })}
+      {!options.length && emptyText && <span className="px-2 py-1.5 text-xs" style={{ color: "var(--fin-ink-3)" }}>{emptyText}</span>}
+      {(hidden > 0 || (expanded && options.length > maxCollapsed)) && (
+        <button type="button" onClick={() => setExpanded((x) => !x)} data-testid={testid ? `${testid}-more` : undefined}
+          className="rounded-md px-2.5 py-1.5 text-xs font-semibold hover:underline" style={{ color: "var(--fin-primary)" }}>
+          {expanded ? "Ver menos" : `Ver mais (${hidden})`}
+        </button>
+      )}
+      {extra}
+    </div>
+  );
+}
+
+// Popover/lista em portal DENTRO de um Dialog: o Dialog trava o scroll do
+// documento (react-remove-scroll escuta wheel/touchmove no document) e a lista,
+// por estar num portal fora dele, perdia a rolagem. Parar a propagação aqui
+// mantém a rolagem interna e não rola o modal de fundo.
+export const keepScroll = {
+  onWheel: (e) => e.stopPropagation(),
+  onTouchMove: (e) => e.stopPropagation(),
+};
 
 export function EmptyState({ icon: Icon, title, children, action }) {
   return (

@@ -76,11 +76,15 @@ function ImageField({ value, onChange, aspect = "square", testid }) {
   const box = aspect === "card" ? "h-[86px] w-[136px]" : "h-16 w-16";
   return (
     <div className="flex items-center gap-3">
-      <div className={`${box} flex shrink-0 items-center justify-center overflow-hidden rounded-xl border`} style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface-2)" }}>
+      {/* A própria prévia é a área visível do upload: clicável só no seu retângulo. */}
+      <button type="button" onClick={() => ref.current?.click()} disabled={busy} title={value ? "Alterar imagem" : "Adicionar imagem"}
+        aria-label={value ? "Alterar imagem" : "Adicionar imagem"} data-testid={testid && `${testid}-preview`}
+        className={`${box} flex shrink-0 items-center justify-center overflow-hidden rounded-xl border transition-colors hover:border-[var(--fin-primary)]`}
+        style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface-2)" }}>
         {busy ? <Loader2 size={18} className="animate-spin" style={{ color: "var(--fin-ink-3)" }} />
           : value ? <img src={fileUrl(value)} alt="" className="h-full w-full object-contain" />
             : aspect === "card" ? <CreditCard size={26} style={{ color: "var(--fin-ink-3)" }} /> : <ImagePlus size={20} style={{ color: "var(--fin-ink-3)" }} />}
-      </div>
+      </button>
       <div className="flex flex-wrap gap-2">
         <FinButton type="button" variant="outline" className="h-8 text-xs" onClick={() => ref.current?.click()} disabled={busy} data-testid={testid}>
           {value ? "Alterar imagem" : "Adicionar imagem"}
@@ -109,7 +113,7 @@ function useSave(kind, item, onClose) {
 
 function AtivoToggle({ value, onChange, label }) {
   return (
-    <label className="flex cursor-pointer items-center gap-3 text-sm" style={{ color: "var(--fin-ink)" }}>
+    <label className="flex w-fit max-w-full cursor-pointer items-center gap-3 text-sm" style={{ color: "var(--fin-ink)" }}>
       <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)} data-testid="fin-cad-ativo"
         className="relative h-6 w-11 rounded-full transition-colors" style={{ background: value ? "var(--fin-primary)" : "var(--fin-border)" }}>
         <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" style={{ left: value ? 22 : 2 }} />

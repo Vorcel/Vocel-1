@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePickerInput } from "@/components/DatePickerInput";
+import { BankLogo } from "@/components/financeiro/icons";
+import { ChipSelect } from "@/components/financeiro/ui";
 import { apiError, centsToInput, finApi, fmtDate, money, parseMoney, todaySP } from "@/lib/financeiro";
 import { cn } from "@/lib/utils";
 
@@ -157,15 +159,25 @@ export function RecebivelModal({ target, onClose, onChanged }) {
 // Execução movida para Pagamento Recebido com recebível aprovado em aberto
 // (inclusive parcial): pergunta se o Financeiro deve quitar o SALDO restante
 // (data sugerida = hoje, editável). Nada é gravado sem confirmação.
+// A conta de entrada é obrigatória (mesma regra da baixa no Financeiro) e não
+// vem pré-selecionada.
 export function BaixaRecebivelDialog({ prompt, onClose, onDone }) {
   const [date, setDate] = useState(todaySP());
+  const [conta, setConta] = useState("");
+  const [contaErr, setContaErr] = useState(false);
+  const [contas, setContas] = useState([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (prompt) setDate(todaySP()); }, [prompt]);
+  useEffect(() => {
+    if (!prompt) return;
+    setDate(todaySP()); setConta(""); setContaErr(false);
+    finApi.cadastros().then((d) => setContas((d.conta || []).filter((c) => c.ativo !== false))).catch(() => setContas([]));
+  }, [prompt]);
   if (!prompt) return null;
   const confirmar = async () => {
     if (!date) { toast.error("Informe a data do recebimento."); return; }
+    if (!conta) { setContaErr(true); toast.error("Selecione a conta em que o recebimento entrou."); return; }
     setBusy(true);
-    try { await finApi.baixar(prompt.entry_id, { date }); toast.success("Recebível quitado no Financeiro"); await onDone(); onClose(); }
+    try { await finApi.baixar(prompt.entry_id, { date, bank_account_id: conta }); toast.success("Recebível quitado no Financeiro"); await onDone(); onClose(); }
     catch (e) { toast.error(apiError(e)); } finally { setBusy(false); }
   };
   return (
@@ -184,6 +196,15 @@ export function BaixaRecebivelDialog({ prompt, onClose, onDone }) {
           <Label className="mb-1 block">Data do recebimento</Label>
           <DatePickerInput value={date} onChange={setDate} testid="exec-baixa-data" />
           <p className="mt-1 text-xs text-muted-foreground">Corrija se o dinheiro entrou em outra data.</p>
+        </div>
+        <div className="fin-scope" style={{ background: "transparent", color: "inherit" }} data-testid="exec-baixa-conta-field">
+          <Label className="mb-1 block">Conta de entrada <span className="text-red-600">*</span></Label>
+          <ChipSelect value={conta} onChange={(v) => { setConta(v); setContaErr(false); }} invalid={contaErr} testid="exec-baixa-conta" maxCollapsed={10}
+            options={contas.map((c) => ({ value: c.id, label: c.nome, icon: <BankLogo item={c} size={18} /> }))}
+            emptyText="Nenhuma conta bancária ativa no Financeiro." />
+          <p className={cn("mt-1 text-xs", contaErr ? "text-red-600" : "text-muted-foreground")}>
+            {contaErr ? "Selecione a conta em que o recebimento entrou." : "O saldo desta conta é movimentado no Financeiro."}
+          </p>
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy} data-testid="exec-baixa-nao">Não</Button>

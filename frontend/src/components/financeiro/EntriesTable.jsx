@@ -6,7 +6,7 @@ import { SortArrows } from "@/components/table/SortArrows";
 import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useFinance } from "@/context/FinanceContext";
-import { MODOS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, todaySP } from "@/lib/financeiro";
+import { MODOS, QUICK_FILTERS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, todaySP } from "@/lib/financeiro";
 import { EntryRowActions } from "./EntryActions";
 import { TagPicker } from "./TagPicker";
 import { Amount, CategoryChip, EmptyState, EntryStatus, FinButton, FinInput, FinSelect, Pager, TagChips, TonePill } from "./ui";
@@ -25,7 +25,10 @@ function useDebounced(value, ms = 350) {
 
 // Tabela de lançamentos com paginação/ordenação NO SERVIDOR (só a página atual
 // trafega). `type` fixo (A Pagar / A Receber) ou null (Lançamentos: ambos).
-export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", title, toolbarExtra }) {
+// `quickFilters` (Visão Geral): botões Todos / Em aberto / Pago / Vencido no
+// lugar do select de status, começando SEMPRE em "Em aberto" (não persiste).
+// Filtram só esta tabela — cards e gráfico da página não mudam.
+export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", title, toolbarExtra, quickFilters = false }) {
   const { cad, version, novoLancamento } = useFinance();
   const today = todaySP();
   const presets = useMemo(() => periodPresets(today), [today]);
@@ -34,7 +37,7 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
   const [page, setPage] = useState(1);
   const [qText, setQText] = useState("");
   const q = useDebounced(qText);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(quickFilters ? "aberto" : "");
   const [period, setPeriod] = useState(defaultPeriod);
   const [custom, setCustom] = useState({ from: "", to: "" });
   const EMPTY_ADV = { type: "", category_id: "", payment_method_id: "", account_id: "", mode: "", tag_ids: [] };
@@ -71,7 +74,8 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
     </th>
   );
   const pagamento = (e) => {
-    const forma = (e.payment_method_id && cad.forma.find((x) => x.id === e.payment_method_id)?.nome) || e.payment_method_name;
+    const forma = (e.payment_method_id && cad.forma.find((x) => x.id === e.payment_method_id)?.nome) || e.payment_method_name
+      || (e.card_id ? "Cartão de crédito" : null);
     const conta = (e.card_id && (cad.cartao.find((x) => x.id === e.card_id)?.nome || e.card_name)) ||
       (e.bank_account_id && (cad.conta.find((x) => x.id === e.bank_account_id)?.nome || e.account_name));
     if (!forma && !conta) return <span style={{ color: "var(--fin-ink-3)" }}>—</span>;
@@ -86,9 +90,11 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--fin-ink-3)" }} />
           <FinInput value={qText} onChange={(e) => setQText(e.target.value)} placeholder={type === "receber" ? "Buscar por descrição, cliente, pregão..." : "Buscar por descrição, fornecedor..."} className="pl-9" data-testid="fin-search" />
         </div>
-        <FinSelect value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto" data-testid="fin-filter-status">
-          {STATUS_OPTS[type || "all"].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </FinSelect>
+        {!quickFilters && (
+          <FinSelect value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto" data-testid="fin-filter-status">
+            {STATUS_OPTS[type || "all"].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </FinSelect>
+        )}
         <FinSelect value={period} onChange={(e) => setPeriod(e.target.value)} className="w-auto" data-testid="fin-filter-period">
           <option value="todos">Todos os vencimentos</option>
           {presets.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
@@ -100,6 +106,25 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
         {toolbarExtra}
         <FinButton onClick={() => novoLancamento(type ? { type } : undefined)} data-testid="fin-new-entry"><Plus size={16} /> Novo lançamento</FinButton>
       </div>
+      {quickFilters && (
+        <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="fin-quick-filters">
+          <span className="text-xs font-medium" style={{ color: "var(--fin-ink-3)" }}>Filtros pré-definidos</span>
+          <div className="inline-flex flex-wrap gap-1 rounded-lg p-1" style={{ background: "var(--fin-muted-soft)" }} role="tablist">
+            {QUICK_FILTERS.map((qf) => {
+              const active = status === qf.status;
+              return (
+                <button key={qf.key} type="button" role="tab" aria-selected={active} onClick={() => setStatus(qf.status)}
+                  data-testid={`fin-quick-${qf.key}`} data-selected={active || undefined}
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors"
+                  style={active ? { background: "var(--fin-surface)", color: "var(--fin-ink)", boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } : { color: "var(--fin-ink-2)" }}>
+                  {qf.color && <span className="h-2 w-2 rounded-full" style={{ background: qf.color }} />}
+                  {qf.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {period === "custom" && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm" style={{ color: "var(--fin-ink-2)" }}>
           Vencimento de <DatePickerInput value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} testid="fin-period-from" className="w-40" />

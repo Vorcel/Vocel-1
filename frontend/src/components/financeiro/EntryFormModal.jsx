@@ -5,18 +5,20 @@ import { DatePickerInput } from "@/components/DatePickerInput";
 import { useData } from "@/context/DataContext";
 import { activeOptions, useFinance } from "@/context/FinanceContext";
 import {
-  FREQUENCIAS, MODOS, apiError, apiErrorCode, centsToInput, contatoServe, finApi, money, parseMoney, splitInstallments, todaySP,
+  FREQUENCIAS, MODOS, apiError, apiErrorCode, applyPaymentChoice, centsToInput, contatoServe, finApi, formaExigeConta, money,
+  parseMoney, paymentValue, splitInstallments, todaySP,
 } from "@/lib/financeiro";
 import { ContactModal } from "./CadastroModals";
 import { ContactFieldLabel, ContactPicker } from "./ContactPicker";
 import { FinModal } from "./FinModal";
-import { TagPicker } from "./TagPicker";
+import { DescriptionInput, PaymentMethodPicker } from "./PaymentFields";
+import { TagSelect } from "./TagPicker";
 import { Field, FinButton, FinInput, FinSelect, FinTextarea, Segmented } from "./ui";
 
 const SCOPES = [
   { value: "one", label: "Somente este lançamento" },
   { value: "next", label: "Este e os próximos" },
-  { value: "all", label: "Todos os lançamentos da sequência" },
+  { value: "all", label: "Todos — anteriores, este e próximos" },
 ];
 
 const uid = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -49,7 +51,7 @@ function initialState(mode, entry, defaults) {
 }
 
 export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSaved }) {
-  const { cad } = useFinance();
+  const { cad, recentDescriptions } = useFinance();
   const { bids } = useData();
   const [entry, setEntry] = useState(entryProp);
   const [f, setF] = useState(() => initialState(mode, entryProp, defaults));
@@ -99,12 +101,23 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
     return null;
   }, [cents, n, f.mode, f.frequency, isEdit]);
 
+  // Banco/Conta só aparece (e só é exigido) para forma que movimenta banco
+  // direto (Pix, Boleto, Transferência…). Cartão, Dinheiro, Outro e "não
+  // informado" não têm banco no lançamento — a conta real vai na baixa.
+  const formaSel = !f.card_id && f.payment_method_id ? (cad.forma || []).find((x) => x.id === f.payment_method_id) : null;
+  const showBank = formaExigeConta(formaSel);
+  const origPay = useMemo(() => (isEdit && entryProp ? initialState("edit", entryProp) : null), [isEdit, entryProp]);
+  // Em registro antigo, banco só é cobrado se a pessoa mexer na forma/banco.
+  const payTouched = !origPay || paymentValue(f) !== paymentValue(origPay) || (f.bank_account_id || "") !== (origPay.bank_account_id || "");
   const catOptions = activeOptions(cad.categoria, f.category_id, (c) => c.tipo === (f.type === "receber" ? "receita" : "despesa"));
   const bidOptions = useMemo(() => [...(bids || [])].sort((a, b) => (b.data_disputa || "").localeCompare(a.data_disputa || "")), [bids]);
 
   const validate = () => {
     const e = {};
     if (!f.description.trim()) e.description = "Informe a descrição.";
+    if (!f.category_id) e.category = "Selecione uma categoria.";
+    if (!(f.tag_ids || []).length) e.tags = "Selecione pelo menos uma tag.";
+    if (showBank && !f.bank_account_id && payTouched) e.bank = `Selecione o banco/conta (${formaSel?.nome}).`;
     if (contactText.trim() && !contact) {
       e.contact = `Selecione um ${f.type === "receber" ? "cliente" : "fornecedor"} cadastrado na lista — ou use "Cadastrar".`;
     } else if (contact && !contatoServe(contact, f.type)) {
@@ -115,6 +128,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
     if (!f.due_date) e.due_date = "Informe a data.";
     if (!isEdit && f.mode !== "avista" && (n < 1 || n > 360)) e.installments = "Entre 1 e 360.";
     setErrors(e);
+    if (Object.keys(e).length) toast.error(e.category || e.tags || e.bank || "Preencha os campos obrigatórios.");
     return !Object.keys(e).length;
   };
 
@@ -216,7 +230,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
                 {settledSelf ? "Alterar um registro realizado muda o histórico financeiro. Confirme abaixo para continuar."
                   : "Por padrão eles são preservados e não mudam. Marque abaixo só se quiser alterá-los também."}
               </p>
-              <label className="mt-2 flex items-center gap-2 text-xs font-semibold" style={{ color: "var(--fin-ink)" }}>
+              <label className="mt-2 flex w-fit max-w-full cursor-pointer items-center gap-2 text-xs font-semibold" style={{ color: "var(--fin-ink)" }}>
                 <input type="checkbox" checked={includeSettled} onChange={(e) => setIncludeSettled(e.target.checked)} data-testid="fin-include-settled" />
                 {settledSelf ? "Confirmo a alteração de um lançamento já realizado" : "Alterar também os já pagos/recebidos"}
               </label>
@@ -232,14 +246,14 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Tipo" className="sm:col-span-2">
             <Segmented testid="fin-entry-type" value={f.type} onChange={(v) => {
-              setF((p) => ({ ...p, type: v, category_id: "" }));
+              setF((p) => ({ ...p, type: v, category_id: "", ...(v === "receber" && p.card_id ? { card_id: "" } : {}) }));
               // Cadastro que não serve ao novo tipo (ex.: só Cliente em A Pagar) sai da seleção.
               if (contact && !contatoServe(contact, v)) { setContact(null); setContactText(""); }
             }}
               options={[{ value: "pagar", label: "A Pagar", disabled: isEdit }, { value: "receber", label: "A Receber", disabled: isEdit }]} />
           </Field>
           <Field label="Descrição" required error={errors.description} className="sm:col-span-2">
-            <FinInput value={f.description} onChange={set("description")} invalid={!!errors.description} data-testid="fin-entry-description"
+            <DescriptionInput value={f.description} onChange={set("description")} invalid={!!errors.description} recent={recentDescriptions}
               placeholder={f.type === "receber" ? "Ex.: Recebimento – Pregão 90012/2026" : "Ex.: Fornecedor – Mercadoria do pregão"} />
           </Field>
           {/* div (não <label>): o atalho "Cadastrar" no rótulo não pode virar o alvo do label */}
@@ -258,9 +272,10 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
                 </span>
               ) : null}
           </div>
-          <Field label="Categoria">
-            <FinSelect value={f.category_id} onChange={set("category_id")} data-testid="fin-entry-category">
-              <option value="">Sem categoria</option>
+          <Field label="Categoria" required error={errors.category}>
+            <FinSelect value={f.category_id} invalid={!!errors.category} data-testid="fin-entry-category"
+              onChange={(e) => { set("category_id")(e); setErrors((p) => ({ ...p, category: undefined })); }}>
+              <option value="" disabled>Selecione…</option>
               {catOptions.map((c) => <option key={c.id} value={c.id}>{`${c.nome}${c.ativo === false ? " (inativa)" : ""}`}</option>)}
             </FinSelect>
           </Field>
@@ -299,36 +314,31 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             </p>
           )}
 
-          <Field label="Forma de pagamento">
-            <FinSelect value={f.payment_method_id} onChange={set("payment_method_id")} data-testid="fin-entry-method">
-              <option value="">—</option>
-              {activeOptions(cad.forma, f.payment_method_id).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </FinSelect>
+          <Field as="div" label="Forma de pagamento" className={showBank ? "" : "sm:col-span-2"}>
+            <PaymentMethodPicker type={f.type} state={f}
+              onChange={(v) => { setF((p) => applyPaymentChoice(p, v, cad.forma)); setErrors((p) => ({ ...p, bank: undefined })); }} />
           </Field>
-          <Field label={f.type === "receber" ? "Conta de recebimento" : "Banco / conta"}>
-            <FinSelect value={f.bank_account_id} onChange={set("bank_account_id")} data-testid="fin-entry-account">
-              <option value="">—</option>
-              {activeOptions(cad.conta, f.bank_account_id).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </FinSelect>
-          </Field>
-          {f.type === "pagar" && (
-            <Field label="Cartão de crédito">
-              <FinSelect value={f.card_id} onChange={set("card_id")} data-testid="fin-entry-card">
-                <option value="">—</option>
-                {activeOptions(cad.cartao, f.card_id).map((c) => <option key={c.id} value={c.id}>{`${c.nome}${c.final ? ` •••• ${c.final}` : ""}`}</option>)}
+          {showBank && (
+            <Field label={f.type === "receber" ? "Conta de recebimento" : "Banco / conta"} required={payTouched} error={errors.bank}>
+              <FinSelect value={f.bank_account_id} invalid={!!errors.bank} data-testid="fin-entry-account"
+                onChange={(e) => { set("bank_account_id")(e); setErrors((p) => ({ ...p, bank: undefined })); }}>
+                <option value="">Selecione…</option>
+                {activeOptions(cad.conta, f.bank_account_id).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </FinSelect>
             </Field>
           )}
-          <Field label="Licitação vinculada (opcional)" className={f.type === "pagar" ? "" : "sm:col-span-2"}>
+          <Field as="div" label="Tags" required className="sm:col-span-2" error={errors.tags} testid="fin-entry-tags-field"
+            hint="Selecione uma ou mais (ex.: urgente, licitação, frete). Diferente da categoria.">
+            <TagSelect value={f.tag_ids} invalid={!!errors.tags} testid="fin-entry-tags"
+              onChange={(v) => { set("tag_ids")(v); setErrors((p) => ({ ...p, tags: undefined })); }} />
+          </Field>
+          <Field label="Licitação vinculada (opcional)" className="sm:col-span-2">
             <FinSelect value={f.bid_id} onChange={set("bid_id")} data-testid="fin-entry-bid">
               <option value="">Nenhuma</option>
               {bidOptions.map((b) => (
                 <option key={b.id} value={b.id}>{[b.pregao && `Pregão ${b.pregao}`, b.orgao, (b.objeto || "").slice(0, 50)].filter(Boolean).join(" · ")}</option>
               ))}
             </FinSelect>
-          </Field>
-          <Field label="Tags" className="sm:col-span-2" hint="Marcadores livres (ex.: pregão, região, urgência). Diferente da categoria.">
-            <TagPicker value={f.tag_ids} onChange={set("tag_ids")} allowCreate testid="fin-entry-tags" />
           </Field>
           <Field label="Observação" className="sm:col-span-2">
             <FinTextarea value={f.notes} onChange={set("notes")} rows={2} data-testid="fin-entry-notes" />

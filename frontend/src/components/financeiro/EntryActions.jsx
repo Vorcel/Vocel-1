@@ -8,14 +8,20 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { activeOptions, useFinance } from "@/context/FinanceContext";
+import { useFinance } from "@/context/FinanceContext";
 import {
-  ACOES, MODOS, TIPOS, apiError, centsToInput, changeValue, finApi, fmtDate, fmtTimestamp, isOpenEntry, money, parseMoney, todaySP,
+  ACOES, MODOS, TIPOS, apiError, cardLabel, centsToInput, changeValue, finApi, fmtDate, fmtTimestamp, isOpenEntry, money, parseMoney, todaySP,
 } from "@/lib/financeiro";
 import { FinConfirm, FinModal } from "./FinModal";
-import { Amount, CategoryChip, EntryStatus, Field, FinButton, FinInput, FinSelect, FinTextarea, Money, TagChips, TonePill } from "./ui";
+import { AccountChips } from "./PaymentFields";
+import { Amount, CategoryChip, EntryStatus, Field, FinButton, FinInput, FinTextarea, Money, TagChips, TonePill } from "./ui";
 
 const hasSettlements = (e) => (e.settled_cents || 0) > 0;
+// Forma do lançamento para exibição: o cartão (com final) ou a forma cadastrada.
+function formaLabel(e, byId) {
+  if (e.card_id) return cardLabel(byId[e.card_id]) || e.card_name || "Cartão de crédito";
+  return (e.payment_method_id && byId[e.payment_method_id]?.nome) || e.payment_method_name || "";
+}
 
 // Ação principal visível (Pagar/Receber, só com saldo em aberto) + menu ⋮.
 export function EntryRowActions({ entry: e }) {
@@ -114,25 +120,31 @@ function Valores({ e, compact }) {
   );
 }
 
+// Baixa = movimentação REAL do dinheiro. A forma de pagamento NÃO é escolhida
+// de novo (é a do lançamento, mostrada só como informação); a conta é
+// obrigatória para QUALQUER forma original e nunca vem pré-selecionada.
 function SettleModal({ entry: e, onClose, onSettled }) {
-  const { cad } = useFinance();
+  const { byId } = useFinance();
   const aberto = e.open_cents ?? (e.amount_cents - (e.settled_cents || 0));
   const [valor, setValor] = useState(centsToInput(aberto));
   const [date, setDate] = useState(todaySP());
-  const [conta, setConta] = useState(e.bank_account_id || "");
-  const [forma, setForma] = useState(e.payment_method_id || "");
+  const [conta, setConta] = useState("");
+  const [contaErr, setContaErr] = useState(false);
   const [notes, setNotes] = useState("");
+  const formaOriginal = formaLabel(e, byId);
   const [saving, setSaving] = useState(false);
   const pagar = e.type === "pagar";
   const cents = parseMoney(valor);
   const parcial = cents != null && cents > 0 && cents < aberto;
+  const contaMsg = pagar ? "Selecione a conta utilizada no pagamento." : "Selecione a conta em que o recebimento entrou.";
   const submit = async () => {
     if (!date) { toast.error("Informe a data."); return; }
     if (!cents || cents <= 0) { toast.error("Informe um valor maior que zero."); return; }
     if (cents > aberto) { toast.error(`O valor não pode passar do saldo em aberto (${money(aberto)}).`); return; }
+    if (!conta) { setContaErr(true); toast.error(contaMsg); return; }
     setSaving(true);
     try {
-      const saved = await finApi.baixar(e.id, { amount: (cents / 100).toFixed(2), date, bank_account_id: conta || null, payment_method_id: forma || null, notes: notes || null });
+      const saved = await finApi.baixar(e.id, { amount: (cents / 100).toFixed(2), date, bank_account_id: conta, notes: notes || null });
       toast.success(saved.quitado ? (pagar ? "Pagamento registrado — conta quitada" : "Recebimento registrado — quitado")
         : `${pagar ? "Pagamento" : "Recebimento"} parcial registrado · restam ${money(saved.open_cents)}`);
       onSettled(saved);
@@ -158,18 +170,15 @@ function SettleModal({ entry: e, onClose, onSettled }) {
         <Field label={pagar ? "Data do pagamento" : "Data do recebimento"} required hint="Pode ser retroativa. O histórico registra também o momento real desta ação.">
           <DatePickerInput value={date} onChange={setDate} testid="fin-settle-date" />
         </Field>
-        <Field label={pagar ? "Conta utilizada" : "Conta de entrada"} hint="A baixa movimenta o saldo desta conta.">
-          <FinSelect value={conta} onChange={(x) => setConta(x.target.value)} data-testid="fin-settle-account">
-            <option value="">Nenhuma (não altera saldo)</option>
-            {activeOptions(cad.conta, conta).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-          </FinSelect>
+        <Field as="div" label={pagar ? "Conta utilizada" : "Conta de entrada"} required error={contaErr ? contaMsg : undefined}
+          hint={pagar ? "De qual conta o dinheiro saiu de fato. O saldo desta conta é movimentado." : "Em qual conta o dinheiro entrou. O saldo desta conta é movimentado."}>
+          <AccountChips value={conta} invalid={contaErr} onChange={(v) => { setConta(v); setContaErr(false); }} />
         </Field>
-        <Field label={pagar ? "Forma de pagamento" : "Forma de recebimento"}>
-          <FinSelect value={forma} onChange={(x) => setForma(x.target.value)}>
-            <option value="">—</option>
-            {activeOptions(cad.forma, forma).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-          </FinSelect>
-        </Field>
+        {formaOriginal && (
+          <p className="text-xs" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-settle-original-method">
+            {pagar ? "Pagamento via" : "Recebimento via"}: <span className="font-medium" style={{ color: "var(--fin-ink-2)" }}>{formaOriginal}</span> (forma registrada no lançamento)
+          </p>
+        )}
         <Field label="Observação"><FinTextarea rows={2} value={notes} onChange={(x) => setNotes(x.target.value)} /></Field>
       </div>
     </FinModal>
@@ -296,7 +305,7 @@ function RemoveModal({ kind, entry: e, onClose, onDone }) {
           <div className="space-y-2">
             <p className="text-sm font-semibold" style={{ color: "var(--fin-ink)" }}>{del ? "Excluir:" : "Cancelar:"}</p>
             {[["one", "Somente este lançamento"], ["next", "Este e os próximos"], ["all", "Toda a sequência"]].map(([v, l]) => (
-              <label key={v} className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: "var(--fin-ink-2)" }}>
+              <label key={v} className="flex w-fit max-w-full cursor-pointer items-center gap-2 text-sm" style={{ color: "var(--fin-ink-2)" }}>
                 <input type="radio" checked={scope === v} onChange={() => setScope(v)} data-testid={`fin-remove-scope-${v}`} /> {l}
               </label>
             ))}
@@ -350,9 +359,8 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
                   : "—")}
                 {row("Categoria", <CategoryChip id={e.category_id} name={e.category_name} />)}
                 {e.tag_ids?.length > 0 && row("Tags", <TagChips ids={e.tag_ids} names={e.tag_names} max={10} className="justify-end" />)}
-                {row("Forma de pagamento", name(e.payment_method_id, e.payment_method_name))}
-                {row("Banco / conta", name(e.bank_account_id, e.account_name))}
-                {e.card_id && row("Cartão", name(e.card_id, e.card_name))}
+                {row("Forma de pagamento", formaLabel(e, byId) || "—")}
+                {e.bank_account_id && row(e.type === "pagar" ? "Banco / conta" : "Conta de recebimento", name(e.bank_account_id, e.account_name))}
                 {e.bid_label && row("Licitação", e.bid_label)}
                 {e.request_id && row("Origem", "Execução & Pós-Venda")}
                 {e.cancel_reason && row("Motivo do cancelamento", e.cancel_reason)}
