@@ -3,6 +3,7 @@ import { Receipt, FileSpreadsheet, Folder, Plus } from "lucide-react";
 import { PropostaIcon, PROPOSTA_COLOR, listPropostas } from "@/components/bids/PropostaIcon";
 import { CountBadge } from "@/components/CountBadge";
 import { DocsDialog, abrirCategoria, buildDocCategories } from "@/components/execution/DocumentHub";
+import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { hasRemessas } from "@/lib/remessas";
 import { cn } from "@/lib/utils";
@@ -66,6 +67,7 @@ function Atalho({ testid, icon: Icon, label, color, count, disabled, title, onCl
 export function DocShortcuts({ bid, execution, remessa, onProposta }) {
   const { addExecutionDoc, removeExecutionDoc, addRemessaDoc, removeRemessaDoc } = useData();
   const [aberta, setAberta] = useState(null);
+  const { can } = useAuth();
 
   const semExecucao = !execution;
   const docsPorRemessa = hasRemessas(execution) && !remessa;
@@ -87,13 +89,15 @@ export function DocShortcuts({ bid, execution, remessa, onProposta }) {
 
   return (
     <div data-testid="budget-doc-shortcuts" className="flex shrink-0 items-center gap-0.5">
-      <Atalho
-        testid="budget-doc-proposta" icon={PropostaIcon} label="Proposta" color={PROPOSTA_COLOR}
-        count={totalPropostas}
-        title={totalPropostas > 1 ? `Propostas (${totalPropostas})` : totalPropostas ? "Proposta" : "Proposta — adicionar"}
-        onClick={() => onProposta(bid)}
-      />
-      {[
+      {can("propostas.view") && (
+        <Atalho
+          testid="budget-doc-proposta" icon={PropostaIcon} label="Proposta" color={PROPOSTA_COLOR}
+          count={totalPropostas}
+          title={totalPropostas > 1 ? `Propostas (${totalPropostas})` : totalPropostas ? "Proposta" : "Proposta — adicionar"}
+          onClick={() => onProposta(bid)}
+        />
+      )}
+      {can("execution.docs.view") && [
         { cat: cats.nota_empenho, icon: Receipt, testid: "budget-doc-nota-empenho" },
         { cat: cats.nota_fiscal, icon: FileSpreadsheet, testid: "budget-doc-nota-fiscal" },
         { cat: cats.outros, icon: Folder, testid: "budget-doc-outros" },

@@ -6,6 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
+import { makeCan } from "@/lib/permissions";
 import { useTheme } from "@/context/ThemeContext";
 import { fileUrl } from "@/lib/api";
 import { FLOW_COLOR, STATUS, TONES, dueAlert, entryStatus, flowOf, money, todaySP } from "@/lib/financeiro";
@@ -44,12 +45,18 @@ function ModuleControls() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const initials = (user?.name || "U").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  // Volta para a 1ª tela do módulo Licitações que o usuário pode abrir (some se nenhuma).
+  const { can } = makeCan(user);
+  const licTo = [["/", "licitacoes.view"], ["/execucao", "execution.view"], ["/analises", "analytics.view"],
+    ["/rascunho", "rascunho.use"]].find(([, k]) => can(k))?.[0];
   return (
     <>
-      <button data-testid="fin-back-licitacoes" onClick={() => navigate("/")}
-        className="flex h-9 items-center gap-1.5 rounded-lg border border-black bg-black px-3 text-sm font-semibold text-white transition-colors hover:bg-black/85">
-        <ArrowLeft size={15} /> Licitações
-      </button>
+      {licTo && (
+        <button data-testid="fin-back-licitacoes" onClick={() => navigate(licTo)}
+          className="flex h-9 items-center gap-1.5 rounded-lg border border-black bg-black px-3 text-sm font-semibold text-white transition-colors hover:bg-black/85">
+          <ArrowLeft size={15} /> Licitações
+        </button>
+      )}
       <button onClick={toggleTheme} title="Alternar tema" data-testid="fin-theme-toggle"
         className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-[var(--fin-muted-soft)]" style={{ color: "var(--fin-ink-2)" }}>
         {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}

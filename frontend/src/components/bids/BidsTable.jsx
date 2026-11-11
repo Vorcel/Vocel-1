@@ -12,6 +12,7 @@ import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { fileUrl } from "@/lib/api";
 import { hexToRgba, tagColorAt } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,7 @@ const FilesCell = ({ files }) => {
 
 export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
   const { toggleFavorite, updateObservacoes } = useData();
+  const { can } = useAuth();
   const navigate = useNavigate();
   const scrollRef = useRef(null);
   // v5: a coluna "PROP." saiu e a proposta virou o ícone "P" ao lado da calculadora —
@@ -142,7 +144,8 @@ export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
                 </td>
                 {/* 2. Favorito */}
                 <td className="px-3 py-3">
-                  <button data-testid={`bid-star-${b.id}`} onClick={() => toggleFavorite(b.id, !b.favorito)} className="transition-transform hover:scale-125">
+                  <button data-testid={`bid-star-${b.id}`} disabled={!can("licitacoes.edit")}
+                    onClick={() => toggleFavorite(b.id, !b.favorito)} className="transition-transform enabled:hover:scale-125 disabled:cursor-default">
                     <Star size={18} className={cn(b.favorito ? "fill-amber-400 text-amber-400" : "text-muted-foreground/50")} />
                   </button>
                 </td>
@@ -166,7 +169,8 @@ export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
                 </td>
                 {/* 6. Observação */}
                 <td className="px-3 py-3">
-                  <ObservacaoTags testid={`bid-obs-${b.id}`} value={b.observacoes || []} onChange={(arr) => updateObservacoes(b.id, arr)} />
+                  <ObservacaoTags testid={`bid-obs-${b.id}`} value={b.observacoes || []} readOnly={!can("licitacoes.edit")}
+                    onChange={(arr) => updateObservacoes(b.id, arr)} />
                 </td>
                 {/* 7. Pregão / UASG */}
                 <td className="whitespace-nowrap px-3 py-3">
@@ -176,25 +180,31 @@ export const BidsTable = ({ bids, onEdit, onDelete, onProposta }) => {
                 {/* 8. Status */}
                 <td className="px-3 py-3"><StatusDropdown bid={b} /></td>
                 {/* 9. Arquivos (multi com badge + popover) */}
-                <td className="px-3 py-3"><FilesCell files={files} /></td>
+                <td className="px-3 py-3">{can("licitacoes.docs.view") ? <FilesCell files={files} /> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 {/* 10. Orçamento + Proposta (o "P" acende quando existe documento) */}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1">
-                    <button data-testid={`bid-budget-${b.id}`} onClick={() => navigate(`/orcamento/${b.id}`)} className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento">
-                      <Calculator size={18} style={{ color: ORCAMENTO_COLOR }} />
-                    </button>
-                    <PropostaButton bid={b} onClick={() => onProposta(b)} />
+                    {can("orcamento.view") && (
+                      <button data-testid={`bid-budget-${b.id}`} onClick={() => navigate(`/orcamento/${b.id}`)} className="flex h-8 w-8 items-center justify-center rounded-md text-brand hover:bg-brand/10" title="Abrir orçamento">
+                        <Calculator size={18} style={{ color: ORCAMENTO_COLOR }} />
+                      </button>
+                    )}
+                    {can("propostas.view") && <PropostaButton bid={b} onClick={() => onProposta(b)} />}
                   </div>
                 </td>
                 {/* 11. Ações */}
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                    <button data-testid={`bid-edit-${b.id}`} onClick={() => onEdit(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar">
-                      <Pencil size={16} />
-                    </button>
-                    <button data-testid={`bid-delete-${b.id}`} onClick={() => onDelete(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-alert/10 hover:text-alert" title="Excluir">
-                      <Trash2 size={16} />
-                    </button>
+                    {can("licitacoes.edit") && (
+                      <button data-testid={`bid-edit-${b.id}`} onClick={() => onEdit(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar">
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                    {can("licitacoes.delete") && (
+                      <button data-testid={`bid-delete-${b.id}`} onClick={() => onDelete(b)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-alert/10 hover:text-alert" title="Excluir">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

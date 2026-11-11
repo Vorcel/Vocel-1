@@ -7,6 +7,7 @@ import { SelectWithAdd } from "@/components/bids/SelectWithAdd";
 import { ObservacaoTags } from "@/components/bids/ObservacaoTags";
 import { FileUpload } from "@/components/FileUpload";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { formatApiError, fileUrl } from "@/lib/api";
 import { smartTitleCase } from "@/lib/textcase";
@@ -29,6 +30,10 @@ const empty = {
 // O valor já salvo é preservado mesmo quando o campo não é exibido (vem em `editing`).
 export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onCreated, withOrgao = false }) => {
   const { createBid, updateBid } = useData();
+  // Edital/anexos exigem permissão própria (o backend recusa o PUT/POST com arquivo novo ou removido).
+  const { can } = useAuth();
+  const canAttach = can("licitacoes.docs.attach");
+  const canRemoveDoc = can("licitacoes.docs.delete");
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState({});
@@ -62,9 +67,9 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
     if (!form.hora) e.hora = "Obrigatório";
     if (!form.pregao.trim()) e.pregao = "Obrigatório";
     if (!form.uasg.trim()) e.uasg = "Obrigatório";
-    if (!form.termo_referencia) e.termo = "Anexe o Termo de Referência (PDF)";
+    if (!form.termo_referencia && canAttach) e.termo = "Anexe o Termo de Referência (PDF)";
     return e;
-  }, [form, editing, wonMode]);
+  }, [form, editing, wonMode, canAttach]);
 
   const valid = Object.keys(errors).length === 0;
 
@@ -216,15 +221,19 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
           </div>
 
           <div className="space-y-1.5">
-            <Label>Termo de Referência (PDF)<Req /></Label>
-            <FileUpload
-              testid="bid-termo"
-              accept=".pdf"
-              value={form.termo_referencia}
-              onUploaded={(f) => set("termo_referencia", f)}
-              onRemove={() => set("termo_referencia", null)}
-              invalid={!!err("termo")}
-            />
+            <Label>Termo de Referência (PDF){canAttach && <Req />}</Label>
+            {canAttach || form.termo_referencia ? (
+              <FileUpload
+                testid="bid-termo"
+                accept=".pdf"
+                value={form.termo_referencia}
+                onUploaded={(f) => set("termo_referencia", f)}
+                onRemove={canRemoveDoc ? () => set("termo_referencia", null) : undefined}
+                invalid={!!err("termo")}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground" data-testid="bid-termo-no-perm">Seu usuário não tem permissão para anexar documentos.</p>
+            )}
             {err("termo") && <p id="err-termo" className="text-xs text-alert">{errors.termo}</p>}
           </div>
 
@@ -238,19 +247,23 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
                       <FileText size={15} className="shrink-0 text-brand" />
                       <span className="truncate">{a.filename}</span>
                     </a>
-                    <button type="button" data-testid={`bid-anexo-remove-${i}`} onClick={() => set("anexos", form.anexos.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-alert">
-                      <X size={15} />
-                    </button>
+                    {canRemoveDoc && (
+                      <button type="button" data-testid={`bid-anexo-remove-${i}`} onClick={() => set("anexos", form.anexos.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-alert">
+                        <X size={15} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
-            <FileUpload
-              testid="bid-anexo"
-              accept=".pdf,.png,.jpg,.jpeg"
-              value={null}
-              onUploaded={(f) => set("anexos", [...(form.anexos || []), f])}
-            />
+            {canAttach && (
+              <FileUpload
+                testid="bid-anexo"
+                accept=".pdf,.png,.jpg,.jpeg"
+                value={null}
+                onUploaded={(f) => set("anexos", [...(form.anexos || []), f])}
+              />
+            )}
           </div>
         </div>
 

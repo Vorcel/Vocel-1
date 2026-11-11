@@ -3,12 +3,13 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { Home, ClipboardList, Truck, BarChart3, Settings, Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VorcelMark } from "@/components/layout/VorcelMark";
+import { useAuth } from "@/context/AuthContext";
 
 const ITEMS = [
-  { to: "/", icon: Home, label: "Página inicial", testid: "nav-home", end: true },
-  { to: "/licitacoes", icon: ClipboardList, label: "Todas as licitações", testid: "nav-bids" },
-  { to: "/execucao", icon: Truck, label: "Execução / Pós-Venda", testid: "nav-execution" },
-  { to: "/analises", icon: BarChart3, label: "Análises", testid: "nav-analytics" },
+  { to: "/", icon: Home, label: "Página inicial", testid: "nav-home", end: true, perms: ["licitacoes.view"] },
+  { to: "/licitacoes", icon: ClipboardList, label: "Todas as licitações", testid: "nav-bids", perms: ["licitacoes.view"] },
+  { to: "/execucao", icon: Truck, label: "Execução / Pós-Venda", testid: "nav-execution", perms: ["execution.view"] },
+  { to: "/analises", icon: BarChart3, label: "Análises", testid: "nav-analytics", perms: ["analytics.view"] },
   { to: "/configuracoes", icon: Settings, label: "Configurações", testid: "nav-settings" },
 ];
 
@@ -29,6 +30,9 @@ const LICITACOES_THEME = {
 // módulo só troca itens, nome e cores via `theme` — o Financeiro usa a mesma
 // peça com a identidade teal dele (FinancialLayout). O símbolo Vorcel é único.
 export const Sidebar = ({ items = ITEMS, brand, theme = LICITACOES_THEME, testid = "app-sidebar", homeTo = "/" }) => {
+  const { canAny } = useAuth();
+  // Itens com `perms` só aparecem para quem tem alguma delas (UX — o backend valida tudo).
+  const visible = items.filter((item) => !item.perms || canAny(item.perms));
   const [pinned, setPinned] = useState(() => localStorage.getItem("sidebar_pinned") === "1");
   const [hovered, setHovered] = useState(false);
   const navigate = useNavigate();
@@ -106,7 +110,7 @@ export const Sidebar = ({ items = ITEMS, brand, theme = LICITACOES_THEME, testid
       </button>
 
       <nav className="flex flex-1 flex-col gap-1 px-2 py-4">
-        {items.map((item) => (
+        {visible.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

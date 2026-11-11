@@ -34,6 +34,11 @@ function detail(h) {
   if (m.origem_label) parts.push(`a partir de "${m.origem_label}"`);
   if (m.motivo) parts.push(`Motivo: ${m.motivo}`);
   if (m.conta) parts.push(`Conta: ${m.conta}`);
+  // Usuários internos (segurança): nunca há senha no histórico, só o fato.
+  if (m.descricao) parts.push(m.descricao);
+  if (m.concedidas?.length) parts.push(`${m.concedidas.length} permissão(ões) concedida(s)`);
+  if (m.removidas?.length) parts.push(`${m.removidas.length} permissão(ões) removida(s)`);
+  if (m.arquivo) parts.push(`Arquivo: ${m.arquivo}`);
   return parts.join(" · ");
 }
 
@@ -117,7 +122,12 @@ export default function Historico() {
                       <td className="whitespace-nowrap">
                         <span className="flex items-center gap-2">
                           <span className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-2)" }}>{initials}</span>
-                          <span style={{ color: "var(--fin-ink)" }}>{h.user_name || "—"}</span>
+                          <span className="leading-tight">
+                            <span className="block" style={{ color: "var(--fin-ink)" }}>{h.user_name || "—"}</span>
+                            {h.user_type === "internal" && h.user_login && (
+                              <span className="block font-mono-num text-[11px]" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-history-user-login">{h.user_login}</span>
+                            )}
+                          </span>
                         </span>
                       </td>
                       <td><TonePill tone={a.tone}>{a.label}</TonePill></td>

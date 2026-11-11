@@ -42,7 +42,8 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 
-from auth import get_current_user, user_id_from_token
+from auth import get_current_user, principal_from_token
+from permissions import has
 from db import db, now_iso
 from realtime import hub
 from routes import BudgetInput, _owned_bid, ser, uid
@@ -468,17 +469,14 @@ async def _ws_session(ws: WebSocket, bid_id: str, remessa_id: Optional[str] = No
     except Exception:
         await ws.close(code=4401)
         return
-    user_id = user_id_from_token(msg.get("token") if isinstance(msg, dict) and msg.get("type") == "auth" else None)
-    user = None
-    if user_id:
-        try:
-            user = await db.users.find_one({"_id": ObjectId(user_id)}, {"_id": 1})
-        except Exception:
-            user = None
-    if not user:
+    current = await principal_from_token(msg.get("token") if isinstance(msg, dict) and msg.get("type") == "auth" else None)
+    if not current:
         await ws.close(code=4401)
         return
-    owner = str(user["_id"])
+    if not has(current, "orcamento.view"):
+        await ws.close(code=4403)
+        return
+    owner = current["id"]   # dono da conta (usuário interno vê a sala da conta)
     if not await _owned_bid(bid_id, owner) or (remessa_id and not await _find_remessa(bid_id, remessa_id, owner)):
         await ws.close(code=4404)
         return

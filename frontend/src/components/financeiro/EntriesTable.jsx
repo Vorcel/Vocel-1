@@ -6,6 +6,7 @@ import { SortArrows } from "@/components/table/SortArrows";
 import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useFinance } from "@/context/FinanceContext";
+import { useAuth } from "@/context/AuthContext";
 import { MODOS, QUICK_FILTERS, apiError, dueAlert, finApi, fmtDate, money, periodPresets, periodRange, todaySP } from "@/lib/financeiro";
 import { EntryRowActions } from "./EntryActions";
 import { TagPicker } from "./TagPicker";
@@ -33,6 +34,9 @@ function useDebounced(value, ms = 350) {
 export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", title, toolbarExtra, quickFilters = false,
   period: periodProp, onPeriodChange, custom: customProp, onCustomChange }) {
   const { cad, version, novoLancamento } = useFinance();
+  const { can } = useAuth();
+  // Tipos que o usuário pode lançar: com um só, o formulário já abre nele.
+  const criaveis = ["pagar", "receber"].filter((t) => can(`finance.${t}.create`) && (!type || t === type));
   const today = todaySP();
   const presets = useMemo(() => periodPresets(today), [today]);
   const [sort, toggleSort] = usePersistentSort(`fin-${pageKey}`, { key: "due_date", dir: "asc" });
@@ -110,7 +114,10 @@ export function EntriesTable({ type = null, pageKey, defaultPeriod = "mes", titl
           <SlidersHorizontal size={15} /> Filtros{advCount ? ` (${advCount})` : ""}
         </FinButton>
         {toolbarExtra}
-        <FinButton onClick={() => novoLancamento(type ? { type } : undefined)} data-testid="fin-new-entry"><Plus size={16} /> Novo lançamento</FinButton>
+        {criaveis.length > 0 && (
+          <FinButton onClick={() => novoLancamento(type ? { type } : criaveis.length === 1 ? { type: criaveis[0] } : undefined)}
+            data-testid="fin-new-entry"><Plus size={16} /> Novo lançamento</FinButton>
+        )}
       </div>
       {quickFilters && (
         <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="fin-quick-filters">

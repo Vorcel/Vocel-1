@@ -30,6 +30,7 @@ import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalSc
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { usePersistentPageSize, PAGE_SIZE_OPTIONS } from "@/hooks/usePersistentPageSize";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
 import { brl } from "@/lib/calc";
 import { addDaysByType } from "@/lib/businessDays";
@@ -177,6 +178,12 @@ export default function Execution() {
     addExecutionDoc, removeExecutionDoc, addBidAnexo, removeBidAnexo,
     createRemessa, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc } = useData();
   const navigate = useNavigate();
+  // Permissões (UX): botões somem / viram leitura; o backend valida cada ação.
+  const { can } = useAuth();
+  const canEditExec = can("execution.edit");
+  const canStep = can("execution.status");
+  const canEditRemessa = can("execution.remessas.edit");
+  const canSendRec = can("execution.recebiveis.send");
   // Proposta: o MESMO fluxo (upload / leitura rápida / substituição) de Todas
   // as Licitações, sobre o mesmo documento da licitação.
   const { abrirProposta, propostaModals } = usePropostaFlow();
@@ -426,6 +433,7 @@ export default function Execution() {
   };
   // Clicar numa etapa reposiciona o fluxo até ela; clicar na etapa atual conclui e avança.
   const moveTo = async (unit, idx) => {
+    if (!canStep) return;
     const cs = doneCount(unitView(unit).nodes);
     const step = idx === cs ? idx + 1 : idx;
     await persistStep(unit, step, filesOf(unit));
@@ -587,7 +595,7 @@ export default function Execution() {
             // Com remessas, o prazo exibido é o da remessa em andamento (editado na linha dela).
             prazo: comRemessas
               ? prazoPill(repUnit, `exec-time-${e.bid_id}`, null, `Prazo da ${repUnit.nome} — ajuste na linha da remessa`)
-              : prazoPill(e, `exec-time-${e.bid_id}`, () => setTimeModal(unitsOf(e)[0])),
+              : prazoPill(e, `exec-time-${e.bid_id}`, canEditExec ? () => setTimeModal(unitsOf(e)[0]) : null),
             dataEntrega: repUnit.data_entrega,
             empenho: e.valor_empenho,
             compra: e.valor_compra,
@@ -597,20 +605,26 @@ export default function Execution() {
             finLink: comRemessas ? null : finLinks[unitKey(e.bid_id)],
             progress: view.progress,
             progressTestid: `exec-progress-${e.bid_id}`,
-            atestado: <AtestadoDropdown execution={e} onChange={(v) => updateAtestado({ ...e, virtual: true }, v)} />,
+            atestado: <AtestadoDropdown execution={e} readOnly={!canEditExec} onChange={(v) => updateAtestado({ ...e, virtual: true }, v)} />,
             acoes: (
               <>
-                <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
-                  className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
+                {can("licitacoes.edit") && (
+                  <button data-testid={`exec-edit-${e.bid_id}`} onClick={() => bid && setEditBid(bid)}
+                    className={cn("flex h-8 w-8 items-center justify-center rounded-md", bid ? "text-blue-600 hover:bg-blue-50" : "text-muted-foreground/30")} title="Editar licitação"><Pencil size={15} /></button>
+                )}
                 {/* Recebíveis: sem remessas, a licitação envia; com remessas, cada remessa envia a sua */}
-                {(!comRemessas || finLinks[unitKey(e.bid_id)]) && (
+                {canSendRec && (!comRemessas || finLinks[unitKey(e.bid_id)]) && (
                   <RecebivelButton link={finLinks[unitKey(e.bid_id)]} testid={`exec-recebivel-${e.bid_id}`} onClick={() => abrirRecebivel(e, null)} />
                 )}
-                <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" title="Encerrar execução"><Archive size={15} /></button>
+                {can("licitacoes.status") && (
+                  <button data-testid={`exec-encerrar-${e.bid_id}`} onClick={() => setEncerrarTarget(e)}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" title="Encerrar execução"><Archive size={15} /></button>
+                )}
                 {/* Nova remessa (abre a confirmação); a seta só aparece depois que existem remessas */}
-                <button data-testid={`exec-add-remessa-${e.bid_id}`} onClick={() => setNovaRemessa(e)}
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50" title="Nova remessa"><PackagePlus size={16} /></button>
+                {can("execution.remessas.create") && (
+                  <button data-testid={`exec-add-remessa-${e.bid_id}`} onClick={() => setNovaRemessa(e)}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50" title="Nova remessa"><PackagePlus size={16} /></button>
+                )}
                 {comRemessas && (
                   <button data-testid={`exec-expand-${e.bid_id}`} onClick={() => toggleExpand(e.bid_id)} aria-expanded={open}
                     className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title={open ? "Recolher remessas" : "Ver remessas"}>
@@ -649,10 +663,12 @@ export default function Execution() {
                   Remessas
                 </span>
                 <RemessasResumo execution={e} />
-                <Button size="sm" data-testid={`exec-nova-remessa-${e.bid_id}`} onClick={() => setNovaRemessa(e)}
-                  className="ml-auto h-9 bg-[#16A34A] px-4 font-semibold text-white hover:bg-[#15803D]">
-                  <Plus size={16} className="mr-1.5" /> Nova Remessa
-                </Button>
+                {can("execution.remessas.create") && (
+                  <Button size="sm" data-testid={`exec-nova-remessa-${e.bid_id}`} onClick={() => setNovaRemessa(e)}
+                    className="ml-auto h-9 bg-[#16A34A] px-4 font-semibold text-white hover:bg-[#15803D]">
+                    <Plus size={16} className="mr-1.5" /> Nova Remessa
+                  </Button>
+                )}
               </div>
               <div className="relative overflow-hidden rounded-lg bg-card ring-1 ring-[#E3E9F2] dark:ring-slate-700">
                 <table data-rem-table className={cn("text-sm", cols && "table-fixed")} style={{ width: cols ? cols.reduce((x, y) => x + y, 0) : "100%" }}>
@@ -668,7 +684,7 @@ export default function Execution() {
                       const u = v.unit;
                       const k = u.id || "virtual";
                       const active = selectedId === e.bid_id && (u.id ?? null) === selectedUnitId;
-                      const podeExcluir = !u.virtual && e.remessas.length > 1;
+                      const podeExcluir = !u.virtual && e.remessas.length > 1 && can("execution.remessas.delete");
                       return (
                         <tr key={`${e.bid_id}-r-${k}`} data-testid={`exec-remessa-row-${e.bid_id}-${u.numero}`} data-active={active ? "1" : "0"}
                           onClick={() => selectRemessa(e.bid_id, u.id)}
@@ -684,7 +700,8 @@ export default function Execution() {
                             </div>
                           </td>
                           {opsCells({
-                            prazo: prazoPill(u, `exec-remessa-time-${e.bid_id}-${u.numero}`, () => setTimeModal(u), `Prazo de entrega da ${u.nome}`),
+                            prazo: prazoPill(u, `exec-remessa-time-${e.bid_id}-${u.numero}`,
+                              (u.virtual ? canEditExec : canEditRemessa) ? () => setTimeModal(u) : null, `Prazo de entrega da ${u.nome}`),
                             dataEntrega: u.data_entrega,
                             empenho: u.valor_empenho,
                             compra: u.valor_compra,
@@ -693,12 +710,15 @@ export default function Execution() {
                             finLink: u.virtual ? null : finLinks[unitKey(e.bid_id, u.id)],
                             progress: v.progress,
                             progressTestid: `exec-remessa-progress-${e.bid_id}-${u.numero}`,
-                            atestado: <AtestadoDropdown execution={u} testKey={`${e.bid_id}-r${u.numero}`} onChange={(val) => updateAtestado(u, val)} />,
+                            atestado: <AtestadoDropdown execution={u} testKey={`${e.bid_id}-r${u.numero}`} readOnly={!(u.virtual ? canEditExec : canEditRemessa)}
+                              onChange={(val) => updateAtestado(u, val)} />,
                             acoes: (
                               <>
-                                <button data-testid={`exec-remessa-orcamento-${e.bid_id}-${u.numero}`} onClick={() => navigate(orcamentoPath(u))}
-                                  className="flex h-8 w-8 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50" title={`Abrir orçamento da ${u.nome}`}><Pencil size={15} /></button>
-                                {!u.virtual && (
+                                {can("orcamento.view") && (
+                                  <button data-testid={`exec-remessa-orcamento-${e.bid_id}-${u.numero}`} onClick={() => navigate(orcamentoPath(u))}
+                                    className="flex h-8 w-8 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50" title={`Abrir orçamento da ${u.nome}`}><Pencil size={15} /></button>
+                                )}
+                                {!u.virtual && canSendRec && (
                                   <RecebivelButton link={finLinks[unitKey(e.bid_id, u.id)]} testid={`exec-remessa-recebivel-${e.bid_id}-${u.numero}`} onClick={() => abrirRecebivel(e, u)} />
                                 )}
                                 <button data-testid={`exec-remessa-excluir-${e.bid_id}-${u.numero}`} disabled={!podeExcluir}
@@ -741,6 +761,7 @@ export default function Execution() {
             orcamentoPath={selectedView.unit.virtual ? undefined : orcamentoPath(selectedView.unit)}
             onBack={() => setSelectedId(null)}
             onMove={(idx) => moveTo(selectedView.unit, idx)}
+            canMove={canStep}
             // Hub de documentos — cada porta usa a fonte de verdade já existente;
             // Nota de Empenho / Nota Fiscal / Outros são da remessa ativa.
             onUploadDoc={(categoria, file) => (selectedView.unit.virtual
@@ -769,9 +790,11 @@ export default function Execution() {
           </div>
           {/* Filtros rápidos — mesmo padrão da Página Inicial (sem favorito/proposta, com Órgão) */}
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-            <Button data-testid="exec-add-won" onClick={() => setAddWonOpen(true)} className="shrink-0 bg-brand hover:bg-brand-hover">
-              <Plus size={16} className="mr-2" /> Adicionar Licitação Ganha
-            </Button>
+            {can("licitacoes.create") && can("licitacoes.status") && (
+              <Button data-testid="exec-add-won" onClick={() => setAddWonOpen(true)} className="shrink-0 bg-brand hover:bg-brand-hover">
+                <Plus size={16} className="mr-2" /> Adicionar Licitação Ganha
+              </Button>
+            )}
             <div className="flex-1">
               <FilterBar filters={filters} setFilter={setFilter} onOpenAdvanced={() => setFilterOpen(true)}
                 activeAdvanced={activeAdvanced} showFavorite={false} showProposal={false} showOrgao />
@@ -987,7 +1010,7 @@ function KpiCard({ icon: Icon, label, value, accent, trend, invert, sub, key: _k
 
 /* ============================ COMPONENTE B ============================ */
 const PROGRESS_BLUE = "#2563EB";
-function DetailPanel({ execution, unit, bid, nodes, orcamentoPath, onBack, onMove, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
+function DetailPanel({ execution, unit, bid, nodes, orcamentoPath, onBack, onMove, canMove = true, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
   // `nodes`/`unit` = remessa ativa (ou a própria execução, sem remessas).
   const comRemessas = hasRemessas(execution);
   // Fluxo cronológico: uma única referência (etapa atual) deriva todos os status.
@@ -1045,10 +1068,11 @@ function DetailPanel({ execution, unit, bid, nodes, orcamentoPath, onBack, onMov
                 <button
                   data-testid={`timeline-step-${idx}`}
                   data-state={st}
-                  onClick={() => onMove(idx)}
-                  title={`${node.name} — ${st} (clique para mover o fluxo até aqui)`}
+                  onClick={() => canMove && onMove(idx)}
+                  disabled={!canMove}
+                  title={canMove ? `${node.name} — ${st} (clique para mover o fluxo até aqui)` : `${node.name} — ${st}`}
                   className={cn(
-                    "relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110",
+                    "relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-transform enabled:hover:scale-110 disabled:cursor-default",
                     st === STEP_DONE ? "bg-emerald-500 text-white"
                       : isActive ? "text-white"
                         : "bg-muted text-muted-foreground/50"

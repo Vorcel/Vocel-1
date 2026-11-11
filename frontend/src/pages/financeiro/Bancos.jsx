@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeftRight, CreditCard, Inbox, Landmark, ListOrdered, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { useFinance } from "@/context/FinanceContext";
+import { useAuth } from "@/context/AuthContext";
 import { apiError, finApi, fmtDate, monthBounds, money, todaySP } from "@/lib/financeiro";
 import { BankLogo } from "@/components/financeiro/icons";
 import { Amount, EmptyState, FinSelect, KpiCard, PageHeader, Pager, Panel, TonePill } from "@/components/financeiro/ui";
@@ -9,26 +10,31 @@ import { CartoesList, ContasList } from "./Configuracoes";
 
 export default function Bancos() {
   const { cad, version } = useFinance();
+  const { can } = useAuth();
+  // Contas/saldos/movimentações só com finance.banks.view; cartões com finance.cards.view.
+  const verContas = can("finance.banks.view");
+  const verCartoes = can("finance.cards.view");
   const ativas = cad.conta.filter((c) => c.ativo !== false);
   const consolidado = ativas.reduce((s, c) => s + (c.saldo_atual_cents || 0), 0);
   const [mes, setMes] = useState(null);
   useEffect(() => {
+    if (!verContas) return;
     const [a, b] = monthBounds(todaySP());
     finApi.movimentos({ date_from: a, date_to: b, page_size: 1 }).then(setMes).catch(() => {});
-  }, [version]);
+  }, [version, verContas]);
   return (
     <>
       <PageHeader icon={Landmark} title="Bancos" subtitle="Saldos, contas, cartões e movimentações por instituição." />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {verContas && <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard testid="fin-banks-total" icon={Wallet} tone="success" highlight label="Saldo consolidado" value={money(consolidado)} sub={`${ativas.length} conta(s) ativa(s)`} />
         <KpiCard testid="fin-banks-mes" icon={ArrowLeftRight} tone={(mes?.net_cents ?? 0) < 0 ? "warning" : "info"} flow={(mes?.net_cents ?? 0) < 0 ? "out" : (mes?.net_cents ?? 0) > 0 ? "in" : undefined} label="Resultado das baixas no mês" value={money(mes?.net_cents)} sub={`${mes?.total ?? 0} pagamento(s)/recebimento(s)`} />
         <KpiCard testid="fin-banks-cards" icon={CreditCard} tone="info" label="Cartões ativos" value={cad.cartao.filter((c) => c.ativo !== false).length} sub="Configuração em Contas e cartões" />
-      </div>
+      </div>}
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-5">
-        <section className="fin-card min-w-0 p-5 xl:col-span-3"><ContasList compact /></section>
-        <section className="fin-card min-w-0 p-5 xl:col-span-2"><CartoesList compact /></section>
+        {verContas && <section className="fin-card min-w-0 p-5 xl:col-span-3"><ContasList compact /></section>}
+        {verCartoes && <section className={verContas ? "fin-card min-w-0 p-5 xl:col-span-2" : "fin-card min-w-0 p-5 xl:col-span-5"}><CartoesList compact /></section>}
       </div>
-      <Movimentacoes />
+      {verContas && <Movimentacoes />}
     </>
   );
 }

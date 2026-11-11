@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
+import { firstAllowedPath } from "@/lib/permissions";
 import { toast } from "sonner";
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -22,9 +23,9 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      await login(email, password);
+      const user = await login(identifier.trim(), password);
       toast.success("Bem-vindo!");
-      navigate("/");
+      navigate(firstAllowedPath(user));
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || "Falha ao autenticar");
     } finally {
@@ -67,8 +68,9 @@ export default function Login() {
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="email">E-mail</Label>
-              <Input id="email" type="email" data-testid="login-email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="voce@empresa.com" />
+              <Label htmlFor="email">E-mail ou login</Label>
+              <Input id="email" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false}
+                data-testid="login-email" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required placeholder="voce@empresa.com ou seu login" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Senha</Label>

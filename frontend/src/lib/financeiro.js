@@ -312,7 +312,29 @@ Object.assign(ACOES, {
   contato_alterado: { label: "Cliente/Fornecedor alterado", tone: "warning" },
 });
 
-export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", dre: "DRE", config: "Configurações", execucao: "Execução" };
+// Licitações, Execução e Usuários (usuários internos + segurança) — mesmo histórico imutável.
+Object.assign(ACOES, {
+  licitacao_criada: { label: "Licitação criada", tone: "info" },
+  licitacao_editada: { label: "Licitação editada", tone: "warning" },
+  licitacao_status_alterado: { label: "Status da licitação alterado", tone: "warning" },
+  licitacao_excluida: { label: "Licitação excluída", tone: "danger" },
+  licitacao_documento_anexado: { label: "Documento anexado", tone: "info" },
+  licitacao_documento_removido: { label: "Documento removido", tone: "muted" },
+  execucao_editada: { label: "Execução editada", tone: "warning" },
+  execucao_etapa_alterada: { label: "Etapa da execução alterada", tone: "warning" },
+  usuario_criado: { label: "Usuário criado", tone: "info" },
+  usuario_editado: { label: "Usuário editado", tone: "warning" },
+  usuario_ativado: { label: "Usuário ativado", tone: "info" },
+  usuario_desativado: { label: "Usuário desativado", tone: "danger" },
+  permissoes_alteradas: { label: "Permissões alteradas", tone: "warning" },
+  senha_redefinida: { label: "Senha redefinida pelo administrador", tone: "warning" },
+  senha_alterada_pelo_usuario: { label: "Senha alterada pelo usuário", tone: "muted" },
+  sessoes_encerradas: { label: "Sessões encerradas", tone: "warning" },
+  login_realizado: { label: "Login realizado", tone: "muted" },
+});
+
+export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", dre: "DRE", config: "Configurações", execucao: "Execução",
+  licitacoes: "Licitações", usuarios: "Usuários" };
 
 // Valor legível de um campo alterado no histórico.
 export function changeValue(field, v) {

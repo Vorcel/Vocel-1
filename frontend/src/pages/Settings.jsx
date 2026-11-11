@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Moon, Sun } from "lucide-react";
+import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Moon, Sun, Users, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { ListSection } from "@/components/settings/ListSection";
+import { UsersTab } from "@/components/settings/UsersTab";
 import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -67,7 +68,9 @@ function ProfileTab() {
             <div className="space-y-1.5 sm:col-span-2"><Label>Nome</Label><Input data-testid="profile-name" value={form.name} onChange={(e) => set("name", e.target.value)} onBlur={() => set("name", smartTitleCase(form.name))} /></div>
             <div className="space-y-1.5"><Label>Telefone</Label><Input data-testid="profile-phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Cargo</Label><Input data-testid="profile-cargo" value={form.cargo} onChange={(e) => set("cargo", e.target.value)} onBlur={() => set("cargo", smartTitleCase(form.cargo))} /></div>
-            <div className="space-y-1.5 sm:col-span-2"><Label>E-mail</Label><Input value={user?.email || ""} disabled /></div>
+            {user?.is_owner
+              ? <div className="space-y-1.5 sm:col-span-2"><Label>E-mail</Label><Input value={user?.email || ""} disabled /></div>
+              : <div className="space-y-1.5 sm:col-span-2"><Label>Login</Label><Input data-testid="profile-login" value={user?.login || ""} disabled /></div>}
           </div>
         </div>
         <div className="mt-4 flex justify-end">
@@ -175,13 +178,16 @@ function BudgetDefaultsTab() {
   );
 }
 
+// `perm`: aba só aparece com a permissão (UX — o backend valida cada gravação).
+// "usuarios" é exclusiva do administrador principal da conta.
 const TABS = [
   { id: "perfil", label: "Meu Perfil e Segurança", icon: User },
-  { id: "empresa", label: "Dados da Empresa", icon: Building2 },
+  { id: "empresa", label: "Dados da Empresa", icon: Building2, perm: "config.company.edit" },
   { id: "aparencia", label: "Preferências", icon: Palette },
-  { id: "orcamento", label: "Padrões de Orçamento", icon: Calculator },
-  { id: "integracoes", label: "Integrações", icon: Plug },
-  { id: "listas", label: "Listas e Parâmetros", icon: ListChecks },
+  { id: "orcamento", label: "Padrões de Orçamento", icon: Calculator, perm: "config.preferences.edit" },
+  { id: "integracoes", label: "Integrações", icon: Plug, perm: "config.google.manage" },
+  { id: "listas", label: "Listas e Parâmetros", icon: ListChecks, perm: "config.lists.edit" },
+  { id: "usuarios", label: "Usuários", icon: Users, ownerOnly: true },
 ];
 
 // Motivos devolvidos pelo callback do Google (ver backend/gdrive.py).
@@ -195,9 +201,12 @@ const ERROS_GOOGLE = {
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const { refreshGoogle } = useData();
+  const { can, isOwner } = useAuth();
+  const tabs = TABS.filter((t) => (t.ownerOnly ? isOwner : !t.perm || can(t.perm)));
   // A aba pode vir pela URL (?tab=integracoes) — usado pelo atalho "Configurar
   // Google Drive" do visualizador de propostas e pelo retorno do OAuth.
-  const [aba, setAba] = useState(() => (TABS.some((t) => t.id === params.get("tab")) ? params.get("tab") : "perfil"));
+  const [aba, setAba] = useState(() => (tabs.some((t) => t.id === params.get("tab")) ? params.get("tab") : "perfil"));
+  const abaVisivel = tabs.some((t) => t.id === aba) ? aba : "perfil";
 
   // Retorno do consentimento do Google: avisa o resultado e limpa a URL.
   useEffect(() => {
@@ -219,24 +228,27 @@ export default function Settings() {
     <>
       <Header title="Configurações" subtitle="Painel administrativo" />
       <main className="p-6">
-        <Tabs value={aba} onValueChange={setAba} className="w-full">
+        <Tabs value={abaVisivel} onValueChange={setAba} className="w-full">
           <TabsList className="mb-6 flex h-auto flex-wrap justify-start gap-1 bg-transparent p-0">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <TabsTrigger key={t.id} value={t.id} data-testid={`tab-${t.id}`} className="gap-2 rounded-lg border border-border data-[state=active]:border-brand data-[state=active]:bg-brand data-[state=active]:text-white">
                 <t.icon size={16} /> <span className="hidden sm:inline">{t.label}</span>
               </TabsTrigger>
             ))}
           </TabsList>
           <TabsContent value="perfil"><ProfileTab /></TabsContent>
-          <TabsContent value="empresa"><CompanyTab /></TabsContent>
+          {can("config.company.edit") && <TabsContent value="empresa"><CompanyTab /></TabsContent>}
           <TabsContent value="aparencia"><AppearanceTab /></TabsContent>
-          <TabsContent value="orcamento"><BudgetDefaultsTab /></TabsContent>
-          <TabsContent value="integracoes"><GoogleDriveCard /></TabsContent>
-          <TabsContent value="listas" className="space-y-6">
-            <ListSection tipo="portais" />
-            <ListSection tipo="modalidades" />
-            <ListSection tipo="statuses" />
-          </TabsContent>
+          {can("config.preferences.edit") && <TabsContent value="orcamento"><BudgetDefaultsTab /></TabsContent>}
+          {can("config.google.manage") && <TabsContent value="integracoes"><GoogleDriveCard /></TabsContent>}
+          {can("config.lists.edit") && (
+            <TabsContent value="listas" className="space-y-6">
+              <ListSection tipo="portais" />
+              <ListSection tipo="modalidades" />
+              <ListSection tipo="statuses" />
+            </TabsContent>
+          )}
+          {isOwner && <TabsContent value="usuarios"><UsersTab /></TabsContent>}
         </Tabs>
       </main>
     </>

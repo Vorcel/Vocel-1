@@ -38,6 +38,7 @@ from pymongo.errors import DuplicateKeyError
 from auth import get_current_user
 from db import db, now_iso
 from fin_contatos import resolve_contact
+from permissions import FIN_FORM_KEYS, allowed_fin_types, cadastro_key, has, has_any
 from fin_core import (
     ATRASADO, CANCELADO, MAX_OCCURRENCES, MODES, OPEN, OPEN_EXPR, PAGAR, PARCIAL, PENDENTE, RECEBER,
     RECEBIDO, SETTLED, SP_TZ, TYPES, brl, days_between, diff, effective_status, in_transaction, log_event,
@@ -195,6 +196,20 @@ async def list_cadastros(current=Depends(get_current_user)):
         if d["kind"] == "conta":
             item["saldo_atual_cents"] = saldos.get(d["id"], 0)
         out.setdefault(d["kind"], []).append(item)
+    if not current.get("is_owner", True):
+        # Usuário interno: cada tipo de cadastro só com a permissão de visualizar
+        # dele — ou, para quem lança/baixa, os nomes necessários ao formulário.
+        # Saldos bancários só com finance.banks.view.
+        form = has_any(current, FIN_FORM_KEYS)
+        for kind in list(out):
+            if kind in ("dre_grupo",) and not has(current, "finance.dre.view") and not has(current, "finance.categories.view"):
+                out[kind] = []
+            elif kind != "dre_grupo" and not (has(current, cadastro_key(kind, "view")) or form):
+                out[kind] = []
+        if not has(current, "finance.banks.view"):
+            for c in out["conta"]:
+                for f in ("saldo_atual_cents", "saldo_inicial_cents", "saldo_data", "saldo_at"):
+                    c.pop(f, None)
     return out
 
 
@@ -309,7 +324,7 @@ async def create_cadastro(kind: str, body: CadastroInput, current=Depends(get_cu
     ts = now_iso()
     doc = {"id": new_id(), "owner_id": owner, "kind": kind, "ativo": True, **data,
            "ordem": await db.fin_cadastros.count_documents({"owner_id": owner, "kind": kind}),
-           "created_by": current["id"], "created_at": ts, "updated_at": ts}
+           "created_by": current.get("actor_id") or current["id"], "created_at": ts, "updated_at": ts}
     if kind == "conta":
         doc["saldo_inicial_cents"] = signed_cents(body.saldo)
         doc["saldo_data"] = parse_date(body.saldo_data, "data do saldo") if body.saldo_data else today_sp()
@@ -749,7 +764,7 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
             "sequence_index": i + 1 if seq_id else None, "sequence_total": len(values) if seq_id else None,
             "frequency": freq, "duplicated_from": duplicated["id"] if duplicated else None,
             "create_token": body.client_token or None,
-            "created_by": current["id"], "created_by_name": current.get("name"),
+            "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"),
             "created_at": ts, "updated_at": ts, "version": 1,
         })
     module = _module(body.type)
@@ -861,6 +876,9 @@ async def list_entries(
                            today=today, card_ids=card_ids, tag_ids=tag_ids, subcategory_id=subcategory_id)
     if sequence_id:
         query["sequence_id"] = sequence_id
+    if not type and not has(current, "finance.overview.view"):
+        # Sem a Visão Geral, a lista mistura só os tipos que o usuário pode ver.
+        query["type"] = {"$in": allowed_fin_types(current)}
     key = SORTS.get(sort, "due_date")
     direction = -1 if dir == "desc" else 1
     total = await db.fin_entries.count_documents(query)
@@ -1094,7 +1112,7 @@ async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_cur
         "payment_method_id": e.get("payment_method_id"), "payment_method_name": forma_original,
         "card_id": e.get("card_id"),
         "notes": (body.notes or "").strip() or None, "description": e.get("description"),
-        "created_by": current["id"], "created_by_name": current.get("name"), "created_at": ts, "reversed": False,
+        "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"), "created_at": ts, "reversed": False,
     }
     upd = {"status": novo_status, "updated_at": ts, "last_settled_date": data_fin}
     if quitado:
@@ -1163,7 +1181,7 @@ async def reverse_settlement(entry_id: str, settlement_id: str, body: ReasonInpu
 
     async def tx(s):
         res = await db.fin_settlements.update_one({"_id": st["_id"], "reversed": False}, {"$set": {
-            "reversed": True, "reversed_at": ts, "reversed_by": current["id"], "reversed_by_name": current.get("name"),
+            "reversed": True, "reversed_at": ts, "reversed_by": current.get("actor_id") or current["id"], "reversed_by_name": current.get("actor_name") or current.get("name"),
             "reversal_reason": (body.reason or "").strip() or None}}, session=s)
         if not res.modified_count:
             raise HTTPException(status_code=409, detail="Esta baixa já foi estornada.")

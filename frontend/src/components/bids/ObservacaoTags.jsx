@@ -12,7 +12,7 @@ const newId = () => `obs_${Date.now()}_${_tid++}`;
 
 // Sistema de observações em tags/chips coloridos: adicionar (+), editar inline
 // (clique no texto) e excluir (X) com modal de confirmação. Componente controlado.
-export const ObservacaoTags = ({ value = [], onChange, testid = "obs" }) => {
+export const ObservacaoTags = ({ value = [], onChange, testid = "obs", readOnly = false }) => {
   const tags = Array.isArray(value) ? value : [];
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState("");
@@ -35,6 +35,21 @@ export const ObservacaoTags = ({ value = [], onChange, testid = "obs" }) => {
     if (pendingDelete) onChange(tags.filter((tg) => tg.id !== pendingDelete.id));
     setPendingDelete(null);
   };
+
+  if (readOnly) {
+    // Somente leitura (usuário sem permissão de editar a licitação).
+    return (
+      <div className="flex flex-wrap items-center gap-1.5" data-testid={`${testid}-tags`}>
+        {tags.map((tg, i) => {
+          const color = tg.color || tagColorAt(i);
+          return (
+            <span key={tg.id} data-testid={`${testid}-tag`} className="inline-flex max-w-[160px] truncate rounded-full border px-2 py-0.5 text-xs font-medium"
+              style={{ backgroundColor: hexToRgba(color, 0.15), borderColor: hexToRgba(color, 0.45), color: "#1A1A1A" }}>{tg.text}</span>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid={`${testid}-tags`}>

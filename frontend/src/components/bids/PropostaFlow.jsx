@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PropostaUploadModal } from "@/components/bids/PropostaUploadModal";
 import { PropostaViewerModal } from "@/components/bids/PropostaViewerModal";
 import { hasProposta, listPropostas } from "@/components/bids/PropostaIcon";
+import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 
 // Fluxo da Proposta (upload / leitura rápida / substituição) extraído de
@@ -16,6 +17,7 @@ import { useData } from "@/context/DataContext";
 // várias, as setas do visualizador navegam entre elas).
 export function usePropostaFlow() {
   const { bids } = useData();
+  const { can } = useAuth();
   // Guardamos só ids: o objeto vem sempre do `bids` do contexto, para o modal
   // refletir a atualização (upload/substituição) sem F5.
   const [propostaBidId, setPropostaBidId] = useState(null);
@@ -28,6 +30,7 @@ export function usePropostaFlow() {
     if (!bid) return;
     setPropostaBidId(bid.id);
     setPropostaId(listPropostas(bid)[0]?.id ?? null);
+    if (!hasProposta(bid) && !can("propostas.attach")) { setPropostaBidId(null); return; }
     setPropostaModo(hasProposta(bid) ? "viewer" : "upload");
   };
   // Fechar o envio/substituição volta para a leitura quando já existe proposta.

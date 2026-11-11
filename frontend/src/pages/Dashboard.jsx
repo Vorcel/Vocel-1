@@ -4,6 +4,8 @@ import { CalendarDays, Award, Star, Clock, MapPin, Wallet } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { BidsSection } from "@/components/bids/BidsSection";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
+import { hasAnyFinance } from "@/lib/permissions";
 import { colorStyles, findColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +52,7 @@ const toDateStr = (dt) =>
 
 export default function Dashboard() {
   const { summary, bids, lists } = useData();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   // Relógio interno (1 min): retira/insere cards da janela sem precisar de F5.
@@ -93,7 +96,7 @@ export default function Dashboard() {
 
   // Troca de módulo: fica à esquerda, logo depois do ícone da sidebar e antes
   // dos cards de indicadores (não junto do Rascunho, que é ferramenta de trabalho).
-  const financeiroButton = (
+  const financeiroButton = hasAnyFinance(user) && (
     <button
       data-testid="header-financeiro"
       onClick={() => navigate("/financeiro")}

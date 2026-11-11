@@ -8,7 +8,8 @@ from botocore.exceptions import ClientError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Header, Response
 
 from db import db, now_iso
-from auth import get_current_user, user_id_from_token
+from auth import get_current_user, principal_from_token
+from permissions import file_permission
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ async def upload(file: UploadFile = File(...), current=Depends(get_current_user)
         "content_type": content_type,
         "size": result.get("size", len(data)),
         "owner_id": current["id"],
+        "uploaded_by": current.get("actor_id") or current["id"],
         "is_deleted": False,
         "created_at": now_iso(),
     })
@@ -116,18 +118,18 @@ async def download(file_id: str, auth: str = Query(None), authorization: str = H
     token = auth
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
-    requester = user_id_from_token(token)
-    if not requester:
+    # Mesmas validações do header: usuário ativo, versão do token, conta ativa.
+    current = await principal_from_token(token)
+    if not current:
         raise HTTPException(status_code=401, detail="Não autenticado")
 
-    record = await db.files.find_one({"id": file_id, "is_deleted": False})
-
+    # Isolamento: o arquivo precisa ser DESTA conta (outra conta => 404, sem revelar).
+    record = await db.files.find_one({"id": file_id, "owner_id": current["id"], "is_deleted": False})
     if not record:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
-    # Isolamento: só o dono do arquivo pode baixá-lo.
-    if record.get("owner_id") != requester:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+    # Permissão herdada do lugar onde o arquivo está anexado (edital, proposta, execução).
+    await file_permission(current, file_id)
 
     try:
         data, content_type = get_object(record["storage_path"])

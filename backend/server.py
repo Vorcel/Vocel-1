@@ -3,11 +3,13 @@ import os
 import logging
 
 from bson import ObjectId
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from db import db
-from auth import auth_router, seed_admin
+from auth import auth_router, seed_admin, create_user_indexes
+from users import users_router
+from permissions import enforce
 from storage import files_router, init_storage
 from routes import api as core_router
 from propostas import propostas_router
@@ -27,18 +29,14 @@ DEFAULT_STATUS_COLOR = "#64748B"
 
 app = FastAPI(title="Sistema de Licitações")
 
-app.include_router(auth_router)
-app.include_router(files_router)
-app.include_router(core_router)
-app.include_router(propostas_router)
-app.include_router(gdrive_router)
-app.include_router(analytics_router)
-app.include_router(budget_router)
-app.include_router(remessas_router)
-app.include_router(fin_router)
-app.include_router(dre_router)
-app.include_router(rec_router)
-app.include_router(contacts_router)
+# Autorização central (permissions.enforce) em TODAS as rotas: usuário principal
+# tem acesso total; usuário interno só o que a tabela de regras permitir
+# (rota sem regra = negada). Login/callback OAuth são marcados como públicos lá.
+_AUTHZ = [Depends(enforce)]
+for _router in (auth_router, users_router, files_router, core_router, propostas_router, gdrive_router,
+                analytics_router, budget_router, remessas_router, fin_router, dre_router, rec_router,
+                contacts_router):
+    app.include_router(_router, dependencies=_AUTHZ)
 
 app.add_middleware(
     CORSMiddleware,
@@ -137,7 +135,11 @@ async def migrate_status_categories():
 @app.on_event("startup")
 async def startup():
     try:
-        await db.users.create_index("email", unique=True)
+        # E-mail único só quando existe (usuário interno não tem e-mail) + login único.
+        await create_user_indexes()
+    except Exception as e:
+        logger.warning(f"User index creation: {e}")
+    try:
         # Índices de isolamento por usuário (performance das consultas por owner_id)
         await db.bids.create_index("owner_id")
         # Consultas da página Análises: recorte por período (data da disputa /

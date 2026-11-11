@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from db import db, now_iso
-from auth import get_current_user
+from auth import get_current_user, audit
 
 api = APIRouter(prefix="/api", tags=["core"])
 
@@ -133,8 +133,39 @@ def ser(doc: dict) -> dict:
 
 
 def uid(current: dict) -> str:
-    """Id do usuário autenticado — chave de isolamento de todos os dados."""
+    """Id do DONO DA CONTA — chave de isolamento de todos os dados. Para usuário
+    interno é o principal da conta (ver auth.get_current_user); quem agiu fica
+    em current["actor_id"]."""
     return current["id"]
+
+
+def _actor_stamp(current: dict, prefix: str) -> dict:
+    return {f"{prefix}_by": current.get("actor_id") or current["id"],
+            f"{prefix}_by_name": current.get("actor_name") or current.get("name") or ""}
+
+
+def _bid_label(bid: dict) -> str:
+    pregao = bid.get("pregao")
+    parts = [f"Pregão {pregao}" if pregao else None, bid.get("orgao"), (bid.get("objeto") or "")[:60]]
+    return " · ".join(p for p in parts if p) or "Licitação"
+
+
+_BID_AUDIT_FIELDS = {"objeto": "Objeto", "modalidade": "Modalidade", "portal": "Portal", "data_disputa": "Data da disputa",
+                     "hora": "Hora", "pregao": "Pregão", "uasg": "UASG", "orgao": "Órgão", "itens": "Itens",
+                     "status": "Status", "observacao": "Observação"}
+
+
+def _bid_changes(before: dict, after: dict) -> list:
+    out = []
+    for f, label in _BID_AUDIT_FIELDS.items():
+        if f in after and (before.get(f) or None) != (after.get(f) or None):
+            out.append({"field": f, "label": label, "before": before.get(f), "after": after.get(f)})
+    return out
+
+
+# Campos que NUNCA podem ser gravados a partir do corpo de um PUT com extra="allow".
+_PROTECTED_FIELDS = {"_id", "id", "owner_id", "account_id", "bid_id", "created_at", "created_by",
+                     "created_by_name", "remessas"}
 
 
 # =================== PARAMS / LISTS ===================
@@ -308,9 +339,12 @@ async def create_bid(body: BidInput, current=Depends(get_current_user)):
     doc["itens_list"] = _itens_list(body.itens)
     doc["owner_id"] = uid(current)
     doc["created_at"] = now_iso()
+    doc.update(_actor_stamp(current, "created"))
     res = await db.bids.insert_one(doc)
     created = await db.bids.find_one({"_id": res.inserted_id})
     await _sync_execution(created)
+    await audit(current, "licitacao_criada", module="licitacoes", entity_type="licitacao",
+                entity_id=str(res.inserted_id), entity_label=_bid_label(created))
     return ser(created)
 
 
@@ -333,9 +367,15 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
     # `proposta_enviada` é DERIVADO do documento da proposta (ver propostas.py): o
     # formulário de edição da licitação não envia esse dado e não pode zerá-lo.
     doc["proposta_enviada"] = bool((existing.get("proposta") or {}).get("file_id") or existing.get("propostas"))
+    doc["updated_at"] = now_iso()
+    doc.update(_actor_stamp(current, "updated"))
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     await _sync_execution(bid)
+    changes = _bid_changes(existing, doc)
+    if changes:
+        await audit(current, "licitacao_editada", module="licitacoes", entity_type="licitacao",
+                    entity_id=bid_id, entity_label=_bid_label(bid), changes=changes)
     return ser(bid)
 
 
@@ -349,9 +389,15 @@ async def change_status(bid_id: str, body: StatusInput, current=Depends(get_curr
     bid = await _owned_bid(bid_id, owner)
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
-    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": {"status": body.status}})
+    before = bid.get("status")
+    await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner},
+                             {"$set": {"status": body.status, "updated_at": now_iso(), **_actor_stamp(current, "updated")}})
     bid["status"] = body.status
     await _sync_execution(bid)
+    if before != body.status:
+        await audit(current, "licitacao_status_alterado", module="licitacoes", entity_type="licitacao",
+                    entity_id=bid_id, entity_label=_bid_label(bid),
+                    changes=[{"field": "status", "label": "Status", "before": before, "after": body.status}])
     return ser(bid)
 
 
@@ -423,6 +469,9 @@ async def add_bid_anexo(bid_id: str, body: BidAnexoInput, current=Depends(get_cu
         updates = {"anexos": list(bid.get("anexos") or []) + [body.file]}
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": updates})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    await audit(current, "licitacao_documento_anexado", module="licitacoes", entity_type="licitacao",
+                entity_id=bid_id, entity_label=_bid_label(bid),
+                metadata={"arquivo": (body.file or {}).get("filename"), "file_id": (body.file or {}).get("id")})
     return ser(bid)
 
 
@@ -441,14 +490,19 @@ async def remove_bid_anexo(bid_id: str, file_id: str, current=Depends(get_curren
         updates["termo_referencia"] = None
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": updates})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
+    await audit(current, "licitacao_documento_removido", module="licitacoes", entity_type="licitacao",
+                entity_id=bid_id, entity_label=_bid_label(bid), metadata={"file_id": file_id})
     return ser(bid)
 
 
 @api.delete("/bids/{bid_id}")
 async def delete_bid(bid_id: str, current=Depends(get_current_user)):
     owner = uid(current)
-    if not await _owned_bid(bid_id, owner):
+    existing = await _owned_bid(bid_id, owner)
+    if not existing:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
+    await audit(current, "licitacao_excluida", module="licitacoes", entity_type="licitacao",
+                entity_id=bid_id, entity_label=_bid_label(existing), metadata={"status": existing.get("status")})
     await db.bids.delete_one({"_id": ObjectId(bid_id), "owner_id": owner})
     await db.budgets.delete_one({"bid_id": bid_id, "owner_id": owner})
     await db.executions.delete_one({"bid_id": bid_id, "owner_id": owner})
@@ -772,7 +826,8 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates = {k: v for k, v in body.model_dump().items()
+               if v is not None and k not in _PROTECTED_FIELDS and not k.startswith("$") and "." not in k}
     if "atestado" in updates and updates["atestado"] not in ATESTADO_OPTIONS:
         raise HTTPException(status_code=400, detail=f"Atestado inválido. Use: {', '.join(ATESTADO_OPTIONS)}")
     # keep current_step and status_atual in sync
@@ -783,9 +838,22 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
         if updates["status_atual"] in TIMELINE_STEPS:
             updates["current_step"] = TIMELINE_STEPS.index(updates["status_atual"])
     if updates:
-        await db.executions.update_one({"bid_id": bid_id, "owner_id": owner}, {"$set": updates})
+        await db.executions.update_one({"bid_id": bid_id, "owner_id": owner},
+                                       {"$set": {**updates, "updated_at": now_iso(), **_actor_stamp(current, "updated")}})
+        changes = [{"field": k, "label": _EXEC_AUDIT_FIELDS[k], "before": doc.get(k), "after": updates[k]}
+                   for k in _EXEC_AUDIT_FIELDS if k in updates and doc.get(k) != updates[k]]
+        if changes:
+            etapa = any(c["field"] == "status_atual" for c in changes)
+            await audit(current, "execucao_etapa_alterada" if etapa else "execucao_editada", module="execucao",
+                        entity_type="execucao", entity_id=bid_id,
+                        entity_label=doc.get("objeto") or doc.get("orgao") or "Execução", changes=changes)
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return await _enrich_execution(ser(doc), owner)
+
+
+_EXEC_AUDIT_FIELDS = {"status_atual": "Etapa", "atestado": "Atestado", "tempo_entrega_dias": "Prazo (dias)",
+                      "data_entrega": "Data de entrega", "data_referencia_entrega": "Data de referência",
+                      "pagamento_pendente": "Pagamento pendente", "resumo_contrato": "Resumo do contrato"}
 
 
 class TimelineFileInput(BaseModel):
@@ -918,21 +986,44 @@ class PreferencesInput(BaseModel):
     execution_groups: Optional[dict] = None
 
 
+# Preferências de INTERFACE (ordenação, paginação, grupos, tema) de usuário
+# interno ficam no próprio usuário (coleção user_preferences) — ele não muda a
+# tela do administrador. Os padrões da conta (impostos, margem, Financeiro)
+# continuam únicos por conta e exigem config.preferences.edit (permissions.py).
+_UX_PREF_KEYS = ("theme", "table_sorts", "table_page_sizes", "execution_groups")
+
+
+async def _read_preferences(current: dict) -> dict:
+    doc = await db.preferences.find_one({"owner_id": uid(current)})
+    out = _strip_meta(doc) if doc else {"theme": "light", "icms_padrao": 18, "pis_cofins_padrao": 9.25, "margem_padrao": 30}
+    if not current.get("is_owner", True):
+        mine = await db.user_preferences.find_one({"user_id": current["actor_id"]}) or {}
+        for k in _UX_PREF_KEYS:
+            if k in mine:
+                out[k] = mine[k]
+    return out
+
+
 @api.get("/preferences")
 async def get_preferences(current=Depends(get_current_user)):
-    doc = await db.preferences.find_one({"owner_id": uid(current)})
-    if not doc:
-        return {"theme": "light", "icms_padrao": 18, "pis_cofins_padrao": 9.25, "margem_padrao": 30}
-    return _strip_meta(doc)
+    return await _read_preferences(current)
 
 
 @api.put("/preferences")
 async def update_preferences(body: PreferencesInput, current=Depends(get_current_user)):
     owner = uid(current)
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    await db.preferences.update_one({"owner_id": owner}, {"$set": {**updates, "owner_id": owner}}, upsert=True)
-    doc = await db.preferences.find_one({"owner_id": owner})
-    return _strip_meta(doc)
+    updates = {k: v for k, v in body.model_dump().items()
+               if v is not None and k not in _PROTECTED_FIELDS and not k.startswith("$") and "." not in k}
+    if not current.get("is_owner", True):
+        ux = {k: v for k, v in updates.items() if k in _UX_PREF_KEYS}
+        updates = {k: v for k, v in updates.items() if k not in _UX_PREF_KEYS}
+        if ux:
+            await db.user_preferences.update_one({"user_id": current["actor_id"]},
+                                                 {"$set": {**ux, "user_id": current["actor_id"], "owner_id": owner}},
+                                                 upsert=True)
+    if updates:
+        await db.preferences.update_one({"owner_id": owner}, {"$set": {**updates, "owner_id": owner}}, upsert=True)
+    return await _read_preferences(current)
 
 
 # =================== DRAFT BUDGET (planilha de rascunho, sem licitação) ===================
@@ -950,13 +1041,27 @@ async def _draft_defaults(owner: str) -> dict:
     }
 
 
+def _draft_filter(current: dict) -> dict:
+    """Rascunho é PESSOAL: o do principal é o documento de sempre (sem actor_id);
+    cada usuário interno tem o seu (actor_id), dentro da mesma conta."""
+    flt = {"owner_id": uid(current), "type": "budget_draft"}
+    if current.get("is_owner", True):
+        flt["actor_id"] = {"$exists": False}
+    else:
+        flt["actor_id"] = current["actor_id"]
+    return flt
+
+
 @api.get("/draft/budget")
 async def get_draft_budget(current=Depends(get_current_user)):
     """Retorna o rascunho do usuário, criando-o vazio na primeira vez (idempotente)."""
     owner = uid(current)
-    doc = await db.drafts.find_one({"owner_id": owner, "type": "budget_draft"})
+    flt = _draft_filter(current)
+    doc = await db.drafts.find_one(flt)
     if not doc:
         doc = {"owner_id": owner, "type": "budget_draft", "rows": [], "summary": {}, "updated_at": now_iso()}
+        if not current.get("is_owner", True):
+            doc["actor_id"] = current["actor_id"]
         await db.drafts.insert_one(dict(doc))
     return {"rows": doc.get("rows", []), "summary": doc.get("summary", {}), "defaults": await _draft_defaults(owner)}
 
@@ -966,7 +1071,7 @@ async def save_draft_budget(body: BudgetInput, current=Depends(get_current_user)
     """Salva o rascunho do usuário (mesmo formato de linhas/summary do orçamento)."""
     owner = uid(current)
     await db.drafts.update_one(
-        {"owner_id": owner, "type": "budget_draft"},
+        _draft_filter(current),
         {"$set": {"rows": body.rows, "summary": body.summary, "owner_id": owner,
                   "type": "budget_draft", "updated_at": now_iso()}},
         upsert=True,
@@ -980,7 +1085,7 @@ async def reset_draft_budget(current=Depends(get_current_user)):
     Não afeta licitações, orçamentos reais, execuções, arquivos nem preferências."""
     owner = uid(current)
     await db.drafts.update_one(
-        {"owner_id": owner, "type": "budget_draft"},
+        _draft_filter(current),
         {"$set": {"rows": [], "summary": {}, "owner_id": owner,
                   "type": "budget_draft", "updated_at": now_iso()}},
         upsert=True,

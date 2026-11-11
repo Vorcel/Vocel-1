@@ -196,11 +196,18 @@ MODULES = {
     "bancos": "Bancos",
     "config": "Configurações",
     "execucao": "Execução",
+    "licitacoes": "Licitações",
+    "usuarios": "Usuários",
 }
 
 
 def actor(current: dict) -> dict:
-    return {"user_id": current["id"], "user_name": current.get("name") or current.get("email") or ""}
+    """Quem REALMENTE agiu (usuário principal ou interno). `owner_id` do evento
+    continua sendo a conta (current["id"])."""
+    return {"user_id": current.get("actor_id") or current["id"],
+            "user_name": current.get("actor_name") or current.get("name") or current.get("email") or "",
+            "user_login": current.get("actor_login") or current.get("email") or "",
+            "user_type": "owner" if current.get("is_owner", True) else "internal"}
 
 
 async def log_event(current: dict, action: str, *, module: str, entity_type: str, entity_id: str,

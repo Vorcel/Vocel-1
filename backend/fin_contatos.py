@@ -247,7 +247,7 @@ async def create_contact(body: ContactInput, current=Depends(get_current_user)):
     data = _validated(body, creating=True)
     ts = now_iso()
     doc = {"id": new_id(), "owner_id": owner, "ativo": True, "email": None, "phone": None, "notes": None,
-           "address": {}, **data, "created_by": current["id"], "created_by_name": current.get("name"),
+           "address": {}, **data, "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"),
            "created_at": ts, "updated_at": ts}
     doc["search_key"] = _search_key(doc)
 

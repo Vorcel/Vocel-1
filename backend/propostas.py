@@ -28,7 +28,8 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile
 
 import gdrive
-from auth import get_current_user, user_id_from_token
+from auth import get_current_user, principal_from_token
+from permissions import require
 from db import db, now_iso
 from routes import _owned_bid, ser, uid
 from storage import APP_NAME, MAX_SIZE, get_object, put_object
@@ -297,10 +298,12 @@ async def _resolve_requester(auth: Optional[str], authorization: Optional[str]) 
     token = auth
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
-    requester = user_id_from_token(token)
-    if not requester:
+    current = await principal_from_token(token)
+    if not current:
         raise HTTPException(status_code=401, detail="Não autenticado")
-    return requester
+    # Rotas com token na URL não passam pela tabela central: checa aqui.
+    require(current, "propostas.view")
+    return current["id"]
 
 
 async def _original_bytes(prop: dict, owner: str) -> bytes:

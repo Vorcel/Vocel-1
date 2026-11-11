@@ -124,7 +124,7 @@ async def send_request(body: SendInput, current=Depends(get_current_user)):
             "etapa": unit.get("status_atual"),
         },
         "notes": (body.notes or "").strip() or None,
-        "sent_by": current["id"], "sent_by_name": current.get("name"), "sent_at": ts, "updated_at": ts,
+        "sent_by": current.get("actor_id") or current["id"], "sent_by_name": current.get("actor_name") or current.get("name"), "sent_at": ts, "updated_at": ts,
     }
     label = _request_label(doc)
 
@@ -263,15 +263,15 @@ async def approve_request(request_id: str, body: ApproveInput, current=Depends(g
         "amount_cents": amount, "settled_cents": 0, "due_date": due, "status": PENDENTE, "mode": "avista",
         "tag_ids": [], "tag_names": [],
         "sequence_id": None, "sequence_index": None, "sequence_total": None, "frequency": None,
-        "origin": "execucao", "created_by": current["id"], "created_by_name": current.get("name"),
+        "origin": "execucao", "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"),
         "created_at": ts, "updated_at": ts, "version": 1,
     }
 
     async def tx(s):
         # Transição condicional: dois cliques em "Aprovar" -> só o primeiro passa.
         res = await db.fin_requests.update_one({"_id": r["_id"], "status": "pendente"}, {"$set": {
-            "status": "aprovado", "entry_id": entry["id"], "decided_by": current["id"],
-            "decided_by_name": current.get("name"), "decided_at": ts, "updated_at": ts,
+            "status": "aprovado", "entry_id": entry["id"], "decided_by": current.get("actor_id") or current["id"],
+            "decided_by_name": current.get("actor_name") or current.get("name"), "decided_at": ts, "updated_at": ts,
             "approved_amount_cents": amount}}, session=s)
         if not res.modified_count:
             raise HTTPException(status_code=409, detail="Esta solicitação já foi analisada.")
@@ -302,8 +302,8 @@ async def reject_request(request_id: str, body: RejectInput, current=Depends(get
 
     async def tx(s):
         res = await db.fin_requests.update_one({"_id": r["_id"], "status": "pendente"}, {
-            "$set": {"status": "rejeitada", "rejection_reason": motivo, "decided_by": current["id"],
-                     "decided_by_name": current.get("name"), "decided_at": ts, "updated_at": ts},
+            "$set": {"status": "rejeitada", "rejection_reason": motivo, "decided_by": current.get("actor_id") or current["id"],
+                     "decided_by_name": current.get("actor_name") or current.get("name"), "decided_at": ts, "updated_at": ts},
             "$unset": {"active_key": ""}}, session=s)
         if not res.modified_count:
             raise HTTPException(status_code=409, detail="Esta solicitação já foi analisada.")

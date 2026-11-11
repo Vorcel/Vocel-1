@@ -4,6 +4,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { findColor } from "@/lib/constants";
 
 // Menu de status — mesmo visual da Execução & Pós-Venda (StatusBadge):
@@ -14,6 +15,11 @@ export const StatusDropdown = ({ bid }) => {
   // Status inativo não é oferecido para novas seleções (Configurações → Status),
   // mas continua listado se for o status atual da licitação (registro antigo).
   const opcoes = (lists.statuses || []).filter((st) => st.ativo !== false || st.nome === bid.status);
+  const { can } = useAuth();
+  // Sem permissão de alterar status: só o badge (o backend recusa a troca de qualquer forma).
+  if (!can("licitacoes.status")) {
+    return <StatusBadge color={findColor(lists.statuses, bid.status)} data-testid={`status-trigger-${bid.id}`}>{bid.status}</StatusBadge>;
+  }
 
   return (
     <DropdownMenu>

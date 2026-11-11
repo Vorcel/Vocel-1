@@ -9,6 +9,13 @@ import { CountBadge } from "@/components/CountBadge";
 import { fileUrl, formatApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/context/AuthContext";
+
+// Permissões por categoria: Edital = documentos da licitação; demais = documentos da Execução.
+export function docPerms(can, key) {
+  const base = key === "edital" ? "licitacoes.docs" : "execution.docs";
+  return { view: can(`${base}.view`), attach: can(`${base}.attach`), remove: can(`${base}.delete`) };
+}
 
 /* Hub central de documentos da Execução & Pós-Venda (ref 2).
  *
@@ -98,8 +105,10 @@ function HubItem({ testid, icon: Icon, label, title, color, count = 0, filled, o
 // do primeiro arquivo e "+ Adicionar arquivo" com a categoria já preenchida.
 export function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
   const [enviando, setEnviando] = useState(false);
+  const { can } = useAuth();
   if (!categoria) return null;
   const { key, label, files, color, aceita, multiplos } = categoria;
+  const perm = docPerms(can, key);
 
   const enviar = async (file) => {
     setEnviando(true);
@@ -141,8 +150,10 @@ export function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
                 <button
                   type="button"
                   data-testid={`exec-doc-item-${key}-${i}`}
-                  onClick={() => openFile(f.id)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  onClick={() => perm.view && openFile(f.id)}
+                  disabled={!perm.view}
+                  title={perm.view ? undefined : "Sem permissão para abrir este documento"}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed"
                 >
                   <FileText size={16} className="shrink-0" style={{ color }} />
                   <span className="min-w-0">
@@ -151,7 +162,7 @@ export function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
                   </span>
                   <ExternalLink size={13} className="ml-auto shrink-0 text-muted-foreground" />
                 </button>
-                {f.removivel !== false && (
+                {f.removivel !== false && perm.remove && (
                   <button
                     type="button"
                     data-testid={`exec-doc-remove-${key}-${i}`}
@@ -167,7 +178,7 @@ export function DocsDialog({ open, categoria, onClose, onUpload, onRemove }) {
           </div>
         )}
 
-        {(files.length === 0 || multiplos) && (
+        {(files.length === 0 || multiplos) && perm.attach && (
           <div className="pt-1">
             <FileUpload
               testid={`exec-doc-upload-${key}`}
@@ -227,6 +238,10 @@ export const abrirCategoria = (cat, abrirLista) => {
 export function DocumentHub({ execution, bid, orcamentoPath, onUploadDoc, onRemoveDoc, onAddEdital, onRemoveEdital, onRemoveLegacyFile, onProposta }) {
   const navigate = useNavigate();
   const [aberta, setAberta] = useState(null); // chave da categoria com a janela aberta
+  const { can, canAny } = useAuth();
+  // Porta visível só com alguma permissão sobre ela (UX; o backend valida cada arquivo).
+  const showEdital = canAny("licitacoes.docs.view", "licitacoes.docs.attach");
+  const showDocs = canAny("execution.docs.view", "execution.docs.attach");
 
   const bidId = execution?.bid_id;
   const CATS = buildDocCategories(execution, bid);
@@ -251,37 +266,47 @@ export function DocumentHub({ execution, bid, orcamentoPath, onUploadDoc, onRemo
         data-testid="exec-doc-hub"
         className="mx-auto grid w-full min-w-0 max-w-4xl grid-cols-3 justify-items-center gap-x-2 gap-y-4 pt-7 sm:grid-cols-6"
       >
-        <HubItem
-          testid="hub-edital" icon={FileText} label="Edital" color={COLORS.edital}
-          title="Abrir edital e documentos da licitação"
-          count={edital.length} onClick={() => abrir(CATS.edital)} onManage={() => setAberta("edital")}
-        />
-        <HubItem
-          testid="hub-orcamento" icon={Calculator} label="Orçamento" color={COLORS.orcamento}
-          title={orcamentoPath ? "Abrir orçamento da remessa" : "Abrir planilha de orçamento"} filled
-          onClick={() => bidId && navigate(orcamentoPath || `/orcamento/${bidId}`)}
-        />
-        <HubItem
-          testid="hub-proposta" icon={PropostaIcon} label="Proposta" color={COLORS.proposta}
-          title={totalPropostas > 1 ? `Abrir propostas (${totalPropostas})` : totalPropostas ? "Abrir proposta" : "Adicionar proposta"}
-          count={totalPropostas}
-          onClick={() => onProposta(bid)}
-        />
-        <HubItem
-          testid="hub-nota-empenho" icon={Receipt} label="Nota de Empenho" color={COLORS.nota_empenho}
-          title="Gerenciar documentos de empenho"
-          count={notaEmpenho.length} onClick={() => abrir(CATS.nota_empenho)} onManage={() => setAberta("nota_empenho")}
-        />
-        <HubItem
-          testid="hub-nota-fiscal" icon={FileSpreadsheet} label="Nota Fiscal" color={COLORS.nota_fiscal}
-          title="Gerenciar notas fiscais"
-          count={notaFiscal.length} onClick={() => abrir(CATS.nota_fiscal)} onManage={() => setAberta("nota_fiscal")}
-        />
-        <HubItem
-          testid="hub-outros" icon={Folder} label="Outros" color={COLORS.outros}
-          title="Gerenciar outros documentos"
-          count={outros.length} onClick={() => abrir(CATS.outros)} onManage={() => setAberta("outros")}
-        />
+        {showEdital && (
+          <HubItem
+            testid="hub-edital" icon={FileText} label="Edital" color={COLORS.edital}
+            title="Abrir edital e documentos da licitação"
+            count={edital.length} onClick={() => abrir(CATS.edital)} onManage={() => setAberta("edital")}
+          />
+        )}
+        {can("orcamento.view") && (
+          <HubItem
+            testid="hub-orcamento" icon={Calculator} label="Orçamento" color={COLORS.orcamento}
+            title={orcamentoPath ? "Abrir orçamento da remessa" : "Abrir planilha de orçamento"} filled
+            onClick={() => bidId && navigate(orcamentoPath || `/orcamento/${bidId}`)}
+          />
+        )}
+        {can("propostas.view") && (
+          <HubItem
+            testid="hub-proposta" icon={PropostaIcon} label="Proposta" color={COLORS.proposta}
+            title={totalPropostas > 1 ? `Abrir propostas (${totalPropostas})` : totalPropostas ? "Abrir proposta" : "Adicionar proposta"}
+            count={totalPropostas}
+            onClick={() => onProposta(bid)}
+          />
+        )}
+        {showDocs && (
+          <>
+            <HubItem
+              testid="hub-nota-empenho" icon={Receipt} label="Nota de Empenho" color={COLORS.nota_empenho}
+              title="Gerenciar documentos de empenho"
+              count={notaEmpenho.length} onClick={() => abrir(CATS.nota_empenho)} onManage={() => setAberta("nota_empenho")}
+            />
+            <HubItem
+              testid="hub-nota-fiscal" icon={FileSpreadsheet} label="Nota Fiscal" color={COLORS.nota_fiscal}
+              title="Gerenciar notas fiscais"
+              count={notaFiscal.length} onClick={() => abrir(CATS.nota_fiscal)} onManage={() => setAberta("nota_fiscal")}
+            />
+            <HubItem
+              testid="hub-outros" icon={Folder} label="Outros" color={COLORS.outros}
+              title="Gerenciar outros documentos"
+              count={outros.length} onClick={() => abrir(CATS.outros)} onManage={() => setAberta("outros")}
+            />
+          </>
+        )}
       </div>
 
       <DocsDialog

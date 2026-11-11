@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
+import { makeCan } from "@/lib/permissions";
 
 const AuthContext = createContext(null);
 
@@ -24,15 +25,28 @@ export function AuthProvider({ children }) {
       .finally(() => setReady(true));
   }, []);
 
-  const login = async (email, password) => {
-    const { data } = await api.post("/auth/login", { email, password });
-    localStorage.setItem("token", data.token);
-    setUser(data.user);
-    return data.user;
-  };
+  // Permissões mudam no servidor sem novo login (o administrador edita o
+  // usuário): ao receber um 403, recarrega o /auth/me para menus e botões
+  // refletirem o estado real. Limitado a uma vez a cada poucos segundos.
+  const lastRefresh = useRef(0);
+  const refreshMe = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastRefresh.current < 3000) return;
+    lastRefresh.current = now;
+    try {
+      const { data } = await api.get("/auth/me");
+      setUser(data);
+    } catch { /* 401 já é tratado pelo interceptor */ }
+  }, []);
+  useEffect(() => {
+    const onForbidden = () => refreshMe();
+    window.addEventListener("vorcel:forbidden", onForbidden);
+    return () => window.removeEventListener("vorcel:forbidden", onForbidden);
+  }, [refreshMe]);
 
-  const register = async (name, email, password) => {
-    const { data } = await api.post("/auth/register", { name, email, password });
+  // Aceita e-mail (usuário principal) ou login (usuário interno).
+  const login = async (identifier, password) => {
+    const { data } = await api.post("/auth/login", { login: identifier, password });
     localStorage.setItem("token", data.token);
     setUser(data.user);
     return data.user;
@@ -43,8 +57,13 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
+  // O perfil salvo (PUT /auth/profile) não traz permissões: mescla com o atual.
+  const updateProfile = useCallback((profile) => setUser((u) => (u ? { ...u, ...profile, id: u.id } : u)), []);
+
+  const perms = useMemo(() => makeCan(user), [user]);
+
   return (
-    <AuthContext.Provider value={{ user, setUser, ready, login, register, logout }}>
+    <AuthContext.Provider value={{ user, setUser: updateProfile, ready, login, logout, refreshMe, ...perms }}>
       {children}
     </AuthContext.Provider>
   );

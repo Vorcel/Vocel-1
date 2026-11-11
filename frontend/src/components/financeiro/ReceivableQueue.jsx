@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { fileUrl } from "@/lib/api";
 import { activeOptions, useFinance } from "@/context/FinanceContext";
+import { useAuth } from "@/context/AuthContext";
 import { apiError, apiErrorCode, centsToInput, finApi, fmtDate, money, parseMoney, relativeTime } from "@/lib/financeiro";
 import { ContactModal } from "./CadastroModals";
 import { ContactFieldLabel, ContactPicker } from "./ContactPicker";
@@ -34,6 +35,9 @@ export function useReceivableQueue() {
 export function ReceivableQueue({ items, loading, limit, compact }) {
   const [approve, setApprove] = useState(null);
   const [reject, setReject] = useState(null);
+  const { can } = useAuth();
+  const podeAprovar = can("finance.receber.approve");
+  const podeRejeitar = can("finance.receber.reject");
   const list = limit ? items.slice(0, limit) : items;
   if (!loading && !items.length) {
     return <EmptyState icon={CheckCircle2} title="Nenhuma solicitação pendente">Os recebíveis enviados pela Execução & Pós-Venda aparecem aqui para aprovação.</EmptyState>;
@@ -57,16 +61,16 @@ export function ReceivableQueue({ items, loading, limit, compact }) {
                 {mudou && !compact && <p className="mt-0.5 text-xs font-medium" style={{ color: "var(--fin-warning)" }}>Valor na Execução agora: {money(r.valor_execucao_atual_cents)}</p>}
               </div>
               <Money cents={r.amount_cents} flow="in" strong className="shrink-0 text-sm" />
-              <FinButton className="h-8 px-3 text-xs" onClick={() => setApprove(r)} data-testid={`fin-approve-${r.id}`}>Aprovar</FinButton>
-              <DropdownMenu>
+              {podeAprovar && <FinButton className="h-8 px-3 text-xs" onClick={() => setApprove(r)} data-testid={`fin-approve-${r.id}`}>Aprovar</FinButton>}
+              {(podeAprovar || podeRejeitar) && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--fin-muted-soft)]" style={{ color: "var(--fin-ink-2)" }} data-testid={`fin-queue-menu-${r.id}`}><MoreHorizontal size={17} /></button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setApprove(r)}><CheckCircle2 size={15} className="mr-2" /> Revisar e aprovar</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setReject(r)} className="text-alert focus:text-alert" data-testid={`fin-reject-${r.id}`}><XCircle size={15} className="mr-2" /> Rejeitar</DropdownMenuItem>
+                  {podeAprovar && <DropdownMenuItem onClick={() => setApprove(r)}><CheckCircle2 size={15} className="mr-2" /> Revisar e aprovar</DropdownMenuItem>}
+                  {podeRejeitar && <DropdownMenuItem onClick={() => setReject(r)} className="text-alert focus:text-alert" data-testid={`fin-reject-${r.id}`}><XCircle size={15} className="mr-2" /> Rejeitar</DropdownMenuItem>}
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>}
             </li>
           );
         })}
@@ -219,6 +223,7 @@ function RejectModal({ request: r, onClose }) {
 // aplicado sozinho — o Financeiro escolhe Ignorar ou Atualizar recebível.
 export function ExecutionUpdates({ updates }) {
   const { bump } = useFinance();
+  const { can } = useAuth();
   const [busy, setBusy] = useState(null);
   const [confirmSettled, setConfirmSettled] = useState(null);
   const decide = async (u, action, includeSettled = false) => {
@@ -233,6 +238,7 @@ export function ExecutionUpdates({ updates }) {
     } finally { setBusy(null); }
   };
   if (!updates.length) return null;
+  const podeDecidir = can("finance.receber.approve");
   return (
     <div className="space-y-2" data-testid="fin-exec-updates">
       {updates.map((u) => (
@@ -244,10 +250,10 @@ export function ExecutionUpdates({ updates }) {
             <span>Novo valor: <Money cents={u.valor_novo_cents} flow="in" strong /></span>
             {u.entry_status === "recebido" && <TonePill tone="success">já recebido</TonePill>}
           </div>
-          <div className="mt-2 flex gap-2">
+          {podeDecidir && <div className="mt-2 flex gap-2">
             <FinButton variant="outline" className="h-8 text-xs" loading={busy === u.request_id + "ignorar"} onClick={() => decide(u, "ignorar")} data-testid={`fin-update-ignore-${u.request_id}`}>Ignorar</FinButton>
             <FinButton className="h-8 text-xs" loading={busy === u.request_id + "aplicar"} onClick={() => decide(u, "aplicar")} data-testid={`fin-update-apply-${u.request_id}`}>Atualizar recebível</FinButton>
-          </div>
+          </div>}
         </div>
       ))}
       <FinConfirm open={!!confirmSettled} onClose={() => setConfirmSettled(null)} title="Recebível já recebido" confirmLabel="Atualizar mesmo assim" danger

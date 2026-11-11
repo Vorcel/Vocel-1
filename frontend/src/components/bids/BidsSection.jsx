@@ -9,6 +9,7 @@ import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { hasProposta } from "@/components/bids/PropostaIcon";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { matchesDigits } from "@/lib/search";
 import { toast } from "sonner";
 
@@ -19,6 +20,7 @@ const EMPTY_FILTERS = {
 
 export const BidsSection = () => {
   const { bids, deleteBid } = useData();
+  const { can } = useAuth();
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [advOpen, setAdvOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -101,9 +103,11 @@ export const BidsSection = () => {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <Button onClick={openNew} data-testid="new-bid-button" className="shrink-0 bg-brand hover:bg-brand-hover">
-          <Plus size={18} className="mr-1.5" /> Nova Licitação
-        </Button>
+        {can("licitacoes.create") && (
+          <Button onClick={openNew} data-testid="new-bid-button" className="shrink-0 bg-brand hover:bg-brand-hover">
+            <Plus size={18} className="mr-1.5" /> Nova Licitação
+          </Button>
+        )}
         <div className="flex-1">
           <FilterBar filters={filters} setFilter={setFilter} onOpenAdvanced={() => setAdvOpen(true)} activeAdvanced={activeAdvanced} />
         </div>

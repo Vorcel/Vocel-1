@@ -11,9 +11,12 @@ import { atestadoOf, atestadoColor } from "@/lib/execution";
 // estado atual na sua cor; aberto, cada opção aparece como badge na própria cor.
 // Salva na hora via `onChange(valor)` — sem botão Salvar. `testKey` diferencia os
 // testids quando há mais de um na mesma licitação (linhas de remessa).
-export const AtestadoDropdown = ({ execution, onChange, testKey }) => {
+export const AtestadoDropdown = ({ execution, onChange, testKey, readOnly = false }) => {
   const value = atestadoOf(execution);
   const tk = testKey ?? execution.bid_id;
+  if (readOnly) {
+    return <StatusBadge color={atestadoColor(value)} data-testid={`atestado-trigger-${tk}`}>{value}</StatusBadge>;
+  }
 
   return (
     <DropdownMenu>

@@ -12,6 +12,7 @@ import { useData } from "@/context/DataContext";
 import api, { authedUrl, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 const fmtDateTime = (iso) => {
   if (!iso) return null;
@@ -55,6 +56,7 @@ const Aviso = ({ icon: Icon, titulo, texto, children }) => (
 // exibida (desabilitadas nas pontas) e o contador mostra "2 de 3". Todas as
 // ações do cabeçalho valem para a proposta selecionada (`pid`).
 export const PropostaViewerModal = ({ open, onOpenChange, bid, pid, onSelect, onSubstituir, onAdicionar }) => {
+  const { can } = useAuth();
   const { removeProposta, syncProposta } = useData();
   const navigate = useNavigate();
   const [situacao, setSituacao] = useState(null);   // null = consultando
@@ -206,12 +208,14 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, pid, onSelect, on
                 )}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                <Acao
-                  icon={Plus} label="Adicionar" testid="proposta-acao-adicionar"
-                  title="Adicionar outra proposta a esta licitação (as atuais continuam)"
-                  onClick={() => onAdicionar?.()}
-                  className="border-[#0114FF]/40 text-[#0114FF]"
-                />
+                {can("propostas.attach") && (
+                  <Acao
+                    icon={Plus} label="Adicionar" testid="proposta-acao-adicionar"
+                    title="Adicionar outra proposta a esta licitação (as atuais continuam)"
+                    onClick={() => onAdicionar?.()}
+                    className="border-[#0114FF]/40 text-[#0114FF]"
+                  />
+                )}
                 <Acao
                   icon={Pencil} label="Editar" testid="proposta-acao-editar"
                   title={pronto ? "Editar no Google Docs (nova aba)" : "Disponível quando a proposta estiver no Google Drive"}
@@ -225,8 +229,12 @@ export const PropostaViewerModal = ({ open, onOpenChange, bid, pid, onSelect, on
                   title={pronto ? "Baixar em PDF" : "Disponível quando a proposta estiver no Google Drive"}
                   href={pdfUrl} disabled={!pronto}
                 />
-                <Acao icon={RefreshCw} label="Substituir" testid="proposta-acao-substituir" title="Enviar outro arquivo no lugar DESTA proposta" onClick={() => onSubstituir?.(propId)} />
-                <Acao icon={Trash2} label="Remover" testid="proposta-acao-remover" title="Remover a proposta desta licitação" onClick={() => setConfirmarRemocao(true)} className="text-muted-foreground hover:text-alert" />
+                {can("propostas.edit") && (
+                  <Acao icon={RefreshCw} label="Substituir" testid="proposta-acao-substituir" title="Enviar outro arquivo no lugar DESTA proposta" onClick={() => onSubstituir?.(propId)} />
+                )}
+                {can("propostas.delete") && (
+                  <Acao icon={Trash2} label="Remover" testid="proposta-acao-remover" title="Remover a proposta desta licitação" onClick={() => setConfirmarRemocao(true)} className="text-muted-foreground hover:text-alert" />
+                )}
               </div>
             </div>
           </DialogHeader>

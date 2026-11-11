@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useFinance } from "@/context/FinanceContext";
+import { useAuth } from "@/context/AuthContext";
 import {
   ACOES, MODOS, TIPOS, apiError, cardLabel, centsToInput, changeValue, finApi, fmtDate, fmtTimestamp, isOpenEntry, money, parseMoney, todaySP,
 } from "@/lib/financeiro";
@@ -26,11 +27,14 @@ function formaLabel(e, byId) {
 // Ação principal visível (Pagar/Receber, só com saldo em aberto) + menu ⋮.
 export function EntryRowActions({ entry: e }) {
   const { acaoLancamento, editarLancamento, duplicarLancamento } = useFinance();
+  const { can } = useAuth();
+  // finance.<pagar|receber>.<ação> — o backend valida de novo cada operação.
+  const p = (acao) => can(`finance.${e.type}.${acao}`);
   const open = isOpenEntry(e);
   const virgem = e.status === "pendente" && !hasSettlements(e);
   return (
     <div className="flex items-center justify-end gap-1">
-      {open && (
+      {open && p("settle") && (
         <button data-testid={`fin-settle-${e.id}`} onClick={() => acaoLancamento("settle", e)}
           className="rounded-md px-2 py-1 text-xs font-semibold transition-colors hover:brightness-95"
           style={{ background: "var(--fin-primary-soft)", color: "var(--fin-primary)" }}>
@@ -45,14 +49,14 @@ export function EntryRowActions({ entry: e }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuItem onClick={() => acaoLancamento("detail", e)} data-testid={`fin-view-${e.id}`}><Eye size={15} className="mr-2" /> Visualizar</DropdownMenuItem>
-          {e.status !== "cancelado" && <DropdownMenuItem onClick={() => editarLancamento(e)} data-testid={`fin-edit-${e.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>}
-          <DropdownMenuItem onClick={() => duplicarLancamento(e)} data-testid={`fin-duplicate-${e.id}`}><Copy size={15} className="mr-2" /> Duplicar lançamento</DropdownMenuItem>
+          {e.status !== "cancelado" && p("edit") && <DropdownMenuItem onClick={() => editarLancamento(e)} data-testid={`fin-edit-${e.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>}
+          {p("create") && <DropdownMenuItem onClick={() => duplicarLancamento(e)} data-testid={`fin-duplicate-${e.id}`}><Copy size={15} className="mr-2" /> Duplicar lançamento</DropdownMenuItem>}
           <DropdownMenuSeparator />
-          {open && <DropdownMenuItem onClick={() => acaoLancamento("settle", e)}><CheckCircle2 size={15} className="mr-2" /> {e.type === "pagar" ? "Registrar pagamento" : "Registrar recebimento"}</DropdownMenuItem>}
+          {open && p("settle") && <DropdownMenuItem onClick={() => acaoLancamento("settle", e)}><CheckCircle2 size={15} className="mr-2" /> {e.type === "pagar" ? "Registrar pagamento" : "Registrar recebimento"}</DropdownMenuItem>}
           {hasSettlements(e) && <DropdownMenuItem onClick={() => acaoLancamento("settlements", e)} data-testid={`fin-settlements-${e.id}`}><Receipt size={15} className="mr-2" /> Baixas e estornos</DropdownMenuItem>}
-          {e.status === "cancelado" && <DropdownMenuItem onClick={() => acaoLancamento("reopen", e)} data-testid={`fin-reopen-${e.id}`}><RotateCcw size={15} className="mr-2" /> Reativar</DropdownMenuItem>}
-          {virgem && <DropdownMenuItem onClick={() => acaoLancamento("cancel", e)} data-testid={`fin-cancel-${e.id}`}><Ban size={15} className="mr-2" /> Cancelar</DropdownMenuItem>}
-          {!hasSettlements(e) && <DropdownMenuItem onClick={() => acaoLancamento("delete", e)} className="text-alert focus:text-alert" data-testid={`fin-delete-${e.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>}
+          {e.status === "cancelado" && p("cancel") && <DropdownMenuItem onClick={() => acaoLancamento("reopen", e)} data-testid={`fin-reopen-${e.id}`}><RotateCcw size={15} className="mr-2" /> Reativar</DropdownMenuItem>}
+          {virgem && p("cancel") && <DropdownMenuItem onClick={() => acaoLancamento("cancel", e)} data-testid={`fin-cancel-${e.id}`}><Ban size={15} className="mr-2" /> Cancelar</DropdownMenuItem>}
+          {!hasSettlements(e) && p("delete") && <DropdownMenuItem onClick={() => acaoLancamento("delete", e)} className="text-alert focus:text-alert" data-testid={`fin-delete-${e.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -231,6 +235,8 @@ function SettlementsModal({ entry, onClose, onChanged }) {
   const [alvo, setAlvo] = useState(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const { can } = useAuth();
+  const podeEstornar = can(`finance.${entry.type}.reverse`);
   const estornar = async () => {
     setBusy(true);
     try {
@@ -249,7 +255,7 @@ function SettlementsModal({ entry, onClose, onChanged }) {
         footer={<FinButton variant="outline" onClick={onClose}>Fechar</FinButton>}>
         <div className="space-y-4">
           <Valores e={e} />
-          <SettlementsList items={items} onReverse={setAlvo} type={entry.type} />
+          <SettlementsList items={items} onReverse={podeEstornar ? setAlvo : null} type={entry.type} />
         </div>
       </FinModal>
       <FinConfirm open={!!alvo} onClose={() => setAlvo(null)} loading={busy} danger testid="fin-reverse-confirm"

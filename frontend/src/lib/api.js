@@ -11,12 +11,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// 403 = autenticado mas sem permissão (o backend valida tudo). Avisa uma vez e
+// pede ao AuthContext para recarregar as permissões (podem ter mudado agora).
+let lastForbiddenToast = 0;
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && !window.location.pathname.includes("/login")) {
       localStorage.removeItem("token");
       window.location.href = "/login";
+    }
+    if (err.response?.status === 403 && err.response?.data?.detail?.code === "forbidden") {
+      window.dispatchEvent(new Event("vorcel:forbidden"));
+      const now = Date.now();
+      if (now - lastForbiddenToast > 2500 && (err.config?.method || "get") !== "get") {
+        lastForbiddenToast = now;
+        import("sonner").then(({ toast }) => toast.error(err.response.data.detail.msg || "Você não tem permissão para esta ação."));
+      }
     }
     return Promise.reject(err);
   }

@@ -11,6 +11,8 @@ import {
 import { fileUrl } from "@/lib/api";
 import { useData } from "@/context/DataContext";
 import { useFinance } from "@/context/FinanceContext";
+import { useAuth } from "@/context/AuthContext";
+import { FIN_SETTINGS_PERMS } from "@/lib/permissions";
 import {
   DRE_TIPO_LABEL, PAPEIS, PESSOAS, TIPOS_CONTA, apiError, apiErrorCode, centsToInput, finApi, fmtDocument, maskPhone, money, parseMoney,
 } from "@/lib/financeiro";
@@ -21,6 +23,25 @@ import {
 } from "@/components/financeiro/CadastroModals";
 import { FinConfirm } from "@/components/financeiro/FinModal";
 import { EmptyState, Field, FinButton, FinInput, PageHeader, Pager, Segmented, TonePill } from "@/components/financeiro/ui";
+
+// Tipo de cadastro → prefixo da permissão (grupos da DRE = configurar DRE).
+const CAD_PERM = {
+  categoria: "finance.categories", subcategoria: "finance.categories", forma: "finance.forms",
+  conta: "finance.banks", cartao: "finance.cards", tag: "finance.tags", dre_grupo: "finance.dre", contato: "finance.contacts",
+};
+export function useCadPerm(kind) {
+  const { can } = useAuth();
+  const base = CAD_PERM[kind];
+  if (base === "finance.dre") {
+    const c = can("finance.dre.configure");
+    return { create: c, edit: c, inactivate: c, delete: c };
+  }
+  return {
+    create: can(`${base}.create`), edit: can(`${base}.edit`),
+    // Contatos: inativar faz parte de editar.
+    inactivate: can(kind === "contato" ? `${base}.edit` : `${base}.inactivate`), delete: can(`${base}.delete`),
+  };
+}
 
 const SECOES = [
   { key: "categorias", label: "Categorias", icon: Tag, desc: "Classificação de receitas e despesas." },
@@ -34,14 +55,18 @@ const SECOES = [
 
 export default function Configuracoes() {
   const { secao } = useParams();
-  if (!secao) return <Navigate to="/financeiro/configuracoes/categorias" replace />;
-  const atual = SECOES.find((s) => s.key === secao) || SECOES[0];
+  const { canAny } = useAuth();
+  // Só as seções que o usuário pode abrir (UX; o backend valida cada gravação).
+  const secoes = SECOES.filter((s) => canAny(FIN_SETTINGS_PERMS[s.key] || []));
+  if (!secoes.length) return null;
+  if (!secao || !secoes.some((s) => s.key === secao)) return <Navigate to={`/financeiro/configuracoes/${secoes[0].key}`} replace />;
+  const atual = secoes.find((s) => s.key === secao) || secoes[0];
   return (
     <>
       <PageHeader icon={Settings} title="Configurações" subtitle="Cadastros auxiliares e preferências do Financeiro." />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
         <nav className="fin-card flex gap-1 overflow-x-auto p-2 lg:flex-col lg:self-start" data-testid="fin-settings-menu">
-          {SECOES.map((s) => (
+          {secoes.map((s) => (
             <NavLink key={s.key} to={`/financeiro/configuracoes/${s.key}`} data-testid={`fin-settings-${s.key}`}
               className="flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
               style={({ isActive }) => isActive ? { background: "var(--fin-primary-soft)", color: "var(--fin-primary)" } : { color: "var(--fin-ink-2)" }}>
@@ -82,10 +107,12 @@ function SectionHead({ title, subtitle, showInactive, setShowInactive, onAdd, ad
 
 function RowMenu({ item, kind, onEdit, askDelete, extra }) {
   const { bump } = useFinance();
+  const perm = useCadPerm(kind);
   const toggle = async () => {
     try { await finApi.editarCadastro(kind, item.id, { ativo: item.ativo === false }); toast.success(item.ativo === false ? "Reativado" : "Inativado"); bump(); }
     catch (e) { toast.error(apiError(e)); }
   };
+  if (!perm.edit && !perm.inactivate && !perm.delete && !extra) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -94,11 +121,11 @@ function RowMenu({ item, kind, onEdit, askDelete, extra }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={onEdit} data-testid={`fin-cad-edit-${item.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>
+        {perm.edit && <DropdownMenuItem onClick={onEdit} data-testid={`fin-cad-edit-${item.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>}
         {extra}
-        <DropdownMenuItem onClick={toggle}><Power size={15} className="mr-2" /> {item.ativo === false ? "Reativar" : "Inativar"}</DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => askDelete(kind, item)} className="text-alert focus:text-alert" data-testid={`fin-cad-delete-${item.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>
+        {perm.inactivate && <DropdownMenuItem onClick={toggle}><Power size={15} className="mr-2" /> {item.ativo === false ? "Reativar" : "Inativar"}</DropdownMenuItem>}
+        {perm.delete && <DropdownMenuSeparator />}
+        {perm.delete && <DropdownMenuItem onClick={() => askDelete(kind, item)} className="text-alert focus:text-alert" data-testid={`fin-cad-delete-${item.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -108,6 +135,7 @@ const rowCls = "flex items-center gap-3 border-b py-3 last:border-0";
 const Inactive = ({ item }) => item.ativo === false ? <TonePill tone="muted">Inativo</TonePill> : null;
 
 function Categorias() {
+  const canCreate_categoria = useCadPerm("categoria").create;
   const { cad, byId } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [tipo, setTipo] = useState("todas");
@@ -121,7 +149,7 @@ function Categorias() {
   return (
     <>
       <SectionHead title="Categorias" subtitle="Classificam lançamentos a pagar (despesas) e a receber (receitas). O Grupo DRE define onde cada uma entra na DRE."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Nova categoria" testid="fin-new-category" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_categoria ? () => setModal({}) : null} addLabel="Nova categoria" testid="fin-new-category" />
       <Segmented size="sm" value={tipo} onChange={setTipo} options={[{ value: "todas", label: "Todas" }, { value: "receita", label: "Receitas" }, { value: "despesa", label: "Despesas" }]} className="mb-2" />
       {semGrupo > 0 && (
         <p className="mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: "var(--fin-warning-soft)", color: "var(--fin-warning)" }} data-testid="fin-cat-sem-grupo">
@@ -153,7 +181,7 @@ function Categorias() {
                 <Inactive item={c} />
                 <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.cor }} />
                 <RowMenu item={c} kind="categoria" onEdit={() => setModal({ item: c })} askDelete={askDelete}
-                  extra={<DropdownMenuItem onClick={() => { setSubModal({ category: c }); setOpen((o) => ({ ...o, [c.id]: true })); }} data-testid={`fin-cat-new-sub-${c.id}`}>
+                  extra={canCreate_categoria && <DropdownMenuItem onClick={() => { setSubModal({ category: c }); setOpen((o) => ({ ...o, [c.id]: true })); }} data-testid={`fin-cat-new-sub-${c.id}`}>
                     <ListTree size={15} className="mr-2" /> Nova subcategoria</DropdownMenuItem>} />
               </div>
               {exp && subs.length > 0 && (
@@ -192,6 +220,7 @@ function Categorias() {
 // organiza os grupos de cada bloco (criar, renomear, ordenar, inativar) e pode
 // renomear as linhas calculadas — a fórmula nunca muda.
 function EstruturaDre() {
+  const canCreate_dre_grupo = useCadPerm("dre_grupo").create;
   const { cad, bump } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [modal, setModal] = useState(null);
@@ -238,7 +267,7 @@ function EstruturaDre() {
   return (
     <>
       <SectionHead title="Estrutura da DRE" subtitle="Grupos que recebem categorias e linhas calculadas da DRE gerencial."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Novo grupo" testid="fin-new-dre-group" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_dre_grupo ? () => setModal({}) : null} addLabel="Novo grupo" testid="fin-new-dre-group" />
       <div className="space-y-3" data-testid="fin-dre-structure">
         {BLOCOS.map((b) => b.calc ? (
           <div key={b.calc} className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink)" }}
@@ -303,6 +332,7 @@ function EstruturaDre() {
 }
 
 function Formas() {
+  const canCreate_forma = useCadPerm("forma").create;
   const { cad } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [modal, setModal] = useState(null);
@@ -311,7 +341,7 @@ function Formas() {
   return (
     <>
       <SectionHead title="Formas de pagamento" subtitle="Disponíveis nos lançamentos e nas baixas."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Nova forma de pagamento" testid="fin-new-method" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_forma ? () => setModal({}) : null} addLabel="Nova forma de pagamento" testid="fin-new-method" />
       <ul data-testid="fin-method-list">
         {list.map((c) => (
           <li key={c.id} className={rowCls} style={{ borderColor: "var(--fin-border)", opacity: c.ativo === false ? 0.6 : 1 }}>
@@ -330,6 +360,7 @@ function Formas() {
 }
 
 function TagsSection() {
+  const canCreate_tag = useCadPerm("tag").create;
   const { cad } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [modal, setModal] = useState(null);
@@ -338,7 +369,7 @@ function TagsSection() {
   return (
     <>
       <SectionHead title="Tags" subtitle="Marcadores livres (pregão, região, urgência…). Um lançamento pode ter várias; a categoria continua sendo a classificação principal."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Nova tag" testid="fin-new-tag" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_tag ? () => setModal({}) : null} addLabel="Nova tag" testid="fin-new-tag" />
       <ul data-testid="fin-tag-list">
         {list.map((c) => (
           <li key={c.id} className={rowCls} style={{ borderColor: "var(--fin-border)", opacity: c.ativo === false ? 0.6 : 1 }}>
@@ -363,6 +394,8 @@ function TagsSection() {
 // Listagem paginada no servidor (a base pode crescer); cadastro/edição no
 // ContactModal — o MESMO usado no cadastro rápido do lançamento.
 function ClientesFornecedores() {
+  const contatoPerm = useCadPerm("contato");
+  const canCreate_contato = useCadPerm("contato").create;
   const [qText, setQText] = useState("");
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
@@ -404,7 +437,7 @@ function ClientesFornecedores() {
   return (
     <>
       <SectionHead title="Clientes e Fornecedores" subtitle="Cadastros usados nos lançamentos: fornecedores em A Pagar, clientes em A Receber."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Novo cadastro" testid="fin-new-contact" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_contato ? () => setModal({}) : null} addLabel="Novo cadastro" testid="fin-new-contact" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--fin-ink-3)" }} />
@@ -436,10 +469,10 @@ function ClientesFornecedores() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setModal({ item: c })} data-testid={`fin-contact-edit-${c.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => toggleAtivo(c)} data-testid={`fin-contact-toggle-${c.id}`}><Power size={15} className="mr-2" /> {c.ativo === false ? "Reativar" : "Inativar"}</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setDel({ item: c })} className="text-alert focus:text-alert" data-testid={`fin-contact-delete-${c.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>
+                      {contatoPerm.edit && <DropdownMenuItem onClick={() => setModal({ item: c })} data-testid={`fin-contact-edit-${c.id}`}><PencilLine size={15} className="mr-2" /> Editar</DropdownMenuItem>}
+                      {contatoPerm.edit && <DropdownMenuItem onClick={() => toggleAtivo(c)} data-testid={`fin-contact-toggle-${c.id}`}><Power size={15} className="mr-2" /> {c.ativo === false ? "Reativar" : "Inativar"}</DropdownMenuItem>}
+                      {contatoPerm.delete && <DropdownMenuSeparator />}
+                      {contatoPerm.delete && <DropdownMenuItem onClick={() => setDel({ item: c })} className="text-alert focus:text-alert" data-testid={`fin-contact-delete-${c.id}`}><Trash2 size={15} className="mr-2" /> Excluir</DropdownMenuItem>}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </td>
@@ -464,17 +497,21 @@ function ClientesFornecedores() {
 }
 
 export function ContasCartoes() {
-  const [aba, setAba] = useState("contas");
+  const { can } = useAuth();
+  const opcoes = [can("finance.banks.view") && { value: "contas", label: "Contas" },
+    can("finance.cards.view") && { value: "cartoes", label: "Cartões de crédito" }].filter(Boolean);
+  const [aba, setAba] = useState(opcoes[0]?.value || "contas");
   return (
     <>
-      <Segmented value={aba} onChange={setAba} testid="fin-accounts-tab" className="mb-5"
-        options={[{ value: "contas", label: "Contas" }, { value: "cartoes", label: "Cartões de crédito" }]} />
+      {opcoes.length > 1 && <Segmented value={aba} onChange={setAba} testid="fin-accounts-tab" className="mb-5" options={opcoes} />}
       {aba === "contas" ? <ContasList /> : <CartoesList />}
     </>
   );
 }
 
 export function ContasList({ compact }) {
+  const canBalance = useAuth().can("finance.banks.balance");
+  const canCreate_conta = useCadPerm("conta").create;
   const { cad } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [modal, setModal] = useState(null);
@@ -484,7 +521,7 @@ export function ContasList({ compact }) {
   return (
     <>
       <SectionHead title={compact ? "Minhas contas bancárias" : "Contas"} subtitle="Saldos alimentam a projeção do fluxo de caixa."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Nova conta" testid="fin-new-account" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_conta ? () => setModal({}) : null} addLabel="Nova conta" testid="fin-new-account" />
       <ul data-testid="fin-account-list">
         {list.map((c) => (
           <li key={c.id} className={rowCls} style={{ borderColor: "var(--fin-border)", opacity: c.ativo === false ? 0.6 : 1 }} data-testid={`fin-account-${c.id}`}>
@@ -501,7 +538,7 @@ export function ContasList({ compact }) {
               <p className="font-mono-num font-semibold" style={{ color: c.saldo_atual_cents < 0 ? "var(--fin-danger)" : "var(--fin-ink)" }}>{money(c.saldo_atual_cents)}</p>
             </div>
             <RowMenu item={c} kind="conta" onEdit={() => setModal({ item: c })} askDelete={askDelete}
-              extra={<DropdownMenuItem onClick={() => setSaldo(c)} data-testid={`fin-account-adjust-${c.id}`}><Landmark size={15} className="mr-2" /> Ajustar saldo</DropdownMenuItem>} />
+              extra={canBalance && <DropdownMenuItem onClick={() => setSaldo(c)} data-testid={`fin-account-adjust-${c.id}`}><Landmark size={15} className="mr-2" /> Ajustar saldo</DropdownMenuItem>} />
           </li>
         ))}
       </ul>
@@ -514,6 +551,7 @@ export function ContasList({ compact }) {
 }
 
 export function CartoesList({ compact }) {
+  const canCreate_cartao = useCadPerm("cartao").create;
   const { cad, byId } = useFinance();
   const [showInactive, setShowInactive] = useState(false);
   const [modal, setModal] = useState(null);
@@ -522,7 +560,7 @@ export function CartoesList({ compact }) {
   return (
     <>
       <SectionHead title={compact ? "Cartões de crédito" : "Cartões de crédito"} subtitle="Só os 4 últimos dígitos são guardados."
-        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={() => setModal({})} addLabel="Novo cartão" testid="fin-new-card" />
+        showInactive={showInactive} setShowInactive={setShowInactive} onAdd={canCreate_cartao ? () => setModal({}) : null} addLabel="Novo cartão" testid="fin-new-card" />
       <ul data-testid="fin-card-list">
         {list.map((c) => (
           <li key={c.id} className={rowCls} style={{ borderColor: "var(--fin-border)", opacity: c.ativo === false ? 0.6 : 1 }}>

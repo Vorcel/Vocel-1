@@ -10,7 +10,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { fileUrl } from "@/lib/api";
 
 export const Header = ({ title, subtitle, leftContent, centerContent }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, can } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -41,15 +41,17 @@ export const Header = ({ title, subtitle, leftContent, centerContent }) => {
       )}
 
       <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
-        <button
-          data-testid="header-draft"
-          onClick={() => navigate("/rascunho")}
-          title="Rascunho"
-          className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
-        >
-          <FilePenLine size={16} className="shrink-0" />
-          <span className="hidden sm:inline">Rascunho</span>
-        </button>
+        {can("rascunho.use") && (
+          <button
+            data-testid="header-draft"
+            onClick={() => navigate("/rascunho")}
+            title="Rascunho"
+            className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+          >
+            <FilePenLine size={16} className="shrink-0" />
+            <span className="hidden sm:inline">Rascunho</span>
+          </button>
+        )}
         <button
           data-testid="header-theme-toggle"
           onClick={toggleTheme}

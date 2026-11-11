@@ -5,7 +5,10 @@ import { useAuth } from "@/context/AuthContext";
 const DataContext = createContext(null);
 
 export function DataProvider({ children }) {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  // Usuário interno só carrega o que pode ver (o backend responderia 403).
+  const canBids = can("licitacoes.view");
+  const canExec = can("execution.view");
   const [bids, setBids] = useState([]);
   const [executions, setExecutions] = useState([]);
   const [lists, setLists] = useState({ modalidades: [], portais: [], statuses: [] });
@@ -17,14 +20,16 @@ export function DataProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const refreshBids = useCallback(async () => {
+    if (!canBids) { setBids([]); return; }
     const { data } = await api.get("/bids");
     setBids(data);
-  }, []);
+  }, [canBids]);
 
   const refreshExecutions = useCallback(async () => {
+    if (!canExec) { setExecutions([]); return; }
     const { data } = await api.get("/executions");
     setExecutions(data);
-  }, []);
+  }, [canExec]);
 
   const refreshLists = useCallback(async () => {
     const { data } = await api.get("/lists");
@@ -57,12 +62,15 @@ export function DataProvider({ children }) {
     }
   }, []);
 
+  // Recarrega quando o usuário (ou as permissões dele) muda — não a cada /auth/me.
+  const userKey = user ? `${user.id}:${(user.permissions || []).join(",")}` : "";
   useEffect(() => {
-    if (!user) return;
+    if (!userKey) return;
     setLoading(true);
-    Promise.all([refreshBids(), refreshExecutions(), refreshLists(), refreshPrefs(), refreshCompany(), refreshGoogle()])
+    // allSettled: um módulo sem permissão (403) não derruba o carregamento dos outros.
+    Promise.allSettled([refreshBids(), refreshExecutions(), refreshLists(), refreshPrefs(), refreshCompany(), refreshGoogle()])
       .finally(() => setLoading(false));
-  }, [user, refreshBids, refreshExecutions, refreshLists, refreshPrefs, refreshCompany, refreshGoogle]);
+  }, [userKey, refreshBids, refreshExecutions, refreshLists, refreshPrefs, refreshCompany, refreshGoogle]);
 
   // ---- Bid operations ----
   // A execução é sincronizada pelo status no backend (Adjudicado cria; outro status

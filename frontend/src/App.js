@@ -5,6 +5,8 @@ import { DataProvider } from "@/context/DataContext";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { DocumentTitle } from "@/components/layout/VorcelMark";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { RequirePerm } from "@/components/layout/RequirePerm";
+import { FIN_SETTINGS_PERMS, hasAnyFinance } from "@/lib/permissions";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import AllBids from "@/pages/AllBids";
@@ -46,28 +48,29 @@ function App() {
             >
               {/* Módulo Licitações (layout principal) */}
               <Route element={<AppLayout />}>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/licitacoes" element={<AllBids />} />
-                <Route path="/execucao" element={<Execution />} />
-                <Route path="/analises" element={<Analytics />} />
+                {/* Permissões (UX): a tela some/nega; o backend é quem bloqueia de fato. */}
+                <Route path="/" element={<RequirePerm any={["licitacoes.view"]}><Dashboard /></RequirePerm>} />
+                <Route path="/licitacoes" element={<RequirePerm any={["licitacoes.view"]}><AllBids /></RequirePerm>} />
+                <Route path="/execucao" element={<RequirePerm any={["execution.view"]}><Execution /></RequirePerm>} />
+                <Route path="/analises" element={<RequirePerm any={["analytics.view"]}><Analytics /></RequirePerm>} />
                 <Route path="/configuracoes" element={<Settings />} />
-                <Route path="/orcamento/:bidId" element={<BidBudget />} />
-                <Route path="/orcamento/:bidId/remessa/:remessaId" element={<BidBudget />} />
-                <Route path="/rascunho" element={<Budget mode="draft" />} />
+                <Route path="/orcamento/:bidId" element={<RequirePerm any={["orcamento.view"]}><BidBudget /></RequirePerm>} />
+                <Route path="/orcamento/:bidId/remessa/:remessaId" element={<RequirePerm any={["orcamento.view"]}><BidBudget /></RequirePerm>} />
+                <Route path="/rascunho" element={<RequirePerm any={["rascunho.use"]}><Budget mode="draft" /></RequirePerm>} />
               </Route>
               {/* Módulo Financeiro: mesmo login e mesmos dados, layout e identidade próprios */}
-              <Route path="/financeiro" element={<FinancialLayout />}>
-                <Route index element={<Overview />} />
+              <Route path="/financeiro" element={<RequirePerm check={hasAnyFinance}><FinancialLayout /></RequirePerm>}>
+                <Route index element={<RequirePerm any={["finance.overview.view"]}><Overview /></RequirePerm>} />
                 {/* Lançamentos foi incorporado à Visão Geral: links antigos continuam funcionando */}
                 <Route path="lancamentos" element={<Navigate to="/financeiro" replace />} />
-                <Route path="pagar" element={<Pagar />} />
-                <Route path="receber" element={<Receber />} />
-                <Route path="fluxo" element={<Fluxo />} />
-                <Route path="bancos" element={<Bancos />} />
-                <Route path="dre" element={<Dre />} />
-                <Route path="historico" element={<Historico />} />
-                <Route path="configuracoes" element={<Configuracoes />} />
-                <Route path="configuracoes/:secao" element={<Configuracoes />} />
+                <Route path="pagar" element={<RequirePerm any={["finance.pagar.view"]}><Pagar /></RequirePerm>} />
+                <Route path="receber" element={<RequirePerm any={["finance.receber.view"]}><Receber /></RequirePerm>} />
+                <Route path="fluxo" element={<RequirePerm any={["finance.cashflow.view"]}><Fluxo /></RequirePerm>} />
+                <Route path="bancos" element={<RequirePerm any={["finance.banks.view", "finance.cards.view"]}><Bancos /></RequirePerm>} />
+                <Route path="dre" element={<RequirePerm any={["finance.dre.view"]}><Dre /></RequirePerm>} />
+                <Route path="historico" element={<RequirePerm any={["finance.history.view"]}><Historico /></RequirePerm>} />
+                <Route path="configuracoes" element={<RequirePerm any={Object.values(FIN_SETTINGS_PERMS).flat()}><Configuracoes /></RequirePerm>} />
+                <Route path="configuracoes/:secao" element={<RequirePerm any={Object.values(FIN_SETTINGS_PERMS).flat()}><Configuracoes /></RequirePerm>} />
               </Route>
             </Route>
             {/* Cadastro público desativado: qualquer rota antiga/desconhecida (ex: /register, /cadastro) volta ao login */}

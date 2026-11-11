@@ -22,6 +22,7 @@ import { BidFilesButton } from "@/components/bids/BidFilesButton";
 import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { DocShortcuts } from "@/components/execution/DocShortcuts";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import api, { formatApiError } from "@/lib/api";
 import { computeRow, computeLote, computeTotals, brl, pct, num } from "@/lib/calc";
 import { smartTitleCase } from "@/lib/textcase";
@@ -444,6 +445,9 @@ export default function Budget({ mode = "bid" }) {
   // Orçamento de uma REMESSA da execução (/orcamento/:bidId/remessa/:remessaId):
   // cópia independente — o orçamento original da licitação não é alterado.
   const isRemessa = !isDraft && !!remessaId;
+  // Sem orcamento.edit: planilha só para leitura (o backend recusa qualquer gravação).
+  const { can } = useAuth();
+  const readOnly = !isDraft && !can("orcamento.edit");
   // Escopo para chaves de localStorage (filtro de lote): "draft" no rascunho.
   const scopeKey = isDraft ? "draft" : isRemessa ? `${bidId}:${remessaId}` : bidId;
   const navigate = useNavigate();
@@ -596,6 +600,7 @@ export default function Budget({ mode = "bid" }) {
   // sincronizada; rascunho: autosave da planilha). Usado pela edição e pelo
   // Desfazer/Refazer — não existe um segundo mecanismo de salvamento.
   const applyPatch = (id, patch) => {
+    if (readOnly) return;
     if (!isDraft) { sync.patchRow(id, patch); return; }
     markDirty(); setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
   };
@@ -607,10 +612,12 @@ export default function Budget({ mode = "bid" }) {
   const onVenda = (id, v, ses) => updateRow(id, { valor_venda: v, margem: "", mode: v === "" || num(v) === 0 ? "margem" : "venda" }, ses);
   const onMargem = (id, v, ses) => updateRow(id, { margem: v, valor_venda: "", mode: "margem" }, ses);
   const addRow = () => {
+    if (readOnly) return;
     if (!isDraft) { sync.addRow(newRow(defaults)); return; }
     markDirty(); setRows((p) => [...p, newRow(defaults)]);
   };
   const removeRow = (id) => {
+    if (readOnly) return;
     if (!isDraft) { sync.deleteRow(id); return; }
     markDirty(); setRows((p) => p.filter((r) => r._id !== id));
   };
@@ -642,7 +649,7 @@ export default function Budget({ mode = "bid" }) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const onDragEnd = ({ active, over }) => {
-    if (!over || active.id === over.id) return;
+    if (readOnly || !over || active.id === over.id) return;
     const from = rows.findIndex((r) => r._id === active.id);
     const to = rows.findIndex((r) => r._id === over.id);
     if (from === -1 || to === -1) return;
@@ -759,17 +766,17 @@ export default function Budget({ mode = "bid" }) {
       case "site":
         return <SiteCell value={r.site} onSave={(v) => updateRow(r._id, { site: v })} />;
       case "text":
-        return <EditableCell value={r[col.key]} type="text" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="text" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "number":
-        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="number" align="right" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "currency":
-        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="currency" align="right" placeholder="R$ 0,00" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "percent":
-        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r[col.key]} type="percent" align="right" placeholder="%" onCommit={(v, ses) => updateRow(r._id, { [col.key]: v }, ses)} testid={tid} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "venda":
-        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v, ses) => onVenda(r._id, v, ses)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r.valor_venda} type="currency" align="right" placeholder="R$" onCommit={(v, ses) => onVenda(r._id, v, ses)} testid={`erp-venda-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "margem":
-        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v, ses) => onMargem(r._id, v, ses)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} />;
+        return <EditableCell value={r.margem} type="percent" align="right" placeholder="%" onCommit={(v, ses) => onMargem(r._id, v, ses)} testid={`erp-margem-${r._id}`} shouldFocus={focus} onAdvance={adv} liveSave={!isDraft} readOnly={readOnly} />;
       case "calc_pct":
         return <div className="px-2 py-2 text-right font-mono-num text-sm font-medium text-emerald-700 dark:text-emerald-300">{pct(c[col.key])}</div>;
       case "calc_currency": {
@@ -810,7 +817,7 @@ export default function Budget({ mode = "bid" }) {
       key: "files",
       node: (
         <div className="flex shrink-0 items-center gap-1">
-          <BidFilesButton bid={bid} />
+          {can("licitacoes.docs.view") && <BidFilesButton bid={bid} />}
           <DocShortcuts bid={bidVivo} execution={execVivo} remessa={remessaViva} onProposta={abrirProposta} />
         </div>
       ),
@@ -890,12 +897,16 @@ export default function Budget({ mode = "bid" }) {
           <RotateCcw size={15} className="mr-1.5" /> Resetar rascunho
         </Button>
       )}
-      <Button
-        size="sm" data-testid="budget-add-row" onClick={addRow}
-        className="h-9 shrink-0 text-sm bg-foreground text-background hover:bg-foreground/90 hover:text-background"
-      >
-        <Plus size={16} className="mr-1.5" /> Linha
-      </Button>
+      {readOnly ? (
+        <span data-testid="budget-readonly" className="rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">Somente leitura</span>
+      ) : (
+        <Button
+          size="sm" data-testid="budget-add-row" onClick={addRow}
+          className="h-9 shrink-0 text-sm bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+        >
+          <Plus size={16} className="mr-1.5" /> Linha
+        </Button>
+      )}
     </div>
   );
 
@@ -954,6 +965,7 @@ export default function Budget({ mode = "bid" }) {
 
         {/* Spreadsheet */}
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card">
+          <fieldset disabled={readOnly} className="contents">
           <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} onDragEnd={onDragEnd}>
           <table className="rt-fixed border-collapse text-sm" style={{ width: totalW }}>
             <colgroup>
@@ -1009,6 +1021,7 @@ export default function Budget({ mode = "bid" }) {
             </tbody>
           </table>
           </DndContext>
+          </fieldset>
         </div>
       </div>
 
