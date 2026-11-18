@@ -837,14 +837,15 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     if "status_atual" in updates and "current_step" not in updates:
         if updates["status_atual"] in TIMELINE_STEPS:
             updates["current_step"] = TIMELINE_STEPS.index(updates["status_atual"])
+    if doc.get("atestado") not in ATESTADO_OPTIONS:
+        doc["atestado"] = ATESTADO_DEFAULT   # histórico: "antes" igual ao que a tela mostrava
     if updates:
         await db.executions.update_one({"bid_id": bid_id, "owner_id": owner},
                                        {"$set": {**updates, "updated_at": now_iso(), **_actor_stamp(current, "updated")}})
         changes = [{"field": k, "label": _EXEC_AUDIT_FIELDS[k], "before": doc.get(k), "after": updates[k]}
                    for k in _EXEC_AUDIT_FIELDS if k in updates and doc.get(k) != updates[k]]
         if changes:
-            etapa = any(c["field"] == "status_atual" for c in changes)
-            await audit(current, "execucao_etapa_alterada" if etapa else "execucao_editada", module="execucao",
+            await audit(current, exec_audit_action(changes), module="execucao",
                         entity_type="execucao", entity_id=bid_id,
                         entity_label=doc.get("objeto") or doc.get("orgao") or "Execução", changes=changes)
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
@@ -852,8 +853,19 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
 
 
 _EXEC_AUDIT_FIELDS = {"status_atual": "Etapa", "atestado": "Atestado", "tempo_entrega_dias": "Prazo (dias)",
+                      "prazo_entrega_tipo": "Tipo de prazo",
                       "data_entrega": "Data de entrega", "data_referencia_entrega": "Data de referência",
                       "pagamento_pendente": "Pagamento pendente", "resumo_contrato": "Resumo do contrato"}
+
+
+def exec_audit_action(changes: list) -> str:
+    """Ação do histórico conforme o que mudou (etapa > só atestado > edição geral)."""
+    fields = {c["field"] for c in changes}
+    if "status_atual" in fields:
+        return "execucao_etapa_alterada"
+    if fields == {"atestado"}:
+        return "execucao_atestado_alterado"
+    return "execucao_editada"
 
 
 class TimelineFileInput(BaseModel):

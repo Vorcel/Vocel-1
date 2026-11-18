@@ -9,7 +9,7 @@ from starlette.middleware.cors import CORSMiddleware
 from db import db
 from auth import auth_router, seed_admin, create_user_indexes
 from users import users_router
-from permissions import enforce
+from permissions import enforce, migrate_legacy_permissions
 from storage import files_router, init_storage
 from routes import api as core_router
 from propostas import propostas_router
@@ -168,6 +168,13 @@ async def startup():
     except Exception as e:
         logger.warning(f"Financeiro index creation: {e}")
     await seed_admin()
+    try:
+        # Permissões divididas (ex.: execution.edit -> prazos/atestado/pagamento).
+        n = await migrate_legacy_permissions()
+        if n:
+            logger.info(f"Permissões legadas migradas: {n} usuário(s)")
+    except Exception as e:
+        logger.error(f"Legacy permissions migration failed: {e}")
     try:
         await migrate_owner_isolation()
     except Exception as e:

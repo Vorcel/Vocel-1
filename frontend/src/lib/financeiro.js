@@ -322,6 +322,7 @@ Object.assign(ACOES, {
   licitacao_documento_removido: { label: "Documento removido", tone: "muted" },
   execucao_editada: { label: "Execução editada", tone: "warning" },
   execucao_etapa_alterada: { label: "Etapa da execução alterada", tone: "warning" },
+  execucao_atestado_alterado: { label: "Status do atestado alterado", tone: "warning" },
   usuario_criado: { label: "Usuário criado", tone: "info" },
   usuario_editado: { label: "Usuário editado", tone: "warning" },
   usuario_ativado: { label: "Usuário ativado", tone: "info" },

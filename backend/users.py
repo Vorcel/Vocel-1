@@ -24,7 +24,7 @@ from pymongo.errors import DuplicateKeyError
 from auth import (INTERNAL, MAX_PASSWORD, audit, get_current_user, hash_password, public_user,
                   validate_login, validate_password)
 from db import db, now_iso
-from permissions import CATALOG, normalize_permissions
+from permissions import ALL_KEYS, CATALOG, expand_legacy, normalize_permissions
 
 users_router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -58,7 +58,8 @@ class PasswordReset(BaseModel):
 
 def _out(u: dict) -> dict:
     out = public_user(u)
-    out["permissions"] = sorted(u.get("permissions") or []) if u.get("user_type") == INTERNAL else ["*"]
+    out["permissions"] = (sorted(k for k in expand_legacy(u.get("permissions") or []) if k in ALL_KEYS)
+                          if u.get("user_type") == INTERNAL else ["*"])
     return out
 
 

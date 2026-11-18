@@ -62,8 +62,10 @@ CATALOG = [
     {"group": "Execução & Pós-Venda", "modules": [
         {"id": "execution", "label": "Execução", "actions": [
             ("execution.view", "Visualizar"),
-            ("execution.edit", "Editar dados (prazos, atestado, pagamento)"),
             ("execution.status", "Alterar etapa da timeline"),
+            ("execution.deadlines.edit", "Editar prazos"),
+            ("execution.atestado.edit", "Alterar status do atestado"),
+            ("execution.payment.edit", "Editar dados de pagamento"),
         ]},
         {"id": "execution.docs", "label": "Documentos (empenho, NF, outros)", "actions": [
             ("execution.docs.view", "Visualizar / baixar"),
@@ -193,10 +195,38 @@ _EXTRA_IMPLIES = {
 }
 
 
+# Chaves antigas que foram DIVIDIDAS em chaves mais finas. Quem tinha a antiga
+# recebe todas as novas (mesmo comportamento de antes). Usado na migração do boot
+# (migrate_legacy_permissions), na leitura do usuário (auth._principal) e ao salvar
+# (normalize_permissions) — nunca perde acesso nem rejeita a chave antiga.
+LEGACY_EXPANSION = {
+    # 2026-11-18: "Editar dados (prazos, atestado, pagamento)" virou 3 permissões.
+    "execution.edit": ["execution.deadlines.edit", "execution.atestado.edit", "execution.payment.edit"],
+}
+
+
+def expand_legacy(keys: Iterable[str]) -> list:
+    out = []
+    for k in keys or []:
+        out.extend(LEGACY_EXPANSION.get(k, [k]))
+    return list(dict.fromkeys(out))
+
+
+async def migrate_legacy_permissions() -> int:
+    """Troca, no banco, cada chave antiga pelas novas. Idempotente."""
+    n = 0
+    for old in LEGACY_EXPANSION:
+        async for u in db.users.find({"permissions": old}, {"permissions": 1}):
+            perms = normalize_permissions(u.get("permissions") or [])
+            await db.users.update_one({"_id": u["_id"]}, {"$set": {"permissions": perms}})
+            n += 1
+    return n
+
+
 def normalize_permissions(keys: Iterable[str]) -> list:
     """Valida contra o catálogo oficial e acrescenta as leituras implícitas.
     Chave desconhecida => 400 (nunca vira acesso)."""
-    keys = list(dict.fromkeys(keys or []))
+    keys = expand_legacy(dict.fromkeys(keys or []))
     unknown = [k for k in keys if k not in ALL_KEYS]
     if unknown:
         raise HTTPException(status_code=400, detail=f"Permissão desconhecida: {', '.join(unknown[:5])}")
@@ -323,27 +353,81 @@ async def _bid_create(cur: dict, req: Request) -> None:
         require(cur, "licitacoes.status")
 
 
-_EXEC_STATUS_FIELDS = {"status_atual", "current_step", "timeline"}
+# ---- Execução & Pós-Venda: validação POR CAMPO ----
+# O PUT da execução e o da remessa aceitam vários campos de uma vez: cada campo
+# presente no corpo exige a permissão da sua natureza (mais de um tipo => todas).
+# Campo fora destes grupos => só o principal (deny by default).
+_EXEC_TIMELINE_FIELDS = frozenset({"status_atual", "current_step", "timeline"})
+_EXEC_DEADLINE_FIELDS = frozenset({"tempo_entrega_dias", "prazo_entrega_tipo", "data_referencia_entrega", "data_entrega"})
+_EXEC_ATESTADO_FIELDS = frozenset({"atestado"})
+_EXEC_PAYMENT_FIELDS = frozenset({"pagamento_pendente", "valor_empenho", "valor_compra", "lucro_previsto"})
+EXEC_FIELD_PERMS = {
+    "execution.status": _EXEC_TIMELINE_FIELDS,
+    "execution.deadlines.edit": _EXEC_DEADLINE_FIELDS,
+    "execution.atestado.edit": _EXEC_ATESTADO_FIELDS,
+    "execution.payment.edit": _EXEC_PAYMENT_FIELDS,
+}
+# Remessa: o prazo da remessa continua sendo "Remessas › Editar" (como antes);
+# etapa, atestado e pagamento usam as mesmas permissões da execução.
+REMESSA_FIELD_PERMS = {**EXEC_FIELD_PERMS, "execution.remessas.edit": _EXEC_DEADLINE_FIELDS}
+del REMESSA_FIELD_PERMS["execution.deadlines.edit"]
+
+
+def _timeline_pending(timeline) -> Optional[bool]:
+    """pagamento_pendente que a própria timeline implica (todas concluídas = pago)."""
+    if not isinstance(timeline, list) or not timeline:
+        return None
+    return not all(isinstance(n, dict) and n.get("status") == "Concluído" for n in timeline)
+
+
+def _file_ids(timeline) -> set:
+    return {f.get("id") for n in (timeline if isinstance(timeline, list) else []) if isinstance(n, dict)
+            for f in (n.get("files") or []) if isinstance(f, dict)}
+
+
+def check_exec_fields(cur: dict, body: dict, stored: Optional[dict], field_perms: dict) -> None:
+    fields = {k for k, v in body.items() if v is not None}
+    # O stepper manda junto o pagamento_pendente que a própria timeline implica:
+    # isso é mover etapa, não editar pagamento. Valor diferente => editar pagamento.
+    if "pagamento_pendente" in fields and "timeline" in fields \
+            and body.get("pagamento_pendente") == _timeline_pending(body.get("timeline")):
+        fields.discard("pagamento_pendente")
+    known = set()
+    for key, group in field_perms.items():
+        if fields & group:
+            require(cur, key)
+        known |= group
+    if fields - known and not cur.get("is_owner"):
+        raise forbid()
+    # Anexos legados ficam dentro da timeline: mexer neles é anexar/remover documento.
+    if "timeline" in fields:
+        before, after = _file_ids((stored or {}).get("timeline")), _file_ids(body.get("timeline"))
+        if after - before:
+            require(cur, "execution.docs.attach")
+        if before - after:
+            require(cur, "execution.docs.delete")
 
 
 async def _execution_put(cur: dict, req: Request) -> None:
     body = await _json(req)
-    fields = {k for k, v in body.items() if v is not None}
-    if fields & _EXEC_STATUS_FIELDS:
-        require(cur, "execution.status")
-    if fields - _EXEC_STATUS_FIELDS:
-        require(cur, "execution.edit")
-    if not fields:
-        require(cur, "execution.edit")
+    if not any(v is not None for v in body.values()):
+        require_any(cur, *EXEC_FIELD_PERMS)
+        return
+    stored = await db.executions.find_one({"owner_id": cur["id"], "bid_id": req.path_params.get("bid_id")},
+                                          {"timeline": 1})
+    check_exec_fields(cur, body, stored, EXEC_FIELD_PERMS)
 
 
 async def _remessa_put(cur: dict, req: Request) -> None:
     body = await _json(req)
-    fields = {k for k, v in body.items() if v is not None}
-    if fields & _EXEC_STATUS_FIELDS:
-        require(cur, "execution.status")
-    if fields - _EXEC_STATUS_FIELDS:
-        require(cur, "execution.remessas.edit")
+    if not any(v is not None for v in body.values()):
+        require_any(cur, *REMESSA_FIELD_PERMS)
+        return
+    rid = req.path_params.get("remessa_id")
+    ex = await db.executions.find_one({"owner_id": cur["id"], "bid_id": req.path_params.get("bid_id")},
+                                      {"remessas": 1})
+    stored = next((r for r in ((ex or {}).get("remessas") or []) if isinstance(r, dict) and r.get("id") == rid), None)
+    check_exec_fields(cur, body, stored, REMESSA_FIELD_PERMS)
 
 
 async def _entry_create(cur: dict, req: Request) -> None:

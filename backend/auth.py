@@ -138,7 +138,7 @@ def _decode(token: Optional[str]) -> Optional[dict]:
 async def _principal(payload: dict) -> dict:
     """Valida usuário/conta/versão do token e monta o principal efetivo.
     Levanta 401 em qualquer falha (token antigo, usuário inativo, conta inativa)."""
-    from permissions import ALL_KEYS
+    from permissions import ALL_KEYS, expand_legacy
     try:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
     except Exception:
@@ -160,7 +160,7 @@ async def _principal(payload: dict) -> dict:
             raise HTTPException(status_code=401, detail="Conta indisponível. Contate o administrador.")
         owner_id = str(owner["_id"])
         # Chave desconhecida nunca vira acesso (deny by default).
-        perms = sorted(k for k in (user.get("permissions") or []) if k in ALL_KEYS)
+        perms = sorted(k for k in expand_legacy(user.get("permissions") or []) if k in ALL_KEYS)
         is_owner = False
         account_name = owner.get("name") or ""
     else:

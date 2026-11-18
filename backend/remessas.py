@@ -33,11 +33,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import get_current_user
+from auth import audit, get_current_user
 from db import db, now_iso
 from routes import (
     ATESTADO_DEFAULT, ATESTADO_OPTIONS, DOC_CATEGORIES, STEP_PENDENTE, TIMELINE_STEPS,
-    _enrich_execution, _owned_bid, ser, uid,
+    _EXEC_AUDIT_FIELDS, _enrich_execution, _owned_bid, exec_audit_action, ser, uid,
 )
 
 remessas_router = APIRouter(prefix="/api", tags=["remessas"])
@@ -194,7 +194,7 @@ class RemessaUpdate(BaseModel):
 async def update_remessa(bid_id: str, remessa_id: str, body: RemessaUpdate, current=Depends(get_current_user)):
     """Mesmas regras do PUT da execução, aplicadas SÓ a esta remessa."""
     owner = uid(current)
-    await _require_execution(bid_id, owner)
+    ex = await _require_execution(bid_id, owner)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "atestado" in updates and updates["atestado"] not in ATESTADO_OPTIONS:
         raise HTTPException(status_code=400, detail=f"Atestado inválido. Use: {', '.join(ATESTADO_OPTIONS)}")
@@ -211,6 +211,18 @@ async def update_remessa(bid_id: str, remessa_id: str, body: RemessaUpdate, curr
         )
         if not res.matched_count:
             raise HTTPException(status_code=404, detail="Remessa não encontrada")
+        # Histórico: mesmo registro do PUT da execução, identificando a remessa.
+        before = next((r for r in ex.get("remessas") or [] if r.get("id") == remessa_id), {})
+        if "atestado" in updates and before.get("atestado") not in ATESTADO_OPTIONS:
+            before = {**before, "atestado": ATESTADO_DEFAULT}   # leitura retrocompatível
+        changes = [{"field": k, "label": label, "before": before.get(k), "after": updates[k]}
+                   for k, label in _EXEC_AUDIT_FIELDS.items() if k in updates and before.get(k) != updates[k]]
+        if changes:
+            nome = before.get("nome") or "Remessa"
+            await audit(current, exec_audit_action(changes), module="execucao", entity_type="execucao",
+                        entity_id=bid_id,
+                        entity_label=f"{ex.get('objeto') or ex.get('orgao') or 'Execução'} · {nome}",
+                        changes=changes, metadata={"remessa_id": remessa_id, "remessa": nome})
     return await _response(bid_id, owner)
 
 

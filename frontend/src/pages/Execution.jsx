@@ -180,7 +180,8 @@ export default function Execution() {
   const navigate = useNavigate();
   // Permissões (UX): botões somem / viram leitura; o backend valida cada ação.
   const { can } = useAuth();
-  const canEditExec = can("execution.edit");
+  const canDeadlines = can("execution.deadlines.edit");   // prazo de entrega da licitação
+  const canAtestado = can("execution.atestado.edit");     // status do atestado (licitação e remessas)
   const canStep = can("execution.status");
   const canEditRemessa = can("execution.remessas.edit");
   const canSendRec = can("execution.recebiveis.send");
@@ -595,7 +596,7 @@ export default function Execution() {
             // Com remessas, o prazo exibido é o da remessa em andamento (editado na linha dela).
             prazo: comRemessas
               ? prazoPill(repUnit, `exec-time-${e.bid_id}`, null, `Prazo da ${repUnit.nome} — ajuste na linha da remessa`)
-              : prazoPill(e, `exec-time-${e.bid_id}`, canEditExec ? () => setTimeModal(unitsOf(e)[0]) : null),
+              : prazoPill(e, `exec-time-${e.bid_id}`, canDeadlines ? () => setTimeModal(unitsOf(e)[0]) : null),
             dataEntrega: repUnit.data_entrega,
             empenho: e.valor_empenho,
             compra: e.valor_compra,
@@ -605,7 +606,7 @@ export default function Execution() {
             finLink: comRemessas ? null : finLinks[unitKey(e.bid_id)],
             progress: view.progress,
             progressTestid: `exec-progress-${e.bid_id}`,
-            atestado: <AtestadoDropdown execution={e} readOnly={!canEditExec} onChange={(v) => updateAtestado({ ...e, virtual: true }, v)} />,
+            atestado: <AtestadoDropdown execution={e} readOnly={!canAtestado} onChange={(v) => updateAtestado({ ...e, virtual: true }, v)} />,
             acoes: (
               <>
                 {can("licitacoes.edit") && (
@@ -701,7 +702,7 @@ export default function Execution() {
                           </td>
                           {opsCells({
                             prazo: prazoPill(u, `exec-remessa-time-${e.bid_id}-${u.numero}`,
-                              (u.virtual ? canEditExec : canEditRemessa) ? () => setTimeModal(u) : null, `Prazo de entrega da ${u.nome}`),
+                              (u.virtual ? canDeadlines : canEditRemessa) ? () => setTimeModal(u) : null, `Prazo de entrega da ${u.nome}`),
                             dataEntrega: u.data_entrega,
                             empenho: u.valor_empenho,
                             compra: u.valor_compra,
@@ -710,7 +711,7 @@ export default function Execution() {
                             finLink: u.virtual ? null : finLinks[unitKey(e.bid_id, u.id)],
                             progress: v.progress,
                             progressTestid: `exec-remessa-progress-${e.bid_id}-${u.numero}`,
-                            atestado: <AtestadoDropdown execution={u} testKey={`${e.bid_id}-r${u.numero}`} readOnly={!(u.virtual ? canEditExec : canEditRemessa)}
+                            atestado: <AtestadoDropdown execution={u} testKey={`${e.bid_id}-r${u.numero}`} readOnly={!canAtestado}
                               onChange={(val) => updateAtestado(u, val)} />,
                             acoes: (
                               <>
