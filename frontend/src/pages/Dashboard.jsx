@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Award, Star, Clock, MapPin, Wallet } from "lucide-react";
+import { CalendarDays, Award, Star, Wallet } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { BidsSection } from "@/components/bids/BidsSection";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { hasAnyFinance } from "@/lib/permissions";
-import { colorStyles, findColor } from "@/lib/constants";
+import { TodayTasks } from "@/components/tasks/TodayTasks";
+import { TodayBids } from "@/components/home/TodayBids";
 import { cn } from "@/lib/utils";
 
 const MiniCard = ({ icon: Icon, label, value, accent, testid, delta }) => (
@@ -51,8 +52,8 @@ const toDateStr = (dt) =>
   `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 
 export default function Dashboard() {
-  const { summary, bids, lists } = useData();
-  const { user } = useAuth();
+  const { summary, bids } = useData();
+  const { user, can } = useAuth();
   const navigate = useNavigate();
 
   // Relógio interno (1 min): retira/insere cards da janela sem precisar de F5.
@@ -61,10 +62,6 @@ export default function Dashboard() {
     const t = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(t);
   }, []);
-
-  const DAY_COLORS = ["#18181B", "#1E293B", "#2D283E", "#334155", "#1F2937", "#475569", "#121417"];
-  const dayColor = DAY_COLORS[now.getDay()];
-  const longDate = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
   // Janela de exibição: de (disputa - 24h) até 30 min depois da disputa.
   // Sexta/sábado/domingo também puxam as sessões da segunda (fim de semana sem disputas).
@@ -111,62 +108,15 @@ export default function Dashboard() {
   return (
     <>
       <Header leftContent={financeiroButton} centerContent={headerCards} />
-      <main className="space-y-8 p-6">
-        {/* Seção 2 — Licitações do Dia (Hero Banner dinâmico) */}
-        <section>
-          <div
-            data-testid="hero-banner"
-            style={{ height: 280, width: "100%", backgroundColor: dayColor, transition: "background-color 0.5s ease" }}
-            className="flex flex-col overflow-hidden rounded-2xl p-6"
-          >
-            <div className="mb-4 flex shrink-0 items-center gap-2">
-              <span className="flex h-2.5 w-2.5 animate-pulse-clock rounded-full bg-white/70" />
-              <h2 className="font-heading text-lg font-semibold text-white">Licitações do Dia</h2>
-              <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold text-white">{todayBids.length}</span>
-              <span className="ml-auto text-sm capitalize text-white/60">{longDate}</span>
-            </div>
+      <main className="space-y-5 p-6">
+        {/* 1 — Tarefas do Dia (resumo operacional; a lista completa fica em /tarefas) */}
+        {can("tasks.view") && <TodayTasks />}
 
-            {todayBids.length === 0 ? (
-              <div className="flex flex-1 items-center justify-center text-white/60">
-                Nenhuma sessão de disputa agendada para hoje.
-              </div>
-            ) : (
-              <div className="scrollbar-hide flex flex-1 items-center overflow-x-auto" style={{ gap: 16 }}>
-                {todayBids.map((b) => {
-                  const portalStyle = colorStyles(findColor(lists.portais, b.portal)).badge;
-                  return (
-                    <div
-                      key={b.id}
-                      data-testid={`today-alert-${b.id}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => navigate(`/orcamento/${b.id}`)}
-                      onKeyDown={(e) => e.key === "Enter" && navigate(`/orcamento/${b.id}`)}
-                      title="Abrir orçamento"
-                      className="hero-bid-card flex shrink-0 cursor-pointer flex-col justify-between p-5"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Clock size={22} className="text-brand" />
-                        <span className="font-mono-num text-4xl font-extrabold tracking-tighter text-[#121417]">{b.hora || "--:--"}</span>
-                        {b.uasg && <span className="font-mono-num ml-auto text-[11px] text-[#76777b]">UASG {b.uasg}</span>}
-                      </div>
-                      <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-[#141d23]">{b.objeto}</h3>
-                      <div className="flex items-center gap-2">
-                        <span style={portalStyle} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold">
-                          <MapPin size={11} /> {b.portal}
-                        </span>
-                        {b.pregao && <span className="font-mono-num text-[11px] text-[#76777b]">{b.pregao}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
+        {/* 2 — Licitações do Dia (REF1) */}
+        <TodayBids bids={todayBids} />
 
-        {/* Seção 3 + 4 — Filtros & Tabela */}
-        <section>
+        {/* 3 — Todas as Licitações (sem alterações) */}
+        <section className="pt-1">
           <h2 className="mb-4 font-heading text-lg font-semibold text-foreground">Todas as Licitações</h2>
           <BidsSection />
         </section>

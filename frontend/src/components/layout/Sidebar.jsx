@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Home, ClipboardList, Truck, BarChart3, Settings, Pin, PinOff } from "lucide-react";
+import { Home, ClipboardList, Truck, BarChart3, ListChecks, Settings, Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VorcelMark } from "@/components/layout/VorcelMark";
 import { useAuth } from "@/context/AuthContext";
@@ -10,6 +10,7 @@ const ITEMS = [
   { to: "/licitacoes", icon: ClipboardList, label: "Todas as licitações", testid: "nav-bids", perms: ["licitacoes.view"] },
   { to: "/execucao", icon: Truck, label: "Execução / Pós-Venda", testid: "nav-execution", perms: ["execution.view"] },
   { to: "/analises", icon: BarChart3, label: "Análises", testid: "nav-analytics", perms: ["analytics.view"] },
+  { to: "/tarefas", icon: ListChecks, label: "Tarefas", testid: "nav-tasks", perms: ["tasks.view"] },
   { to: "/configuracoes", icon: Settings, label: "Configurações", testid: "nav-settings" },
 ];
 

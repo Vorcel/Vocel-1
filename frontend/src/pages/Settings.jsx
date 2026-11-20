@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Moon, Sun, Users, Loader2 } from "lucide-react";
+import { User, Building2, Palette, Calculator, ListChecks, Plug, Save, Moon, Sun, Users, UserCheck, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { ListSection } from "@/components/settings/ListSection";
 import { UsersTab } from "@/components/settings/UsersTab";
+import { ResponsiblesTab } from "@/components/settings/ResponsiblesTab";
 import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -187,6 +188,8 @@ const TABS = [
   { id: "orcamento", label: "Padrões de Orçamento", icon: Calculator, perm: "config.preferences.edit" },
   { id: "integracoes", label: "Integrações", icon: Plug, perm: "config.google.manage" },
   { id: "listas", label: "Listas e Parâmetros", icon: ListChecks, perm: "config.lists.edit" },
+  // Cadastro auxiliar das Tarefas — independente de Usuários (não faz login).
+  { id: "responsaveis", label: "Responsáveis", icon: UserCheck, perm: "task_responsibles.view" },
   { id: "usuarios", label: "Usuários", icon: Users, ownerOnly: true },
 ];
 
@@ -248,6 +251,7 @@ export default function Settings() {
               <ListSection tipo="statuses" />
             </TabsContent>
           )}
+          {can("task_responsibles.view") && <TabsContent value="responsaveis"><ResponsiblesTab /></TabsContent>}
           {isOwner && <TabsContent value="usuarios"><UsersTab /></TabsContent>}
         </Tabs>
       </main>

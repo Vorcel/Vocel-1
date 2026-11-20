@@ -12,6 +12,7 @@ import Dashboard from "@/pages/Dashboard";
 import AllBids from "@/pages/AllBids";
 import Execution from "@/pages/Execution";
 import Analytics from "@/pages/Analytics";
+import Tasks from "@/pages/Tasks";
 import Settings from "@/pages/Settings";
 import Budget from "@/pages/Budget";
 import { FinancialLayout } from "@/components/financeiro/FinancialLayout";
@@ -53,6 +54,7 @@ function App() {
                 <Route path="/licitacoes" element={<RequirePerm any={["licitacoes.view"]}><AllBids /></RequirePerm>} />
                 <Route path="/execucao" element={<RequirePerm any={["execution.view"]}><Execution /></RequirePerm>} />
                 <Route path="/analises" element={<RequirePerm any={["analytics.view"]}><Analytics /></RequirePerm>} />
+                <Route path="/tarefas" element={<RequirePerm any={["tasks.view"]}><Tasks /></RequirePerm>} />
                 <Route path="/configuracoes" element={<Settings />} />
                 <Route path="/orcamento/:bidId" element={<RequirePerm any={["orcamento.view"]}><BidBudget /></RequirePerm>} />
                 <Route path="/orcamento/:bidId/remessa/:remessaId" element={<RequirePerm any={["orcamento.view"]}><BidBudget /></RequirePerm>} />

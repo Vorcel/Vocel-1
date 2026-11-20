@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GripVertical, Loader2, Plus, Trash2 } from "lucide-react";
+import { GripVertical, ImageUp, Landmark, Loader2, Plus, Trash2 } from "lucide-react";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
 } from "@dnd-kit/core";
@@ -19,7 +19,7 @@ import { configDoTipo } from "@/components/settings/listTypes";
 import { useData } from "@/context/DataContext";
 import { ANALYTIC_CATEGORIES, DEFAULT_ANALYTIC_CATEGORY } from "@/lib/analytics";
 import { smartTitleCase } from "@/lib/textcase";
-import { formatApiError } from "@/lib/api";
+import api, { fileUrl, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +34,7 @@ const COR_PADRAO = "#0C7B93";
 const NOVO = "__novo__";
 
 const vazio = () => ({
-  nome: "", cor: COR_PADRAO, categoria: DEFAULT_ANALYTIC_CATEGORY, grafico: true, ativo: true,
+  nome: "", cor: COR_PADRAO, categoria: DEFAULT_ANALYTIC_CATEGORY, grafico: true, ativo: true, logo: "",
 });
 const doItem = (it) => ({
   nome: it.nome || "",
@@ -42,7 +42,72 @@ const doItem = (it) => ({
   categoria: it.categoria || DEFAULT_ANALYTIC_CATEGORY,
   grafico: it.grafico !== false,
   ativo: it.ativo !== false,
+  logo: it.logo || "",
 });
+
+// Logo do portal: PNG/JPG/WEBP até 2 MB (o backend valida de novo: extensão,
+// MIME, assinatura do arquivo, tamanho e permissão). Envia na hora e guarda o
+// id no formulário — só vale para o portal depois de "Salvar".
+const LOGO_EXTS = ["png", "jpg", "jpeg", "webp"];
+const LOGO_MAX = 2 * 1024 * 1024;
+
+function PortalLogoField({ value, onChange, testidBase }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [value]);
+
+  const pick = async (file) => {
+    if (!file) return;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (!LOGO_EXTS.includes(ext)) { toast.error("Formato não suportado. Use PNG, JPG ou WEBP."); return; }
+    if (file.size > LOGO_MAX) { toast.error("A imagem excede 2 MB."); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post("/lists/portais/logo", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      onChange(data.id);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label>Logo / Imagem do portal</Label>
+      <div className="flex items-center gap-3">
+        <div data-testid={`${testidBase}-logo-preview`}
+          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white shadow-sm">
+          {value && !broken ? (
+            <img src={fileUrl(value)} alt="Logo do portal" onError={() => setBroken(true)} className="h-full w-full object-contain p-1.5" />
+          ) : (
+            <Landmark size={24} className="text-slate-400" aria-hidden />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input ref={inputRef} type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" className="hidden"
+            data-testid={`${testidBase}-logo-input`} onChange={(e) => pick(e.target.files?.[0])} />
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}
+            data-testid={`${testidBase}-logo-select`}>
+            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <ImageUp size={14} className="mr-1.5" />}
+            {value ? "Trocar imagem" : "Selecionar imagem"}
+          </Button>
+          {value && (
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => onChange("")}
+              data-testid={`${testidBase}-logo-remove`} className="text-alert hover:bg-alert/10 hover:text-alert">
+              Remover
+            </Button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">PNG, JPG ou WEBP, até 2 MB. Sem imagem, os cards usam um ícone genérico.</p>
+    </div>
+  );
+}
 
 // Linha da lista: alça de arraste + bolinha na cor do item + nome (+ categoria).
 function LinhaItem({ item, selecionado, comCategoria, testidBase, onSelect }) {
@@ -168,6 +233,7 @@ export function ListManagerModal({ tipo, open, onOpenChange, modoInicial = "edit
     ativo: form.ativo,
     ...(cfg.comCategoria ? { categoria: form.categoria } : {}),
     ...(cfg.comGrafico ? { grafico: form.grafico } : {}),
+    ...(cfg.comLogo ? { logo: form.logo || "" } : {}),
   });
 
   const salvar = async () => {
@@ -356,6 +422,10 @@ export function ListManagerModal({ tipo, open, onOpenChange, modoInicial = "edit
                     </div>
                   )}
                 </div>
+
+                {cfg.comLogo && (
+                  <PortalLogoField value={form.logo} onChange={(v) => set("logo", v)} testidBase={testidBase} />
+                )}
 
                 {cfg.comGrafico && (
                   <label className="flex w-fit max-w-full cursor-pointer items-start gap-3">

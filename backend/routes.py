@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Any
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel, Field
 
 from db import db, now_iso
@@ -98,6 +98,9 @@ def _normalize_list(items, kind=None):
         # `ativo` vale para qualquer lista: item inativo continua existindo
         # (histórico preservado), só deixa de ser oferecido em novas seleções.
         item["ativo"] = bool(it.get("ativo", True)) if isinstance(it, dict) else True
+        # Logo do portal (id do arquivo no R2) — exibido nos cards "Licitações do Dia".
+        if kind == "portais" and isinstance(it, dict) and it.get("logo"):
+            item["logo"] = str(it["logo"])
         if kind == "statuses":
             cat = it.get("categoria") if isinstance(it, dict) else None
             item["categoria"] = cat if cat in ANALYTIC_CATEGORIES else seed_category_for(item["nome"])
@@ -175,6 +178,7 @@ class ListItemInput(BaseModel):
     categoria: Optional[str] = None   # Categoria Analítica (só para `statuses`)
     ativo: Optional[bool] = None      # status inativo não é oferecido em novas seleções
     grafico: Optional[bool] = None    # participa do gráfico de status (página Análises)
+    logo: Optional[str] = None        # só `portais`: id do arquivo (POST /lists/portais/logo)
 
 
 class ListItemUpdate(BaseModel):
@@ -184,6 +188,16 @@ class ListItemUpdate(BaseModel):
     categoria: Optional[str] = None   # Categoria Analítica (só para `statuses`)
     ativo: Optional[bool] = None
     grafico: Optional[bool] = None
+    logo: Optional[str] = None        # só `portais`: None = manter, "" = remover, id = trocar
+
+
+async def _portal_logo_ok(owner_id: str, file_id: str) -> str:
+    """O logo precisa ser um arquivo DESTA conta enviado pelo endpoint de logo."""
+    rec = await db.files.find_one({"id": file_id, "owner_id": owner_id, "is_deleted": False, "kind": "portal_logo"},
+                                  {"id": 1})
+    if not rec:
+        raise HTTPException(status_code=400, detail="Imagem do portal inválida. Envie a imagem novamente.")
+    return file_id
 
 
 async def _get_params(owner_id: str) -> dict:
@@ -223,6 +237,8 @@ async def add_list_item(list_type: str, body: ListItemInput, current=Depends(get
     nome = body.nome.strip()
     if nome and not any(i["nome"].lower() == nome.lower() for i in items):
         novo = {"nome": nome, "cor": body.cor, "ativo": True if body.ativo is None else bool(body.ativo)}
+        if list_type == "portais" and body.logo:
+            novo["logo"] = await _portal_logo_ok(owner, body.logo)
         if list_type == "statuses":
             # Sem categoria escolhida, o status novo entra em "Outros" — nenhuma
             # licitação some do donut da página Análises.
@@ -247,6 +263,11 @@ async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends
             i["cor"] = body.cor
             if body.ativo is not None:
                 i["ativo"] = bool(body.ativo)
+            if list_type == "portais" and body.logo is not None:
+                if body.logo:
+                    i["logo"] = await _portal_logo_ok(owner, body.logo)
+                else:
+                    i.pop("logo", None)
             if list_type == "statuses":
                 if body.categoria in ANALYTIC_CATEGORIES:
                     i["categoria"] = body.categoria
@@ -258,6 +279,53 @@ async def update_list_item(list_type: str, body: ListItemUpdate, current=Depends
         field = _BID_FIELD[list_type]
         await db.bids.update_many({field: body.old_nome, "owner_id": owner}, {"$set": {field: new_nome}})
     return await get_lists(current)
+
+
+# ---- Logo do portal: upload próprio, validado no servidor (não confia no navegador).
+_LOGO_MAX = 2 * 1024 * 1024
+_LOGO_TYPES = {  # extensão -> (MIME gravado, assinatura dos primeiros bytes)
+    "png": ("image/png", (bytes.fromhex("89504e470d0a1a0a"),)),
+    "jpg": ("image/jpeg", (bytes.fromhex("ffd8ff"),)),
+    "jpeg": ("image/jpeg", (bytes.fromhex("ffd8ff"),)),
+    "webp": ("image/webp", (b"RIFF",)),
+}
+_LOGO_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"}
+
+
+@api.post("/lists/portais/logo")
+async def upload_portal_logo(file: UploadFile = File(...), current=Depends(get_current_user)):
+    """PNG / JPG / WEBP até 2 MB. Valida extensão, MIME declarado e a assinatura
+    real do arquivo (SVG não é aceito: pode carregar script). Grava no R2 pelo
+    mesmo storage do Vorcel (uploads/{conta}/...) e devolve o id do arquivo."""
+    import uuid as _uuid
+    from storage import put_object, APP_NAME
+    name = file.filename or ""
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in _LOGO_TYPES:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use PNG, JPG ou WEBP.")
+    if (file.content_type or "").lower() not in _LOGO_MIMES:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use PNG, JPG ou WEBP.")
+    data = await file.read(_LOGO_MAX + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+    if len(data) > _LOGO_MAX:
+        raise HTTPException(status_code=400, detail="A imagem excede 2 MB.")
+    mime, sigs = _LOGO_TYPES[ext]
+    if not any(data.startswith(sg) for sg in sigs) or (ext == "webp" and data[8:12] != b"WEBP"):
+        raise HTTPException(status_code=400, detail="O conteúdo do arquivo não é uma imagem PNG, JPG ou WEBP válida.")
+    owner = uid(current)
+    path = f"{APP_NAME}/uploads/{owner}/{_uuid.uuid4()}.{ext}"
+    try:
+        put_object(path, data, mime)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Falha no upload da imagem")
+    file_id = str(_uuid.uuid4())
+    await db.files.insert_one({
+        "id": file_id, "storage_path": path, "original_filename": name[:200], "content_type": mime,
+        "size": len(data), "owner_id": owner, "uploaded_by": current.get("actor_id") or owner,
+        "kind": "portal_logo", "is_deleted": False, "created_at": now_iso(),
+    })
+    return {"id": file_id, "content_type": mime, "size": len(data)}
 
 
 class ListReorderInput(BaseModel):
@@ -509,6 +577,8 @@ async def delete_bid(bid_id: str, current=Depends(get_current_user)):
     # Remessas (orçamentos próprios + execução guardada ao encerrar) saem junto.
     await db.remessa_budgets.delete_many({"bid_id": bid_id, "owner_id": owner})
     await db.executions_archive.delete_many({"bid_id": bid_id, "owner_id": owner})
+    # Tarefas vinculadas continuam existindo; perdem só o link (o rótulo fica como histórico).
+    await db.tasks.update_many({"bid_id": bid_id, "owner_id": owner}, {"$set": {"bid_id": None}})
     return {"message": "Licitação removida"}
 
 

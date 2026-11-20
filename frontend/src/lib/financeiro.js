@@ -332,10 +332,22 @@ Object.assign(ACOES, {
   senha_alterada_pelo_usuario: { label: "Senha alterada pelo usuário", tone: "muted" },
   sessoes_encerradas: { label: "Sessões encerradas", tone: "warning" },
   login_realizado: { label: "Login realizado", tone: "muted" },
+  tarefa_criada: { label: "Tarefa criada", tone: "info" },
+  tarefa_editada: { label: "Tarefa editada", tone: "warning" },
+  tarefa_responsavel_alterado: { label: "Responsável da tarefa alterado", tone: "warning" },
+  tarefa_prazo_alterado: { label: "Prazo da tarefa alterado", tone: "warning" },
+  tarefa_status_alterado: { label: "Status da tarefa alterado", tone: "warning" },
+  tarefa_concluida: { label: "Tarefa concluída", tone: "info" },
+  tarefa_reaberta: { label: "Tarefa reaberta", tone: "warning" },
+  tarefa_excluida: { label: "Tarefa excluída", tone: "danger" },
+  responsavel_criado: { label: "Responsável cadastrado", tone: "info" },
+  responsavel_editado: { label: "Responsável editado", tone: "warning" },
+  responsavel_ativado: { label: "Responsável ativado", tone: "info" },
+  responsavel_inativado: { label: "Responsável inativado", tone: "muted" },
 });
 
 export const MODULOS = { pagar: "A Pagar", receber: "A Receber", bancos: "Bancos", dre: "DRE", config: "Configurações", execucao: "Execução",
-  licitacoes: "Licitações", usuarios: "Usuários" };
+  licitacoes: "Licitações", usuarios: "Usuários", tarefas: "Tarefas" };
 
 // Valor legível de um campo alterado no histórico.
 export function changeValue(field, v) {

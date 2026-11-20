@@ -58,6 +58,7 @@ export const TIPOS = {
     duplicado: "Já existe um portal com esse nome.",
     comCategoria: false,
     comGrafico: false,
+    comLogo: true,   // logo exibido nos cards "Licitações do Dia"
   },
   modalidades: {
     testid: "modalidade",

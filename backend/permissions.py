@@ -31,6 +31,19 @@ CATALOG = [
         {"id": "analytics", "label": "Análises", "actions": [
             ("analytics.view", "Visualizar análises"),
         ]},
+        {"id": "tasks", "label": "Tarefas", "actions": [
+            ("tasks.view", "Visualizar tarefas"),
+            ("tasks.create", "Criar tarefa"),
+            ("tasks.edit", "Editar tarefa (descrição, responsável, prioridade, prazo, vínculo)"),
+            ("tasks.complete", "Alterar status / concluir / reabrir"),
+            ("tasks.delete", "Excluir tarefa"),
+        ]},
+        {"id": "task_responsibles", "label": "Responsáveis de tarefas (cadastro)", "actions": [
+            ("task_responsibles.view", "Visualizar cadastro de responsáveis"),
+            ("task_responsibles.create", "Cadastrar responsável"),
+            ("task_responsibles.edit", "Editar responsável"),
+            ("task_responsibles.deactivate", "Ativar / inativar responsável"),
+        ]},
     ]},
     {"group": "Licitações", "modules": [
         {"id": "licitacoes", "label": "Licitações (participações)", "actions": [
@@ -505,6 +518,32 @@ async def _prefs_put(cur: dict, req: Request) -> None:
         require(cur, "config.preferences.edit")
 
 
+async def _task_put(cur: dict, req: Request) -> None:
+    """Status = tasks.complete; qualquer outro campo = tasks.edit (por campo)."""
+    body = await _json(req)
+    if "status" in body:
+        require(cur, "tasks.complete")
+    if any(k != "status" for k in body):
+        require(cur, "tasks.edit")
+    if not body:
+        require_any(cur, "tasks.edit", "tasks.complete")
+
+
+async def _responsible_put(cur: dict, req: Request) -> None:
+    """Nome = task_responsibles.edit; ativo/inativo = task_responsibles.deactivate."""
+    body = await _json(req)
+    if "name" in body:
+        require(cur, "task_responsibles.edit")
+    if "active" in body:
+        require(cur, "task_responsibles.deactivate")
+    if not body:
+        require_any(cur, "task_responsibles.edit", "task_responsibles.deactivate")
+
+
+async def _task_create(cur: dict, req: Request) -> None:
+    require(cur, "tasks.create")
+
+
 def _ex(*keys: str):
     """Exige TODAS as chaves."""
     async def rule(cur: dict, req: Request) -> None:
@@ -594,6 +633,19 @@ RULES: Dict[Tuple[str, str], Rule] = {
     ("DELETE", "/api/executions/{bid_id}/remessas/{remessa_id}"): "execution.remessas.delete",
     # ---------------- análises
     ("GET", "/api/analytics"): "analytics.view",
+    # ---------------- tarefas
+    ("GET", "/api/tasks"): "tasks.view",
+    ("GET", "/api/tasks/summary"): "tasks.view",
+    # Responsáveis: leitura dos ativos para o modal/filtros (tasks.view) ou para a
+    # tela de Configurações (task_responsibles.view). Não depende de usuários.
+    ("GET", "/api/tasks/responsibles"): ("tasks.view", "task_responsibles.view"),
+    ("POST", "/api/tasks/responsibles"): "task_responsibles.create",
+    ("PUT", "/api/tasks/responsibles/{rid}"): _responsible_put,
+    ("POST", "/api/tasks"): _task_create,
+    ("PUT", "/api/tasks/{task_id}"): _task_put,
+    ("DELETE", "/api/tasks/{task_id}"): "tasks.delete",
+    # ---------------- logo dos portais
+    ("POST", "/api/lists/portais/logo"): "config.lists.edit",
     # ---------------- Google Drive
     ("GET", "/api/integrations/google/status"): AUTHED,
     ("GET", "/api/integrations/google/auth-url"): "config.google.manage",

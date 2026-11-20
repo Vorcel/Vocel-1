@@ -32,6 +32,7 @@ export const ROUTE_PERMS = [
   { path: "/licitacoes", perms: ["licitacoes.view"] },
   { path: "/execucao", perms: ["execution.view"] },
   { path: "/analises", perms: ["analytics.view"] },
+  { path: "/tarefas", perms: ["tasks.view"] },
   { path: "/rascunho", perms: ["rascunho.use"] },
   { path: "/financeiro", perms: ["finance.overview.view"] },
   { path: "/financeiro/pagar", perms: ["finance.pagar.view"] },

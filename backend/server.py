@@ -21,6 +21,7 @@ from financeiro import fin_router, create_indexes as create_fin_indexes
 from fin_recebiveis import rec_router
 from fin_dre import dre_router
 from fin_contatos import contacts_router, create_contact_indexes
+from tasks import tasks_router, create_task_indexes, migrate_task_responsibles
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ app = FastAPI(title="Sistema de Licitações")
 _AUTHZ = [Depends(enforce)]
 for _router in (auth_router, users_router, files_router, core_router, propostas_router, gdrive_router,
                 analytics_router, budget_router, remessas_router, fin_router, dre_router, rec_router,
-                contacts_router):
+                contacts_router, tasks_router):
     app.include_router(_router, dependencies=_AUTHZ)
 
 app.add_middleware(
@@ -165,6 +166,7 @@ async def startup():
         # únicos que impedem recebível/lançamento duplicado (ver financeiro.py).
         await create_fin_indexes()
         await create_contact_indexes()
+        await create_task_indexes()
     except Exception as e:
         logger.warning(f"Financeiro index creation: {e}")
     await seed_admin()
@@ -179,6 +181,12 @@ async def startup():
         await migrate_owner_isolation()
     except Exception as e:
         logger.error(f"Owner isolation migration failed: {e}")
+    try:
+        n = await migrate_task_responsibles()
+        if n:
+            logger.info(f"Task responsibles migration: {n} tasks converted")
+    except Exception as e:
+        logger.error(f"Task responsibles migration failed: {e}")
     try:
         await migrate_add_status("Encerrado", "#475569", "_encerrado_seeded")
     except Exception as e:

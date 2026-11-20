@@ -160,19 +160,27 @@ body {
     vertical-align: middle;
 }
 
-/* Hero Banner "Licitações do Dia" — floating fixed-size cards */
-.hero-bid-card {
-    height: 9rem;
-    width: 22rem;
-    min-width: 22rem;
-    background: #ffffff;
-    border-radius: 16px;
-    box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.2);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+/* Cards "Licitações do Dia" (REF1): borda fina em gradiente ao redor de todo o
+   card (border-box) com interior claro (padding-box). Cores por card via vars. */
+.today-bid-card {
+    border: 1.5px solid transparent;
+    background: linear-gradient(var(--tb-bg), var(--tb-bg)) padding-box, var(--tb-border) border-box;
+    box-shadow: var(--tb-shadow);
 }
-.hero-bid-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0px 12px 32px rgba(0, 0, 0, 0.3);
+.dark .today-bid-card { --tb-bg: hsl(var(--card)) !important; }
+.today-bids-scroll { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+.today-bids-scroll::-webkit-scrollbar { height: 6px; }
+.today-bids-scroll::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
+.today-bids-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* Prazo da tarefa a menos de 30 min: pulse MUITO suave só no ícone do indicador. */
+@keyframes task-deadline-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.92); }
+}
+.task-deadline-pulse { animation: task-deadline-pulse 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+    .task-deadline-pulse { animation: none; }
 }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
