@@ -17,6 +17,7 @@ export const statusLabel = (v) => TASK_STATUSES.find((s) => s.value === v)?.labe
 export const priorityLabel = (v) => TASK_PRIORITIES.find((p) => p.value === v)?.label || v;
 
 export const HOME_SCOPES = [
+  { key: "todos", label: "Todos" },
   { key: "hoje", label: "Hoje" },
   { key: "amanha", label: "Amanhã" },
   { key: "proximos2", label: "Próximos 2 dias" },
@@ -24,6 +25,7 @@ export const HOME_SCOPES = [
 ];
 export const PAGE_SCOPES = [
   { key: "todas", label: "Todas" },
+  { key: "todos", label: "Todos" },
   { key: "hoje", label: "Hoje" },
   { key: "amanha", label: "Amanhã" },
   { key: "proximos", label: "Próximos dias" },

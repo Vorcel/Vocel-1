@@ -52,7 +52,7 @@ TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 HOME_MAX = 10           # a home nunca mostra mais que 10
 PAGE_SIZES = (5, 10, 25, 50)
-HOME_SCOPES = ("hoje", "amanha", "proximos2", "semana")
+HOME_SCOPES = ("todos", "hoje", "amanha", "proximos2", "semana")
 PAGE_SCOPES = ("todas", "hoje", "amanha", "proximos", "semana")
 
 # Campos de edição comum (tasks.edit). Status é tasks.complete.
@@ -167,10 +167,14 @@ def _scope_query(scope: str, today: datetime, home: bool = False) -> dict:
     - amanha: data final = amanhã.
     - proximos2: os DOIS dias depois de amanhã (home).
     - proximos: de depois de amanhã em diante (página completa).
+    - todos (home): todas as abertas + concluídas hoje.
     - semana: segunda a domingo da semana corrente. Na home, concluídas seguem a
       regra de sempre (só aparecem até o fim do dia em que foram concluídas);
       na página completa aparecem todas (histórico)."""
     t0, t1, t2, t3 = (day_str(today, i) for i in range(4))
+    if scope == "todos":
+        # Home: todas as abertas (qualquer data) + concluídas HOJE (riscadas até o fim do dia).
+        return {"$or": [{"status": {"$ne": DONE}}, {"completed_date": t0}]}
     if scope == "hoje":
         return {"$or": [
             {"due_date": t0},
@@ -327,7 +331,7 @@ async def update_responsible(rid: str, body: ResponsibleUpdate, current=Depends(
 
 # ------------------------------------------------------------ tarefas
 @tasks_router.get("/summary")
-async def tasks_summary(scope: str = Query("hoje"), limit: int = Query(HOME_MAX, ge=1, le=HOME_MAX),
+async def tasks_summary(scope: str = Query("todos"), limit: int = Query(HOME_MAX, ge=1, le=HOME_MAX),
                         current=Depends(get_current_user)):
     """Resumo da home: contadores dos filtros + até `limit` (máx. 10) tarefas do
     filtro escolhido, já ordenadas por urgência. Nada é filtrado no navegador."""

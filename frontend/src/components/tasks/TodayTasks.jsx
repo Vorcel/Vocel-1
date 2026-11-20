@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 const COLLAPSED = 5;
 const EXPANDED = 10;   // teto da home — o resto fica em "Ver todas as tarefas"
-const EMPTY = { hoje: "Nenhuma tarefa para hoje.", amanha: "Nenhuma tarefa para amanhã.", proximos2: "Nenhuma tarefa nos próximos 2 dias.", semana: "Nenhuma tarefa nesta semana." };
+const EMPTY = { todos: "Nenhuma tarefa em aberto.", hoje: "Nenhuma tarefa para hoje.", amanha: "Nenhuma tarefa para amanhã.", proximos2: "Nenhuma tarefa nos próximos 2 dias.", semana: "Nenhuma tarefa nesta semana." };
 
 // Pílula de filtro (ref2): selecionada = preenchida; demais = contorno discreto.
 export const ScopePill = ({ active, onClick, children, testid }) => (
@@ -48,7 +48,7 @@ export const NewTaskButton = ({ onClick, testid = "new-task-button" }) => (
 export function TodayTasks() {
   const { can } = useAuth();
   const now = useNow();
-  const [scope, setScope] = useState("hoje");
+  const [scope, setScope] = useState("todos"); // filtro NÃO persiste: toda abertura/F5 volta para Todos
   const [data, setData] = useState({ items: [], counts: {}, total: 0, today: null });
   const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState({ open: false, task: null });
