@@ -1,5 +1,9 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, Check, ChevronDown, Clock, AlertTriangle, AlarmClock } from "lucide-react";
+import { toast } from "sonner";
+import { CalendarDays, Check, ChevronDown, Clock, AlertTriangle, AlarmClock, Trash2 } from "lucide-react";
+import api, { formatApiError } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -130,11 +134,29 @@ export const PregaoTag = ({ task, clickable, done, onOpen, testid }) => {
   );
 };
 
-export function TaskTable({ tasks, now, onEdit, onStatus, showDetails = false, testid = "tasks-table", emptyText }) {
+export function TaskTable({ tasks, now, onEdit, onStatus, onDeleted, showDetails = false, testid = "tasks-table", emptyText }) {
   const { can } = useAuth();
   const navigate = useNavigate();
   const canComplete = can("tasks.complete");
   const canSeeBids = can("licitacoes.view") && can("orcamento.view");
+  // Lixeira no fim da linha (só com tasks.delete) → confirmação antes de excluir.
+  const canDelete = can("tasks.delete");
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const colCount = COLS.length + (canDelete ? 1 : 0);
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/tasks/${toDelete.id}`);
+      toast.success("Tarefa excluída.");
+      setToDelete(null);
+      onDeleted?.();
+    } catch (e) {
+      if (e.response?.status !== 403) toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -146,17 +168,19 @@ export function TaskTable({ tasks, now, onEdit, onStatus, showDetails = false, t
           <col className="w-[110px]" />
           <col className="w-[200px]" />
           <col className="w-[140px]" />
+          {canDelete && <col className="w-[44px]" />}
         </colgroup>
         <thead>
           <tr className="bg-muted/60 text-left text-[12.5px] font-semibold text-foreground/80">
             {COLS.map((c, i) => (
-              <th key={c} scope="col" className={cn("px-3 py-2 font-semibold", i === 0 && "rounded-l-lg pl-4", i === COLS.length - 1 && "rounded-r-lg")}>{c}</th>
+              <th key={c} scope="col" className={cn("px-3 py-2 font-semibold", i === 0 && "rounded-l-lg pl-4", i === COLS.length - 1 && !canDelete && "rounded-r-lg")}>{c}</th>
             ))}
+            {canDelete && <th scope="col" className="rounded-r-lg px-1 py-2"><span className="sr-only">Excluir</span></th>}
           </tr>
         </thead>
         <tbody>
           {tasks.length === 0 && (
-            <tr><td colSpan={COLS.length} className="px-4 py-6 text-center text-xs text-muted-foreground">{emptyText || "Nenhuma tarefa."}</td></tr>
+            <tr><td colSpan={colCount} className="px-4 py-6 text-center text-xs text-muted-foreground">{emptyText || "Nenhuma tarefa."}</td></tr>
           )}
           {tasks.map((t) => {
             const done = t.status === "concluida";
@@ -212,11 +236,30 @@ export function TaskTable({ tasks, now, onEdit, onStatus, showDetails = false, t
                 <td className={cn("px-3 py-1.5", done && "opacity-60")}><PriorityBadge priority={t.priority} /></td>
                 <td className="px-3 py-1.5"><DeadlineBadge task={t} now={now} testid={`${testid}-deadline-${t.id}`} /></td>
                 <td className="whitespace-nowrap px-3 py-1.5 font-mono-num text-foreground/80">{formatDueFull(t)}</td>
+                {canDelete && (
+                  <td className="px-1 py-1.5 text-center">
+                    <button type="button" onClick={() => setToDelete(t)} data-testid={`${testid}-delete-${t.id}`}
+                      aria-label={`Excluir: ${t.title}`} title="Excluir tarefa"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 dark:hover:bg-red-500/10 dark:hover:text-red-400">
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+      <ConfirmDialog
+        open={!!toDelete}
+        onOpenChange={(o) => !o && setToDelete(null)}
+        title="Excluir tarefa?"
+        description={`Tem certeza de que deseja excluir a tarefa "${toDelete?.title || ""}"? Esta ação não pode ser desfeita.`}
+        confirmLabel="Excluir"
+        loading={deleting}
+        onConfirm={remove}
+        testid={`${testid}-confirm-delete`}
+      />
     </div>
   );
 }

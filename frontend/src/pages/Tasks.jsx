@@ -119,6 +119,7 @@ export default function Tasks() {
             showDetails
             onEdit={(t) => setModal({ open: true, task: t })}
             onStatus={onStatus}
+            onDeleted={load}
             testid="tasks-table"
             emptyText={loaded ? "Nenhuma tarefa encontrada." : "Carregando…"}
           />

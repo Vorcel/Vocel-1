@@ -110,6 +110,7 @@ export function TodayTasks() {
         now={now}
         onEdit={(t) => setModal({ open: true, task: t })}
         onStatus={onStatus}
+        onDeleted={load}
         testid="today-tasks-table"
         emptyText={loaded ? EMPTY[scope] : "Carregando…"}
       />
