@@ -72,6 +72,7 @@ class _Banco:
         self.executions = _Colecao(executions)
         self.budgets = _Colecao(budgets)
         self.params = _Colecao(params)
+        self.remessa_budgets = _Colecao([])   # sem remessas nesta massa de teste
 
 
 # -------------------- massa de teste --------------------

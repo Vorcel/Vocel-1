@@ -68,22 +68,25 @@ export function RecebivelButton({ link, testid, onClick }) {
   );
 }
 
-// target = { bidId, remessaId, nome, valorCents, link }
-export function RecebivelModal({ target, onClose, onChanged }) {
+// target = { bidId, remessaId, nome, valorCents (empenho fixo), empenhoInformado, link }
+// O valor enviado é SEMPRE o empenho fixo da unidade (não editável aqui).
+export function RecebivelModal({ target, onClose, onChanged, onSolicitarAtualizacao }) {
   const link = target?.link;
   const estado = link?.estado || "nao_enviado";
   const podeEnviar = ["nao_enviado", "rejeitado", "cancelado"].includes(estado);
-  const [valor, setValor] = useState("");
   const [obs, setObs] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (target) { setValor(centsToInput(target.valorCents || 0)); setObs(""); } }, [target]);
+  useEffect(() => { if (target) setObs(""); }, [target]);
   if (!target) return null;
+  const empenho = target.empenhoInformado ? target.valorCents : null;
+  // Empenho mudou depois do recebível aprovado e o Financeiro ficou com o valor antigo.
+  const vinculado = ["aprovado", "parcial", "recebido"].includes(estado);
+  const divergeFin = vinculado && empenho != null && link.entry_amount_cents !== empenho;
   const enviar = async () => {
-    const c = parseMoney(valor);
-    if (!c || c <= 0) { toast.error("Informe um valor maior que zero."); return; }
+    if (!empenho || empenho <= 0) { toast.error("Informe o valor do empenho antes de enviar ao Financeiro."); return; }
     setBusy(true);
     try {
-      await finApi.enviarSolicitacao({ bid_id: target.bidId, remessa_id: target.remessaId || null, amount: (c / 100).toFixed(2), notes: obs || null });
+      await finApi.enviarSolicitacao({ bid_id: target.bidId, remessa_id: target.remessaId || null, amount: (empenho / 100).toFixed(2), notes: obs || null });
       toast.success("Enviado ao Financeiro — aguardando aprovação");
       await onChanged();
       onClose();
@@ -127,12 +130,29 @@ export function RecebivelModal({ target, onClose, onChanged }) {
               <p className="mt-1 text-xs text-red-700">Corrija o que for preciso e envie novamente.</p>
             </div>
           )}
+          {vinculado && link.update_pending && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800" data-testid="exec-recebivel-atualizacao-pendente">
+              Solicitação de atualização para {money(link.update_amount_cents)} aguardando o Financeiro.
+            </p>
+          )}
+          {divergeFin && !link.update_pending && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-800" data-testid="exec-recebivel-divergente">
+              <p>O valor no Financeiro ({money(link.entry_amount_cents)}) é diferente do empenho atual ({money(empenho)}).</p>
+              {onSolicitarAtualizacao && (
+                <button type="button" data-testid="exec-recebivel-solicitar-atualizacao" className="mt-1 font-semibold text-red-700 underline-offset-2 hover:underline"
+                  onClick={() => onSolicitarAtualizacao({ bidId: target.bidId, remessaId: target.remessaId || null, nome: target.nome,
+                    antes: link.entry_amount_cents, depois: empenho })}>
+                  Solicitar atualização ao Financeiro
+                </button>
+              )}
+            </div>
+          )}
           {podeEnviar && (
             <>
               <div>
-                <Label className="mb-1 block">Valor a receber</Label>
-                <Input value={valor} onChange={(e) => setValor(e.target.value)} inputMode="decimal" data-testid="exec-recebivel-valor" />
-                <p className="mt-1 text-xs text-muted-foreground">Sugerido: empenho {target.remessaId ? "da remessa" : "da licitação"} ({money(target.valorCents)}).</p>
+                <Label className="mb-1 block">Valor a receber (empenho)</Label>
+                <p className="font-mono-num text-lg font-semibold text-foreground" data-testid="exec-recebivel-valor">{empenho == null ? "Empenho não informado" : money(empenho)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">É o valor do empenho {target.remessaId ? "da remessa" : "da licitação"}. Para mudar, altere o empenho na tabela.</p>
               </div>
               <div>
                 <Label className="mb-1 block">Observação para o Financeiro (opcional)</Label>
@@ -146,7 +166,7 @@ export function RecebivelModal({ target, onClose, onChanged }) {
           <Button variant="outline" onClick={onClose} disabled={busy}>Fechar</Button>
           {estado === "enviado" && <Button variant="outline" onClick={retirar} disabled={busy} data-testid="exec-recebivel-retirar">Retirar solicitação</Button>}
           {podeEnviar && (
-            <Button onClick={enviar} disabled={busy} data-testid="exec-recebivel-enviar" className="bg-[#0F6B5C] hover:bg-[#0B564A]">
+            <Button onClick={enviar} disabled={busy || empenho == null} data-testid="exec-recebivel-enviar" className="bg-[#0F6B5C] hover:bg-[#0B564A]">
               {busy && <Loader2 size={15} className="mr-1.5 animate-spin" />}{estado === "nao_enviado" ? "Enviar para Recebíveis" : "Reenviar"}
             </Button>
           )}

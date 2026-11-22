@@ -322,12 +322,13 @@ async def _reorder(scope: _Scope, body: RowsOrderInput) -> dict:
 
 
 async def _propagate_execution(bid_id: str, owner: str, summary: dict) -> None:
-    """Mesma propagação de sempre para a Execução vinculada (se existir)."""
+    """Propaga a COMPRA para a Execução vinculada (se existir). O EMPENHO nunca
+    vem do orçamento: é o valor fixo gravado em empenho_cents (ver empenho.py) —
+    a tela calcula Compra/Lucro/conferência na leitura (_enrich_execution)."""
     s = summary or {}
     await db.executions.update_one(
         {"bid_id": bid_id, "owner_id": owner},
         {"$set": {
-            "valor_empenho": s.get("valor_total", 0),
             "valor_compra": s.get("custo_global", 0),
             "lucro_previsto": s.get("lucro_global", 0),
         }},

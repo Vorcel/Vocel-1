@@ -28,13 +28,14 @@ Escritas concorrentes: campos de UMA remessa são gravados com `$set` posicional
 lista inteira. Isolamento: toda consulta filtra `owner_id` do usuário logado."""
 import copy
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import audit, get_current_user
 from db import db, now_iso
+from empenho import EMPENHO_FIELDS, audit_empenho, empenho_set, parse_empenho
 from routes import (
     ATESTADO_DEFAULT, ATESTADO_OPTIONS, DOC_CATEGORIES, STEP_PENDENTE, TIMELINE_STEPS,
     _EXEC_AUDIT_FIELDS, _enrich_execution, _owned_bid, exec_audit_action, ser, uid,
@@ -47,6 +48,8 @@ _OPERATIONAL = (
     "timeline", "current_step", "status_atual", "atestado", "documentos",
     "tempo_entrega_dias", "prazo_entrega_tipo", "data_referencia_entrega",
     "data_entrega", "pagamento_pendente",
+    # O empenho fixo da execução passa a ser o da Remessa 1 (mesma unidade).
+    *EMPENHO_FIELDS,
 )
 
 
@@ -126,6 +129,7 @@ def _remessa_doc(numero: int, origem: str, base: Optional[dict] = None, defaults
 
 class RemessaCreateInput(BaseModel):
     base: str = "original"   # "original" | "anterior"
+    empenho: Optional[Any] = None   # valor do empenho da NOVA remessa (obrigatório)
 
 
 @remessas_router.post("/executions/{bid_id}/remessas")
@@ -133,6 +137,12 @@ async def create_remessa(bid_id: str, body: RemessaCreateInput, current=Depends(
     owner = uid(current)
     if body.base not in ("original", "anterior"):
         raise HTTPException(status_code=400, detail="Base inválida. Use: original, anterior")
+    empenho_cents = parse_empenho(body.empenho)
+
+    def com_empenho(nova: dict) -> dict:
+        f = empenho_set(current, nova, empenho_cents, "remessa_criada", confirmar=False, acao="informado")
+        f["empenho_historico"] = [f.pop("_hist")]
+        return {**nova, **f}
     for _ in range(3):
         ex = await _require_execution(bid_id, owner)
         remessas = list(ex.get("remessas") or [])
@@ -142,7 +152,7 @@ async def create_remessa(bid_id: str, body: RemessaCreateInput, current=Depends(
             # Primeira remessa nova: a execução atual vira a Remessa 1 (nada se perde —
             # os campos da execução continuam gravados como estavam) e nasce a Remessa 2.
             r1 = _remessa_doc(1, "execucao", base=ex)
-            nova = _remessa_doc(2, "original", defaults=ex)
+            nova = com_empenho(_remessa_doc(2, "original", defaults=ex))
             await _insert_budget(owner, bid_id, r1["id"], original, "original")
             await _insert_budget(owner, bid_id, nova["id"], original, "original")
             res = await db.executions.update_one(
@@ -151,6 +161,7 @@ async def create_remessa(bid_id: str, body: RemessaCreateInput, current=Depends(
                 {"$set": {"remessas": [r1, nova], "remessas_seq": 2, "remessas_desde": now_iso()}},
             )
             if res.matched_count:
+                await _audit_nova(current, ex, nova, empenho_cents)
                 return await _response(bid_id, owner)
             await db.remessa_budgets.delete_many({"remessa_id": {"$in": [r1["id"], nova["id"]]}, "owner_id": owner})
             continue
@@ -163,7 +174,7 @@ async def create_remessa(bid_id: str, body: RemessaCreateInput, current=Depends(
             origem = f"remessa:{anterior['id']}"
         else:
             source, origem = original, "original"
-        nova = _remessa_doc(seq + 1, origem, defaults=ex)
+        nova = com_empenho(_remessa_doc(seq + 1, origem, defaults=ex))
         await _insert_budget(owner, bid_id, nova["id"], source, origem)
         # $push (não regrava as remessas existentes) + compare-and-set no contador:
         # duas criações simultâneas nunca recebem o mesmo número.
@@ -173,9 +184,15 @@ async def create_remessa(bid_id: str, body: RemessaCreateInput, current=Depends(
             {"$push": {"remessas": nova}, "$set": {"remessas_seq": seq + 1}},
         )
         if res.matched_count:
+            await _audit_nova(current, ex, nova, empenho_cents)
             return await _response(bid_id, owner)
         await db.remessa_budgets.delete_one({"remessa_id": nova["id"], "owner_id": owner})
     raise HTTPException(status_code=409, detail="Execução alterada ao mesmo tempo. Tente novamente.")
+
+
+async def _audit_nova(current: dict, ex: dict, nova: dict, cents: int) -> None:
+    await audit_empenho(current, "informado", bid_id=ex["bid_id"], label=ex.get("objeto") or "Execução",
+                        before=None, after=cents, origem="remessa_criada", etapa=nova.get("status_atual"), remessa=nova)
 
 
 class RemessaUpdate(BaseModel):

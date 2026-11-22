@@ -17,6 +17,7 @@ from gdrive import gdrive_router
 from analytics import analytics_router
 from budget_sync import budget_router
 from remessas import remessas_router
+from empenho import empenho_router
 from financeiro import fin_router, create_indexes as create_fin_indexes
 from fin_recebiveis import rec_router
 from fin_dre import dre_router
@@ -35,7 +36,7 @@ app = FastAPI(title="Sistema de Licitações")
 # (rota sem regra = negada). Login/callback OAuth são marcados como públicos lá.
 _AUTHZ = [Depends(enforce)]
 for _router in (auth_router, users_router, files_router, core_router, propostas_router, gdrive_router,
-                analytics_router, budget_router, remessas_router, fin_router, dre_router, rec_router,
+                analytics_router, budget_router, remessas_router, empenho_router, fin_router, dre_router, rec_router,
                 contacts_router, tasks_router):
     app.include_router(_router, dependencies=_AUTHZ)
 

@@ -87,8 +87,10 @@ export function DataProvider({ children }) {
     await refreshExecutions();
     return data;
   };
-  const changeStatus = async (id, status) => {
-    await api.patch(`/bids/${id}/status`, { status });
+  // Entrar em "Adjudicado" exige o valor do empenho confirmado no pop-up
+  // (EmpenhoAdjudicacaoDialog); o backend recusa sem ele.
+  const changeStatus = async (id, status, extra = {}) => {
+    await api.patch(`/bids/${id}/status`, { status, ...extra });
     await refreshBids();
     await refreshExecutions();
   };
@@ -185,9 +187,17 @@ export function DataProvider({ children }) {
   // ---- Remessas da execução (backend: remessas.py) ----
   // Mesmas estratégias acima, aplicadas a UMA remessa: o backend sempre devolve a
   // execução inteira enriquecida (com o consolidado das remessas).
-  const createRemessa = async (bidId, base) => {
-    const { data } = await api.post(`/executions/${bidId}/remessas`, { base });
+  const createRemessa = async (bidId, base, empenho) => {
+    const { data } = await api.post(`/executions/${bidId}/remessas`, { base, empenho });
     return applyExecution(data);
+  };
+  // Valor do EMPENHO (fixo): confirmar o valor gravado ou alterar. Devolve também
+  // o vínculo financeiro, para a tela perguntar se envia a solicitação ao Financeiro.
+  const saveEmpenho = async (bidId, remessaId, body) => {
+    const url = remessaId ? `/executions/${bidId}/remessas/${remessaId}/empenho` : `/executions/${bidId}/empenho`;
+    const { data } = await api.put(url, body);
+    applyExecution(data.execution);
+    return data;
   };
   const updateRemessa = async (bidId, remessaId, patch) => {
     setExecutions((prev) => prev.map((e) => (e.bid_id === bidId
@@ -337,7 +347,7 @@ export function DataProvider({ children }) {
         connectGoogle, createDriveFolder, disconnectGoogle,
         createBid, updateBid, changeStatus, toggleFavorite, updateObservacoes, deleteBid,
         updateExecution, addExecutionDoc, removeExecutionDoc,
-        createRemessa, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc,
+        createRemessa, saveEmpenho, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc,
         addBidAnexo, removeBidAnexo,
         uploadProposta, replaceProposta, removeProposta, syncProposta,
         addListItem, removeListItem, updateListItem, reorderList, savePrefs, saveCompany, saveTableSort, saveTablePageSize, saveExecutionGroup,

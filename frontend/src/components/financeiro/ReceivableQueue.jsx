@@ -58,6 +58,12 @@ export function ReceivableQueue({ items, loading, limit, compact }) {
                 <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>
                   {[sn.pregao && `Pregão ${sn.pregao}`, sn.remessa_nome, `Execução · ${relativeTime(r.sent_at)}`].filter(Boolean).join(" · ")}
                 </p>
+                {r.updated_after_send && r.original_amount_cents != null && (
+                  <p className="mt-0.5 truncate text-xs" style={{ color: "var(--fin-ink-3)" }} data-testid={`fin-queue-atualizado-${r.id}`}
+                    title={`Enviado originalmente com ${money(r.original_amount_cents)}; valor atualizado pela Execução antes da aprovação.`}>
+                    Atualizado após o envio · enviado com {money(r.original_amount_cents)}
+                  </p>
+                )}
                 {mudou && !compact && <p className="mt-0.5 text-xs font-medium" style={{ color: "var(--fin-warning)" }}>Valor na Execução agora: {money(r.valor_execucao_atual_cents)}</p>}
               </div>
               <Money cents={r.amount_cents} flow="in" strong className="shrink-0 text-sm" />
@@ -219,8 +225,9 @@ function RejectModal({ request: r, onClose }) {
   );
 }
 
-// "Alteração recebida da Execução": valor mudou depois da aprovação. Nunca é
-// aplicado sozinho — o Financeiro escolhe Ignorar ou Atualizar recebível.
+// "Alteração recebida da Execução": a Execução ENVIOU uma solicitação de
+// atualização do valor do empenho (nunca é detectado nem aplicado sozinho). O
+// Financeiro escolhe Ignorar ou Atualizar valor — no MESMO lançamento.
 export function ExecutionUpdates({ updates }) {
   const { bump } = useFinance();
   const { can } = useAuth();
@@ -230,32 +237,44 @@ export function ExecutionUpdates({ updates }) {
     setBusy(u.request_id + action);
     try {
       await finApi.decidirAtualizacao(u.request_id, { action, valor_novo_cents: u.valor_novo_cents, include_settled: includeSettled });
-      toast.success(action === "aplicar" ? "Recebível atualizado" : "Alteração ignorada");
+      toast.success(action === "aplicar" ? "Valor do recebível atualizado" : "Solicitação ignorada");
       setConfirmSettled(null);
       bump();
     } catch (e) {
-      if (apiErrorCode(e) === "settled") setConfirmSettled(u); else toast.error(apiError(e));
+      if (apiErrorCode(e) === "settled") setConfirmSettled(u); else { toast.error(apiError(e)); setConfirmSettled(null); }
     } finally { setBusy(null); }
   };
   if (!updates.length) return null;
   const podeDecidir = can("finance.receber.approve");
   return (
     <div className="space-y-2" data-testid="fin-exec-updates">
-      {updates.map((u) => (
-        <div key={u.request_id} className="rounded-xl border p-3" style={{ borderColor: "var(--fin-warning)", background: "var(--fin-warning-soft)" }}>
+      {updates.map((u) => {
+        const dif = u.diferenca_cents ?? (u.valor_novo_cents - u.valor_anterior_cents);
+        return (
+        <div key={u.request_id} className="rounded-xl border p-3" style={{ borderColor: "var(--fin-warning)", background: "var(--fin-warning-soft)" }} data-testid={`fin-update-${u.request_id}`}>
           <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--fin-warning)" }}><RefreshCcw size={15} /> Alteração recebida da Execução</p>
-          <p className="mt-1 truncate text-xs" style={{ color: "var(--fin-ink-2)" }} title={u.description}>{u.description} · vence {fmtDate(u.due_date)}</p>
+          <p className="mt-1 truncate text-xs font-medium" style={{ color: "var(--fin-ink)" }} title={u.label}>{u.label}</p>
+          <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }} title={u.description}>{u.description} · vence {fmtDate(u.due_date)} · Origem: {u.origem || "Execução & Pós-Venda"}</p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: "var(--fin-ink-2)" }}>
-            <span>Valor anterior: <b className="font-mono-num">{money(u.valor_anterior_cents)}</b></span>
-            <span>Novo valor: <Money cents={u.valor_novo_cents} flow="in" strong /></span>
+            <span>Valor atual no Financeiro: <b className="font-mono-num">{money(u.valor_anterior_cents)}</b></span>
+            <span>Novo valor do Empenho: <Money cents={u.valor_novo_cents} flow="in" strong /></span>
+            <span>Diferença: <b className="font-mono-num" data-testid={`fin-update-diff-${u.request_id}`}>{dif > 0 ? "+" : dif < 0 ? "−" : ""}{money(Math.abs(dif))}</b></span>
+            {u.received_cents > 0 && <span>Já recebido: <b className="font-mono-num">{money(u.received_cents)}</b></span>}
             {u.entry_status === "recebido" && <TonePill tone="success">já recebido</TonePill>}
           </div>
+          {u.bloqueado && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs font-medium" style={{ color: "var(--fin-danger)" }} data-testid={`fin-update-bloqueado-${u.request_id}`}>
+              <AlertTriangle size={14} className="mt-px shrink-0" />
+              O novo valor é menor que o total já recebido. Estorne ou corrija os recebimentos antes de atualizar, ou ignore esta solicitação.
+            </p>
+          )}
           {podeDecidir && <div className="mt-2 flex gap-2">
             <FinButton variant="outline" className="h-8 text-xs" loading={busy === u.request_id + "ignorar"} onClick={() => decide(u, "ignorar")} data-testid={`fin-update-ignore-${u.request_id}`}>Ignorar</FinButton>
-            <FinButton className="h-8 text-xs" loading={busy === u.request_id + "aplicar"} onClick={() => decide(u, "aplicar")} data-testid={`fin-update-apply-${u.request_id}`}>Atualizar recebível</FinButton>
+            <FinButton className="h-8 text-xs" disabled={u.bloqueado} loading={busy === u.request_id + "aplicar"} onClick={() => decide(u, "aplicar")} data-testid={`fin-update-apply-${u.request_id}`}>Atualizar valor</FinButton>
           </div>}
         </div>
-      ))}
+        );
+      })}
       <FinConfirm open={!!confirmSettled} onClose={() => setConfirmSettled(null)} title="Recebível já recebido" confirmLabel="Atualizar mesmo assim" danger
         description="Este recebível já foi baixado. Alterar o valor muda um registro realizado (o histórico guarda o antes e o depois)."
         loading={!!busy} onConfirm={() => decide(confirmSettled, "aplicar", true)} />

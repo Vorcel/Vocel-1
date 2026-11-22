@@ -276,6 +276,17 @@ async def get_analytics(
             {"owner_id": owner, "bid_id": {"$in": list(bid_ids)}}, {"bid_id": 1, "summary": 1}
         ):
             summaries[doc.get("bid_id")] = doc.get("summary") or {}
+    # Empenho FIXO (empenho.py) de cada execução / remessa: é ele a receita,
+    # não a venda selecionada do orçamento. Lucro = Empenho − Compra.
+    empenho_exec, empenho_rem = {}, {}
+    if bid_ids:
+        async for e in db.executions.find({"owner_id": owner, "bid_id": {"$in": list(bid_ids)}},
+                                          {"bid_id": 1, "empenho_cents": 1, "remessas.id": 1, "remessas.empenho_cents": 1}):
+            if isinstance(e.get("empenho_cents"), int):
+                empenho_exec[e.get("bid_id")] = e["empenho_cents"] / 100
+            for r in e.get("remessas") or []:
+                if isinstance(r.get("empenho_cents"), int):
+                    empenho_rem[r.get("id")] = r["empenho_cents"] / 100
     remessa_summaries = {}
     if remessas_de:
         async for doc in db.remessa_budgets.find(
@@ -283,9 +294,13 @@ async def get_analytics(
         ):
             remessa_summaries[doc.get("remessa_id")] = doc.get("summary") or {}
 
+    def _com_empenho(s: dict, fixo) -> tuple:
+        if fixo is None:   # sem empenho gravado (ex.: licitação ainda não adjudicada)
+            return _money(s.get("valor_total")), _money(s.get("lucro_global"))
+        return fixo, fixo - _money(s.get("custo_global"))
+
     def valores_remessa(remessa_id: str) -> tuple:
-        s = remessa_summaries.get(remessa_id) or {}
-        return _money(s.get("valor_total")), _money(s.get("lucro_global"))
+        return _com_empenho(remessa_summaries.get(remessa_id) or {}, empenho_rem.get(remessa_id))
 
     # Configuração dos status (Configurações → Status) é a FONTE da classificação
     # do donut: categoria + o toggle "Exibir no gráfico de indicadores".
@@ -302,10 +317,9 @@ async def get_analytics(
                 oculto_no_grafico.add(item["nome"])
 
     def valores(bid_id: str) -> tuple:
-        """Empenho e Lucro Previsto da licitação — MESMA fonte da Execução &
-        Pós-Venda (soma dos lotes já salva em budgets.summary). Nada é recalculado."""
-        s = summaries.get(bid_id) or {}
-        return _money(s.get("valor_total")), _money(s.get("lucro_global"))
+        """Empenho e Lucro Previsto da licitação — MESMA regra da Execução &
+        Pós-Venda: empenho fixo gravado; Lucro = Empenho − Compra do orçamento."""
+        return _com_empenho(summaries.get(bid_id) or {}, empenho_exec.get(bid_id))
 
     # --- Registros normalizados ---
     lic = []

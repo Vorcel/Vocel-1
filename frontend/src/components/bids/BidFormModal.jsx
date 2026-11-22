@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { formatApiError, fileUrl } from "@/lib/api";
 import { smartTitleCase } from "@/lib/textcase";
 import { cn } from "@/lib/utils";
+import { parseMoney } from "@/lib/financeiro";
 import { X, FileText } from "lucide-react";
 
 const ITENS_REGEX = /^\d+(,\s*\d+)*$/;
@@ -68,6 +69,9 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
     if (!form.pregao.trim()) e.pregao = "Obrigatório";
     if (!form.uasg.trim()) e.uasg = "Obrigatório";
     if (!form.termo_referencia && canAttach) e.termo = "Anexe o Termo de Referência (PDF)";
+    // Licitação ganha já nasce Adjudicada: o valor do empenho é obrigatório (é o
+    // valor fixo da execução; o orçamento ainda nem existe).
+    if (wonMode && !editing && !((parseMoney(form.empenho) || 0) > 0)) e.empenho = "Informe o valor do empenho";
     return e;
   }, [form, editing, wonMode, canAttach]);
 
@@ -83,6 +87,7 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
         observacoes: obsList,
         observacao: obsList.map((o) => o.text).join("; "),
         status: editing ? form.status : (wonMode ? "Adjudicado" : "Disputar"),
+        empenho: wonMode && !editing ? (parseMoney(form.empenho) / 100).toFixed(2) : undefined,
       };
       if (editing) {
         await updateBid(editing.id, payload);
@@ -201,6 +206,21 @@ export const BidFormModal = ({ open, onOpenChange, editing, wonMode = false, onC
               {err("uasg") && <p id="err-uasg" className="text-xs text-alert">{errors.uasg}</p>}
             </div>
           </div>
+
+          {wonMode && !editing && (
+            <div className="space-y-1.5">
+              <Label>Valor do empenho<Req /></Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R$</span>
+                <Input data-testid="bid-empenho" inputMode="decimal" value={form.empenho || ""} placeholder="0,00"
+                  onChange={(e) => set("empenho", e.target.value)} onBlur={() => setTouched((t) => ({ ...t, empenho: true }))}
+                  aria-invalid={!!err("empenho") || undefined}
+                  className={cn("pl-9 font-mono-num", err("empenho") && "border-alert focus-visible:ring-alert")} />
+              </div>
+              {err("empenho") ? <p className="text-xs text-alert">{errors.empenho}</p>
+                : <p className="text-xs text-muted-foreground">Valor oficial do empenho. Alterar o orçamento depois não muda este valor.</p>}
+            </div>
+          )}
 
           {withOrgao && (
             <div className="space-y-1.5">

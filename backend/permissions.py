@@ -431,6 +431,17 @@ async def _execution_put(cur: dict, req: Request) -> None:
     check_exec_fields(cur, body, stored, EXEC_FIELD_PERMS)
 
 
+async def _empenho_put(cur: dict, req: Request) -> None:
+    """Valor do empenho (execução ou remessa): ALTERAR o valor é "Editar dados de
+    pagamento"; só CONFIRMAR o valor já gravado (pop-up de Empenho Recebido) faz
+    parte de mover a timeline e também vale para quem pode editar pagamento."""
+    body = await _json(req)
+    if body.get("acao") == "confirmar":
+        require_any(cur, "execution.status", "execution.payment.edit")
+    else:
+        require(cur, "execution.payment.edit")
+
+
 async def _remessa_put(cur: dict, req: Request) -> None:
     body = await _json(req)
     if not any(v is not None for v in body.values()):
@@ -622,6 +633,9 @@ RULES: Dict[Tuple[str, str], Rule] = {
     ("GET", "/api/executions/kpis"): "execution.view",
     ("GET", "/api/executions/{bid_id}"): "execution.view",
     ("PUT", "/api/executions/{bid_id}"): _execution_put,
+    ("PUT", "/api/executions/{bid_id}/empenho"): _empenho_put,
+    ("PUT", "/api/executions/{bid_id}/remessas/{remessa_id}/empenho"): _empenho_put,
+    ("GET", "/api/bids/{bid_id}/empenho-sugestao"): ("licitacoes.status", "licitacoes.create"),
     ("POST", "/api/executions/{bid_id}/timeline/{step}/file"): "execution.docs.attach",
     ("DELETE", "/api/executions/{bid_id}/timeline/{step}/file/{file_id}"): "execution.docs.delete",
     ("POST", "/api/executions/{bid_id}/documentos/{categoria}"): "execution.docs.attach",
@@ -689,6 +703,7 @@ RULES: Dict[Tuple[str, str], Rule] = {
     ("POST", "/api/fin/recebiveis/solicitacoes/{request_id}/aprovar"): "finance.receber.approve",
     ("POST", "/api/fin/recebiveis/solicitacoes/{request_id}/rejeitar"): "finance.receber.reject",
     ("GET", "/api/fin/recebiveis/atualizacoes"): ("finance.receber.view", "finance.overview.view"),
+    ("POST", "/api/fin/recebiveis/atualizacoes/solicitar"): "execution.recebiveis.send",
     ("POST", "/api/fin/recebiveis/atualizacoes/{request_id}"): "finance.receber.approve",
     ("POST", "/api/fin/recebiveis/sincronizar-execucao"): "execution.status",
     # ---------------- financeiro: clientes / fornecedores

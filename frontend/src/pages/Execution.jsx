@@ -24,6 +24,10 @@ import { AtestadoDropdown } from "@/components/execution/AtestadoDropdown";
 import { TimelineProgressBar } from "@/components/execution/TimelineProgressBar";
 import { DocumentHub } from "@/components/execution/DocumentHub";
 import { BaixaRecebivelDialog, FinNote, RecebivelButton, RecebivelModal, unitKey, useFinLinks } from "@/components/execution/RecebivelAction";
+import {
+  EmpenhoCell, EmpenhoEditDialog, EmpenhoFinanceiroDialog, EmpenhoRecebidoDialog, empenhoCents,
+} from "@/components/execution/EmpenhoDialogs";
+import { centsToInput, parseMoney, money as moneyCents } from "@/lib/financeiro";
 import { usePropostaFlow } from "@/components/bids/PropostaFlow";
 import { SortArrows } from "@/components/table/SortArrows";
 import { StickyHorizontalScrollbar } from "@/components/table/StickyHorizontalScrollbar";
@@ -54,6 +58,8 @@ const EMPTY_FILTERS = {
   objeto: "", pregao: "", uasg: "", orgao: "", data: { from: "", to: "" },
   portal: "", modalidade: "", status: [], atestado: "",
 };
+// Avançar para esta etapa pede a confirmação do valor do empenho (pop-up 2).
+const EMPENHO_STEP = TIMELINE_STEPS.indexOf("Empenho Recebido");
 // Ícone por NOME de etapa (a ordem vem só de TIMELINE_STEPS — nada posicional).
 const STEP_ICONS = {
   "Aguardando Empenho": FileText, "Empenho Recebido": ClipboardCheck, "Comprar Mercadoria": ShoppingCart,
@@ -176,7 +182,7 @@ const inWindow = (d, [a, b]) => d >= a && d <= b;
 export default function Execution() {
   const { executions, bids, refreshExecutions, changeStatus, updateExecution, prefs, saveExecutionGroup,
     addExecutionDoc, removeExecutionDoc, addBidAnexo, removeBidAnexo,
-    createRemessa, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc } = useData();
+    createRemessa, saveEmpenho, updateRemessa, deleteRemessa, addRemessaDoc, removeRemessaDoc } = useData();
   const navigate = useNavigate();
   // Permissões (UX): botões somem / viram leitura; o backend valida cada ação.
   const { can } = useAuth();
@@ -185,6 +191,7 @@ export default function Execution() {
   const canStep = can("execution.status");
   const canEditRemessa = can("execution.remessas.edit");
   const canSendRec = can("execution.recebiveis.send");
+  const canEmpenho = can("execution.payment.edit");       // alterar o valor do empenho
   // Proposta: o MESMO fluxo (upload / leitura rápida / substituição) de Todas
   // as Licitações, sobre o mesmo documento da licitação.
   const { abrirProposta, propostaModals } = usePropostaFlow();
@@ -192,6 +199,12 @@ export default function Execution() {
   const { links: finLinks, refresh: refreshFinLinks } = useFinLinks();
   const [recebivel, setRecebivel] = useState(null);     // { bidId, remessaId, nome, valorCents, link }
   const [baixaPrompt, setBaixaPrompt] = useState(null); // vínculo aprovado a baixar no Financeiro
+  // EMPENHO fixo: confirmação ao avançar para "Empenho Recebido", edição pelo
+  // clique na célula e a pergunta ao Financeiro quando já existe lançamento.
+  const [empRecebido, setEmpRecebido] = useState(null);   // { unit, nome, step }
+  const [empEdit, setEmpEdit] = useState(null);           // { unit, nome }
+  const [empFin, setEmpFin] = useState(null);             // { bidId, remessaId, nome, antes, depois }
+  const [envioBloqueado, setEnvioBloqueado] = useState(null); // { etapa } — envio antes de Empenho Recebido
 
   const [selectedId, setSelectedId] = useState(null); // null => Componente A (dashboard)
   // Remessa ativa da licitação selecionada (undefined = a padrão; null = a própria
@@ -437,6 +450,15 @@ export default function Execution() {
     if (!canStep) return;
     const cs = doneCount(unitView(unit).nodes);
     const step = idx === cs ? idx + 1 : idx;
+    // Avançar para "Empenho Recebido" (ou além, vindo de antes dela) pede a
+    // conferência do valor do empenho — a etapa só muda depois de confirmar.
+    if (cs < EMPENHO_STEP && step >= EMPENHO_STEP && unit.empenho_status !== "confirmado") {
+      setEmpRecebido({ unit, nome: unitNome(unit), step });
+      return;
+    }
+    await finishMove(unit, step);
+  };
+  const finishMove = async (unit, step) => {
     await persistStep(unit, step, filesOf(unit));
     // Chegou em Pagamento Recebido com recebível aprovado e em aberto no
     // Financeiro: pergunta antes de dar baixa lá (nunca automático).
@@ -447,13 +469,59 @@ export default function Execution() {
       }
     }
   };
+  const unitNome = (unit) => {
+    const objeto = bidsById[unit.bid_id]?.objeto ?? unit.objeto ?? "";
+    return unit.virtual || !unit.id ? objeto : [objeto, unit.nome].filter(Boolean).join(" · ");
+  };
+  // Grava o empenho (confirmar / editar) e, se mudou e já há lançamento no
+  // Financeiro com outro valor, pergunta se envia a solicitação (nunca automático).
+  const gravarEmpenho = async (unit, body) => {
+    const remessaId = unit.virtual || !unit.id ? null : unit.id;
+    const res = await saveEmpenho(unit.bid_id, remessaId, body);
+    const fin = res.financeiro;
+    // Ainda pendente de aprovação: o backend já atualizou a MESMA solicitação.
+    if (res.pendente_sincronizada) toast.info("A solicitação pendente no Financeiro foi atualizada para o novo valor do empenho.");
+    if (res.changed && fin && fin.entry_amount_cents !== res.after_cents) {
+      setEmpFin({ bidId: unit.bid_id, remessaId, nome: unitNome(unit), antes: res.before_cents, depois: res.after_cents });
+    }
+    return res;
+  };
+  const confirmarEmpenhoRecebido = async (body) => {
+    const alvo = empRecebido;
+    await gravarEmpenho(alvo.unit, body);
+    setEmpRecebido(null);
+    await finishMove(alvo.unit, alvo.step);
+    toast.success(body.acao === "editar" ? "Empenho alterado e confirmado" : "Valor do empenho confirmado");
+  };
+  const salvarEmpenhoEditado = async (body) => {
+    const res = await gravarEmpenho(empEdit.unit, body);
+    setEmpEdit(null);
+    if (res.changed) toast.success("Valor do empenho atualizado");
+  };
+  const abrirEmpenho = (unit) => (canEmpenho ? () => setEmpEdit({ unit, nome: unitNome(unit) }) : undefined);
+  // Empenho mudou e o Financeiro ficou com o valor antigo ("Agora não"): a
+  // solicitação pode ser enviada depois, pelo modal de Recebíveis.
+  const solicitarAtualizacaoDepois = (target) => {
+    setRecebivel(null);
+    setEmpFin({ ...target, titulo: "Atualizar valor no Financeiro", labelAntes: "Valor atual no Financeiro" });
+  };
   const abrirRecebivel = (e, u) => {
     const remessaId = u && !u.virtual ? u.id : null;
-    const valor = Number((u && !u.virtual ? u.valor_empenho : e.valor_empenho) || 0);
+    const unit = u && !u.virtual ? u : e;
+    const link = finLinks[unitKey(e.bid_id, remessaId)];
+    // Envio novo (nada ativo no Financeiro) exige timeline >= "Empenho Recebido",
+    // pela POSIÇÃO da etapa (doneCount = índice da etapa atual), não pelo nome.
+    // O botão segue clicável: antes da etapa mínima só explica (backend também recusa).
+    const enviaria = ["nao_enviado", "rejeitado", "cancelado"].includes(link?.estado || "nao_enviado");
+    const nodes = unitView(u && !u.virtual ? u : { ...e, virtual: true }).nodes;
+    if (enviaria && doneCount(nodes) < EMPENHO_STEP) {
+      setEnvioBloqueado({ etapa: currentStage(nodes) });
+      return;
+    }
     setRecebivel({
-      bidId: e.bid_id, remessaId, valorCents: Math.round(valor * 100),
+      bidId: e.bid_id, remessaId, valorCents: empenhoCents(unit), empenhoInformado: !!unit.empenho_informado,
       nome: [bidsById[e.bid_id]?.objeto ?? e.objeto, remessaId && u.nome].filter(Boolean).join(" · "),
-      link: finLinks[unitKey(e.bid_id, remessaId)],
+      link,
     });
   };
   // Anexos antigos (enviados no modelo por etapa): continuam exatamente onde
@@ -476,11 +544,11 @@ export default function Execution() {
   };
 
   // Nova remessa: o backend copia o orçamento escolhido e devolve a execução.
-  const criarRemessa = async (base) => {
+  const criarRemessa = async (base, empenho) => {
     const e = novaRemessa;
     if (!e) return;
     try {
-      const ex = await createRemessa(e.bid_id, base);
+      const ex = await createRemessa(e.bid_id, base, empenho);
       const nova = ex.remessas[ex.remessas.length - 1];
       setExpanded((prev) => new Set(prev).add(e.bid_id));
       selectRemessa(e.bid_id, nova.id);
@@ -528,12 +596,14 @@ export default function Execution() {
   // licitação e pelas linhas de remessa — mesmas colunas da tabela, então os
   // eixos (Empenho, Compra, Lucro, Status, Progresso, Atestado, Ações) coincidem.
   const stop = (ev) => ev.stopPropagation();
-  const opsCells = ({ prazo, dataEntrega, empenho, compra, lucro, lucroTitle, stage, finLink, progress, progressTestid, atestado, acoes }) => [
+  // Empenho = célula própria (EmpenhoCell): vermelho claro + exclamação SÓ nela
+  // quando o empenho fixo difere da venda selecionada do orçamento.
+  const opsCells = ({ prazo, dataEntrega, empenhoUnit, empenhoTestid, onEmpenho, remessasDivergentes, compra, lucro, lucroTitle, stage, finLink, progress, progressTestid, atestado, acoes }) => [
     <td key="entrega" className="px-3 py-3" onClick={stop}>{prazo}</td>,
     <td key="data" className="whitespace-nowrap px-3 py-3 text-muted-foreground">{fmtDate(dataEntrega)}</td>,
-    <td key="empenho" className="font-mono-num whitespace-nowrap px-3 py-3">{brl(empenho)}</td>,
+    <EmpenhoCell key="empenho" unit={empenhoUnit} testid={empenhoTestid} onClick={onEmpenho} remessasDivergentes={remessasDivergentes} />,
     <td key="compra" className="font-mono-num whitespace-nowrap px-3 py-3 text-muted-foreground">{brl(compra)}</td>,
-    <td key="lucro" className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600" title={lucroTitle}>{brl(lucro)}</td>,
+    <td key="lucro" className="font-mono-num whitespace-nowrap px-3 py-3 font-bold text-emerald-600" title={lucroTitle}>{lucro == null ? "—" : brl(lucro)}</td>,
     <td key="status" className="px-3 py-3"><StatusBadge color={stageColor(stage)}>{stage}</StatusBadge><FinNote link={finLink} /></td>,
     // Progresso — mesma regra da barra principal
     <td key="progresso" className="px-3 py-3">
@@ -598,7 +668,11 @@ export default function Execution() {
               ? prazoPill(repUnit, `exec-time-${e.bid_id}`, null, `Prazo da ${repUnit.nome} — ajuste na linha da remessa`)
               : prazoPill(e, `exec-time-${e.bid_id}`, canDeadlines ? () => setTimeModal(unitsOf(e)[0]) : null),
             dataEntrega: repUnit.data_entrega,
-            empenho: e.valor_empenho,
+            // Com remessas, o empenho da linha é a soma das remessas (editado em cada uma).
+            empenhoUnit: e,
+            empenhoTestid: `exec-empenho-${e.bid_id}`,
+            onEmpenho: comRemessas ? undefined : abrirEmpenho({ ...e, virtual: true }),
+            remessasDivergentes: comRemessas ? e.empenho_remessas_divergentes : undefined,
             compra: e.valor_compra,
             lucro: e.lucro_previsto,
             lucroTitle: comRemessas ? `Lucro atualizado (soma das remessas). Lucro previsto original: ${brl(lucroOriginal)}` : undefined,
@@ -704,7 +778,9 @@ export default function Execution() {
                             prazo: prazoPill(u, `exec-remessa-time-${e.bid_id}-${u.numero}`,
                               (u.virtual ? canDeadlines : canEditRemessa) ? () => setTimeModal(u) : null, `Prazo de entrega da ${u.nome}`),
                             dataEntrega: u.data_entrega,
-                            empenho: u.valor_empenho,
+                            empenhoUnit: u,
+                            empenhoTestid: `exec-remessa-empenho-${e.bid_id}-${u.numero}`,
+                            onEmpenho: abrirEmpenho(u),
                             compra: u.valor_compra,
                             lucro: u.lucro_previsto,
                             stage: v.stage,
@@ -893,7 +969,23 @@ export default function Execution() {
         showOrgao showAtestado
       />
 
-      <RecebivelModal target={recebivel} onClose={() => setRecebivel(null)} onChanged={refreshFinLinks} />
+      <RecebivelModal target={recebivel} onClose={() => setRecebivel(null)} onChanged={refreshFinLinks}
+        onSolicitarAtualizacao={solicitarAtualizacaoDepois} />
+      <EmpenhoRecebidoDialog target={empRecebido} canEdit={canEmpenho} onCancel={() => setEmpRecebido(null)} onSave={confirmarEmpenhoRecebido} />
+      <EmpenhoEditDialog target={empEdit} onCancel={() => setEmpEdit(null)} onSave={salvarEmpenhoEditado} />
+      <Dialog open={!!envioBloqueado} onOpenChange={(o) => !o && setEnvioBloqueado(null)}>
+        <DialogContent data-testid="exec-envio-bloqueado" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Envio ao Financeiro indisponível</DialogTitle>
+            <DialogDescription>Esta licitação só pode ser enviada ao Financeiro quando a timeline estiver, no mínimo, na etapa Empenho Recebido.</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm">Etapa atual: <strong data-testid="exec-envio-bloqueado-etapa">{envioBloqueado?.etapa}</strong></p>
+          <DialogFooter>
+            <Button onClick={() => setEnvioBloqueado(null)} data-testid="exec-envio-bloqueado-ok" className="bg-brand hover:bg-brand-hover">Entendi</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <EmpenhoFinanceiroDialog prompt={empFin} onClose={() => setEmpFin(null)} onSent={refreshFinLinks} />
       <BaixaRecebivelDialog prompt={baixaPrompt} onClose={() => setBaixaPrompt(null)} onDone={refreshFinLinks} />
 
       {/* Encerrar execução com confirmação (não exclui nada) */}
@@ -1186,11 +1278,21 @@ function ComparativoRemessas({ execution: e }) {
 function NovaRemessaModal({ execution, onClose, onCreate }) {
   const [base, setBase] = useState("original");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (execution) { setBase("original"); setBusy(false); } }, [execution]);
+  const [empenho, setEmpenho] = useState("");
+  const [empErr, setEmpErr] = useState("");
+  useEffect(() => { if (execution) { setBase("original"); setBusy(false); setEmpenho(""); setEmpErr(""); } }, [execution]);
   if (!execution) return null;
   const comRemessas = hasRemessas(execution);
   const anterior = comRemessas ? execution.remessas[execution.remessas.length - 1] : null;
-  const criar = async () => { setBusy(true); try { await onCreate(comRemessas ? base : "original"); } finally { setBusy(false); } };
+  // Referência discreta: venda selecionada do orçamento que será copiado.
+  const fonte = comRemessas && base === "anterior" ? anterior : null;
+  const vendaRef = fonte ? Number(fonte.venda_orcamento_cents || 0) : Number(execution.venda_original_cents || 0);
+  const criar = async () => {
+    const c = parseMoney(empenho);
+    if (!c || c <= 0) { setEmpErr("Informe o valor do empenho da remessa."); return; }
+    setBusy(true);
+    try { await onCreate(comRemessas ? base : "original", (c / 100).toFixed(2)); } finally { setBusy(false); }
+  };
   return (
     <Dialog open={!!execution} onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent data-testid="nova-remessa-modal">
@@ -1221,6 +1323,21 @@ function NovaRemessaModal({ execution, onClose, onCreate }) {
             <p className="text-xs text-muted-foreground">A cópia é feita agora; depois disso a nova remessa é independente.</p>
           </div>
         )}
+        <div className="space-y-1">
+          <Label className="block">Valor do empenho da {comRemessas ? "nova remessa" : "Remessa 2"} <span className="text-red-600">*</span></Label>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R$</span>
+            <Input value={empenho} onChange={(ev) => { setEmpenho(ev.target.value); setEmpErr(""); }} inputMode="decimal" placeholder="0,00"
+              data-testid="nova-remessa-empenho" className={cn("pl-9 font-mono-num", empErr && "border-red-500 focus-visible:ring-red-500")} />
+          </div>
+          {empErr ? <p className="text-xs text-red-600">{empErr}</p> : (
+            <p className="text-xs text-muted-foreground" data-testid="nova-remessa-empenho-ref">
+              Valor total de venda do orçamento copiado: {moneyCents(vendaRef)}
+              {vendaRef > 0 && <button type="button" className="ml-1.5 text-brand hover:underline" onClick={() => setEmpenho(centsToInput(vendaRef))}>usar</button>}
+            </p>
+          )}
+          {!comRemessas && <p className="text-xs text-muted-foreground">A Remessa 1 continua com o empenho atual da licitação.</p>}
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy} data-testid="nova-remessa-cancel">Cancelar</Button>
           <Button onClick={criar} disabled={busy} data-testid="nova-remessa-confirm" className="bg-emerald-600 text-white hover:bg-emerald-700">

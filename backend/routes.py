@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from db import db, now_iso
 from auth import get_current_user, audit
+from empenho import EMPENHO_FIELDS, apply_values, money_cents, parse_empenho, set_initial
 
 api = APIRouter(prefix="/api", tags=["core"])
 
@@ -378,6 +379,7 @@ class BidInput(BaseModel):
     anexos: List[dict] = []                    # arquivos adicionais [{id, filename, url}]
     status: str = "Disputar"
     favorito: bool = False
+    empenho: Optional[Any] = None   # só ao nascer/entrar em "Adjudicado" (não é gravado na licitação)
 
 
 def _itens_list(itens: str) -> List[str]:
@@ -404,6 +406,8 @@ async def list_bids(current=Depends(get_current_user)):
 @api.post("/bids")
 async def create_bid(body: BidInput, current=Depends(get_current_user)):
     doc = body.model_dump()
+    # "Adicionar licitação ganha" já nasce Adjudicada: exige o valor do empenho.
+    empenho = await _required_empenho(None, uid(current), None, doc.get("status"), doc.pop("empenho", None))
     doc["itens_list"] = _itens_list(body.itens)
     doc["owner_id"] = uid(current)
     doc["created_at"] = now_iso()
@@ -411,6 +415,8 @@ async def create_bid(body: BidInput, current=Depends(get_current_user)):
     res = await db.bids.insert_one(doc)
     created = await db.bids.find_one({"_id": res.inserted_id})
     await _sync_execution(created)
+    if empenho is not None:
+        await set_initial(current, created, empenho)
     await audit(current, "licitacao_criada", module="licitacoes", entity_type="licitacao",
                 entity_id=str(res.inserted_id), entity_label=_bid_label(created))
     return ser(created)
@@ -431,6 +437,7 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
     if not existing:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     doc = body.model_dump()
+    empenho = await _required_empenho(bid_id, owner, existing.get("status"), doc.get("status"), doc.pop("empenho", None))
     doc["itens_list"] = _itens_list(body.itens)
     # `proposta_enviada` é DERIVADO do documento da proposta (ver propostas.py): o
     # formulário de edição da licitação não envia esse dado e não pode zerá-lo.
@@ -440,6 +447,8 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner}, {"$set": doc})
     bid = await db.bids.find_one({"_id": ObjectId(bid_id)})
     await _sync_execution(bid)
+    if empenho is not None:
+        await set_initial(current, bid, empenho)
     changes = _bid_changes(existing, doc)
     if changes:
         await audit(current, "licitacao_editada", module="licitacoes", entity_type="licitacao",
@@ -449,6 +458,23 @@ async def update_bid(bid_id: str, body: BidInput, current=Depends(get_current_us
 
 class StatusInput(BaseModel):
     status: str
+    empenho: Optional[Any] = None   # obrigatório ao ENTRAR em "Adjudicado" (pop-up de confirmação)
+
+
+def _entering_adjudicado(before: Optional[str], after: Optional[str]) -> bool:
+    return after == "Adjudicado" and before != "Adjudicado"
+
+
+async def _required_empenho(bid_id: Optional[str], owner: str, before: Optional[str], after: Optional[str], value) -> Optional[int]:
+    """Entrar em Adjudicado exige o valor do empenho confirmado pelo usuário.
+    Execução já existente (não deveria, mas por segurança) mantém o próprio valor."""
+    if not _entering_adjudicado(before, after):
+        return None
+    if bid_id and await db.executions.find_one({"bid_id": bid_id, "owner_id": owner}, {"_id": 1}):
+        return None
+    if value in (None, ""):
+        raise HTTPException(status_code=400, detail="Informe e confirme o valor do empenho para enviar a licitação para Adjudicado.")
+    return parse_empenho(value)
 
 
 @api.patch("/bids/{bid_id}/status")
@@ -458,10 +484,13 @@ async def change_status(bid_id: str, body: StatusInput, current=Depends(get_curr
     if not bid:
         raise HTTPException(status_code=404, detail="Licitação não encontrada")
     before = bid.get("status")
+    empenho = await _required_empenho(bid_id, owner, before, body.status, body.empenho)
     await db.bids.update_one({"_id": ObjectId(bid_id), "owner_id": owner},
                              {"$set": {"status": body.status, "updated_at": now_iso(), **_actor_stamp(current, "updated")}})
     bid["status"] = body.status
     await _sync_execution(bid)
+    if empenho is not None:
+        await set_initial(current, bid, empenho)
     if before != body.status:
         await audit(current, "licitacao_status_alterado", module="licitacoes", entity_type="licitacao",
                     entity_id=bid_id, entity_label=_bid_label(bid),
@@ -655,8 +684,6 @@ async def _ensure_execution(bid: dict):
         await db.executions.insert_one(arquivada)
         await db.executions_archive.delete_one({"_id": arquivada["_id"]})
         return arquivada
-    bud = await db.budgets.find_one({"bid_id": bid_id})
-    s = (bud or {}).get("summary", {})
     doc = {
         "bid_id": bid_id,
         "owner_id": owner,
@@ -666,9 +693,8 @@ async def _ensure_execution(bid: dict):
         "orgao": bid.get("orgao", ""),
         "data_cadastro": bid.get("data_disputa", now_iso()[:10]),
         "termo_referencia": bid.get("termo_referencia"),
-        "valor_empenho": s.get("valor_total", 0),
-        "valor_compra": s.get("custo_global", 0),
-        "lucro_previsto": s.get("lucro_global", 0),
+        # Empenho NÃO nasce do orçamento: é gravado pela confirmação da adjudicação
+        # (empenho.set_initial). Compra/Lucro são calculados na leitura.
         "tempo_entrega_dias": 30,
         "data_entrega": "",
         "status_atual": TIMELINE_STEPS[0],
@@ -798,14 +824,15 @@ async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None
         totals = _totals_from_summary(bud.get("summary"))
         original_rows = bud.get("rows") or []
     t = totals
-    # Empenho, Compra e Lucro Previsto seguem a MESMA base: o orçamento vinculado
-    # (soma de todos os lotes). Empenho = "Valor Total" do orçamento (card azul).
-    doc["valor_empenho"] = t["valor_total"]
-    doc["valor_compra"] = t["custo_global"]
-    doc["lucro_previsto"] = t["lucro_global"]
-    doc["valor_original"] = t["valor_total"]
+    # Empenho = valor FIXO gravado (empenho.py); Compra = custo das linhas
+    # selecionadas; Lucro = Empenho − Compra. A venda selecionada do orçamento só
+    # é usada para conferir (empenho_divergente).
+    apply_values(doc, t)
+    # Referência do adjudicado (Total Adjudicado / comparativo das remessas).
+    doc["valor_original"] = doc["valor_empenho"] if doc["valor_empenho"] is not None else t["valor_total"]
     doc["compra_original"] = t["custo_global"]
-    doc["lucro_original"] = t["lucro_global"]
+    doc["lucro_original"] = round(doc["valor_original"] - t["custo_global"], 2)
+    doc["venda_original_cents"] = money_cents(t["valor_total"])
     doc["resumo_original"] = _resumo_itens(original_rows)
     _normalize_operational(doc)
     doc.pop("remessas_excluidas", None)
@@ -818,16 +845,19 @@ async def _enrich_execution(doc: dict, owner: str, totals: Optional[dict] = None
                 remessa_budgets[b.get("remessa_id")] = b
         for r in remessas:
             b = remessa_budgets.get(r.get("id")) or {}
-            rt = _totals_from_summary(b.get("summary"))
-            r["valor_empenho"] = rt["valor_total"]
-            r["valor_compra"] = rt["custo_global"]
-            r["lucro_previsto"] = rt["lucro_global"]
+            apply_values(r, _totals_from_summary(b.get("summary")))
             r["resumo"] = _resumo_itens(b.get("rows") or [])
             _normalize_operational(r)
         # Consolidado operacional = soma das remessas (o original NÃO entra na soma).
-        doc["valor_empenho"] = sum(r["valor_empenho"] for r in remessas)
+        doc["valor_empenho"] = sum(r["valor_empenho"] or 0 for r in remessas)
         doc["valor_compra"] = sum(r["valor_compra"] for r in remessas)
-        doc["lucro_previsto"] = sum(r["lucro_previsto"] for r in remessas)
+        doc["lucro_previsto"] = round(doc["valor_empenho"] - doc["valor_compra"], 2)
+        doc["venda_orcamento"] = sum(r["venda_orcamento"] for r in remessas)
+        # A linha da licitação acende se QUALQUER remessa diverge (cada remessa
+        # mostra a própria célula).
+        doc["empenho_divergente"] = any(r["empenho_divergente"] for r in remessas)
+        doc["empenho_informado"] = all(r["empenho_informado"] for r in remessas)
+        doc["empenho_remessas_divergentes"] = [r.get("nome") for r in remessas if r["empenho_divergente"]]
     return doc
 
 
@@ -897,7 +927,8 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     if not doc:
         raise HTTPException(status_code=404, detail="Execução não encontrada")
     updates = {k: v for k, v in body.model_dump().items()
-               if v is not None and k not in _PROTECTED_FIELDS and not k.startswith("$") and "." not in k}
+               if v is not None and k not in _PROTECTED_FIELDS and k not in _DERIVED_EXEC_FIELDS
+               and not k.startswith("$") and "." not in k}
     if "atestado" in updates and updates["atestado"] not in ATESTADO_OPTIONS:
         raise HTTPException(status_code=400, detail=f"Atestado inválido. Use: {', '.join(ATESTADO_OPTIONS)}")
     # keep current_step and status_atual in sync
@@ -921,6 +952,12 @@ async def update_execution(bid_id: str, body: ExecutionUpdate, current=Depends(g
     doc = await db.executions.find_one({"bid_id": bid_id, "owner_id": owner})
     return await _enrich_execution(ser(doc), owner)
 
+
+# Empenho só muda pelas rotas de empenho.py (com histórico); Compra/Lucro/conferência
+# são calculados na leitura — nada disso é gravado pelo PUT genérico.
+_DERIVED_EXEC_FIELDS = {"valor_empenho", "valor_compra", "lucro_previsto", "venda_orcamento", "venda_orcamento_cents",
+                        "empenho_divergente", "empenho_informado", "valor_original", "compra_original",
+                        "lucro_original", *EMPENHO_FIELDS}
 
 _EXEC_AUDIT_FIELDS = {"status_atual": "Etapa", "atestado": "Atestado", "tempo_entrega_dias": "Prazo (dias)",
                       "prazo_entrega_tipo": "Tipo de prazo",

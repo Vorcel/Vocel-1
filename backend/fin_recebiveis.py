@@ -14,9 +14,12 @@ Unidade = a execução inteira (sem remessas) ou UMA remessa. `active_key`
 e tem índice único — então não há duas solicitações ativas para a mesma unidade,
 nem dois recebíveis para a mesma solicitação (índice único em request_id).
 
-Depois de aprovado, mudança de valor na Execução (o empenho vem do orçamento)
-NUNCA sobrescreve o recebível: é detectada na leitura e vira um aviso
-"Alteração recebida da Execução" com Ignorar / Atualizar recebível.
+O valor enviado é o EMPENHO FIXO da unidade (empenho.py), nunca a venda
+dinâmica do orçamento. Depois de aprovado, mudar o empenho NUNCA sobrescreve o
+recebível: a Execução pergunta e, se o usuário quiser, cria uma SOLICITAÇÃO DE
+ATUALIZAÇÃO (`fin_requests.update_request`, no MESMO vínculo — sem novo
+lançamento). O Financeiro vê "Alteração recebida da Execução" e decide
+Ignorar / Atualizar valor.
 
 A Data de Entrega da Execução é logística e nunca é usada como data financeira."""
 from typing import Any, Optional
@@ -35,6 +38,7 @@ from fin_core import (
 from fin_contatos import resolve_contact
 from financeiro import _entry_label, _entry_out, _resolve_refs, resolve_classification
 from routes import TIMELINE_STEPS, _enrich_execution, ser
+from analytics import EMPENHO_STEP_INDEX, step_index
 
 rec_router = APIRouter(prefix="/api/fin/recebiveis", tags=["financeiro-recebiveis"])
 
@@ -53,13 +57,6 @@ def _clean(doc: Optional[dict]) -> Optional[dict]:
     doc.pop("_id", None)
     doc.pop("owner_id", None)
     return doc
-
-
-def _value_cents(v: Any) -> int:
-    try:
-        return to_cents(v or 0, "valor", allow_zero=True)
-    except HTTPException:
-        return 0
 
 
 async def _executions(owner: str, bid_ids: list) -> dict:
@@ -107,10 +104,19 @@ async def send_request(body: SendInput, current=Depends(get_current_user)):
     unit = _unit(ex, body.remessa_id)
     if not unit:
         raise HTTPException(status_code=404, detail="Remessa não encontrada")
-    valor_execucao = _value_cents(unit.get("valor_empenho"))
-    amount = to_cents(body.amount, "valor") if body.amount not in (None, "") else valor_execucao
+    # Etapa mínima: a posição da etapa na timeline (índice em TIMELINE_STEPS, mesma
+    # leitura robusta das Análises — trata nomes legados), nunca o texto do status.
+    if step_index(unit) < EMPENHO_STEP_INDEX:
+        raise HTTPException(status_code=400, detail="O envio ao Financeiro só é permitido quando a timeline estiver, no mínimo, na etapa Empenho Recebido.")
+    if not unit.get("empenho_informado"):
+        raise HTTPException(status_code=400, detail="Informe o valor do empenho antes de enviar ao Financeiro.")
+    # Valor = empenho FIXO (nunca a venda selecionada do orçamento).
+    valor_execucao = int(unit.get("empenho_cents") or 0)
+    if body.amount not in (None, "") and to_cents(body.amount, "valor") != valor_execucao:
+        raise HTTPException(status_code=400, detail="O valor enviado ao Financeiro é o valor do empenho. Para mudar, altere o empenho na Execução.")
+    amount = valor_execucao
     if amount <= 0:
-        raise HTTPException(status_code=400, detail="O valor da solicitação deve ser maior que zero (confira o orçamento).")
+        raise HTTPException(status_code=400, detail="O valor do empenho deve ser maior que zero.")
     ts = now_iso()
     doc = {
         "id": new_id(), "owner_id": owner, "bid_id": body.bid_id, "remessa_id": body.remessa_id or None,
@@ -194,6 +200,8 @@ async def execution_links(current=Depends(get_current_user)):
             "due_date": e["due_date"] if e else None, "entry_amount_cents": e["amount_cents"] if e else None,
             "settled_date": e.get("settled_date") if e else None,
             "received_cents": int(e.get("settled_cents") or 0) if e else 0,
+            "update_pending": (r.get("update_request") or {}).get("status") == "pendente",
+            "update_amount_cents": (r.get("update_request") or {}).get("amount_cents"),
             "open_cents": open_cents(e) if e and e["status"] != CANCELADO else 0,
             "atrasado": bool(e and e["status"] in (PENDENTE, PARCIAL) and e["due_date"] < today_sp()),
         })
@@ -215,7 +223,7 @@ async def list_requests(status: str = "pendente", current=Depends(get_current_us
         item["label"] = _request_label(r)
         if r["status"] == "pendente":
             unit = _unit(execs.get(r["bid_id"]), r.get("remessa_id"))
-            atual = _value_cents(unit.get("valor_empenho")) if unit else None
+            atual = unit.get("empenho_cents") if unit else None
             item["valor_execucao_atual_cents"] = atual
             item["execucao_disponivel"] = unit is not None
         out.append(item)
@@ -315,40 +323,72 @@ async def reject_request(request_id: str, body: RejectInput, current=Depends(get
 
 
 # ---------------- Alterações vindas da Execução depois da aprovação ----------------
+# Nada é detectado sozinho: só existe alteração quando a Execução ENVIA uma
+# solicitação (botão "Enviar solicitação ao Financeiro"). Ela fica gravada no
+# próprio vínculo aprovado (`update_request`) — o mesmo recebível, sem duplicar.
+class UpdateRequestInput(BaseModel):
+    bid_id: str
+    remessa_id: Optional[str] = None
+
+
+@rec_router.post("/atualizacoes/solicitar")
+async def request_update(body: UpdateRequestInput, current=Depends(get_current_user)):
+    owner = current["id"]
+    r = await db.fin_requests.find_one({"owner_id": owner, "bid_id": body.bid_id, "remessa_id": body.remessa_id or None,
+                                        "status": "aprovado"})
+    e = await db.fin_entries.find_one({"owner_id": owner, "id": r.get("entry_id")}) if r and r.get("entry_id") else None
+    if not r or not e or e["status"] == CANCELADO:
+        raise HTTPException(status_code=404, detail="Esta execução não tem lançamento vinculado no Financeiro.")
+    ex = await db.executions.find_one({"owner_id": owner, "bid_id": body.bid_id})
+    unit = _unit(ex, body.remessa_id)
+    novo = unit.get("empenho_cents") if unit else None
+    if novo is None:
+        raise HTTPException(status_code=400, detail="Informe o valor do empenho.")
+    if novo == e["amount_cents"]:
+        raise HTTPException(status_code=409, detail="O valor no Financeiro já é igual ao valor do empenho.")
+    ts = now_iso()
+    pedido = {"status": "pendente", "amount_cents": novo, "previous_cents": e["amount_cents"], "origin": "Execução & Pós-Venda",
+              "requested_by": current.get("actor_id") or current["id"],
+              "requested_by_name": current.get("actor_name") or current.get("name"), "requested_at": ts}
+
+    async def tx(s):
+        await db.fin_requests.update_one({"_id": r["_id"]}, {"$set": {"update_request": pedido, "updated_at": ts}}, session=s)
+        await log_event(current, "atualizacao_solicitada", module="receber", entity_type="lancamento", entity_id=e["id"],
+                        entity_label=_entry_label(e), amount_cents=novo, origin="Execução",
+                        changes=[{"field": "amount_cents", "label": "Valor", "before": e["amount_cents"], "after": novo}],
+                        metadata={"request_id": r["id"], "bid_id": body.bid_id, "remessa_id": body.remessa_id}, session=s)
+    await in_transaction(tx)
+    return {"ok": True, "request_id": r["id"], "amount_cents": novo, "previous_cents": e["amount_cents"]}
+
+
 @rec_router.get("/atualizacoes")
 async def pending_updates(current=Depends(get_current_user)):
-    """Recebíveis aprovados cujo valor na Execução mudou depois da aprovação.
-    Nada é gravado no recebível aqui — o Financeiro decide (Ignorar / Atualizar)."""
+    """Solicitações de atualização de valor enviadas pela Execução e ainda não
+    decididas. Nada é gravado no recebível aqui — o Financeiro decide."""
     owner = current["id"]
-    aprovadas = await db.fin_requests.find({"owner_id": owner, "status": "aprovado"}).to_list(1000)
-    if not aprovadas:
+    pedidos = await db.fin_requests.find({"owner_id": owner, "status": "aprovado",
+                                          "update_request.status": "pendente"}).to_list(1000)
+    if not pedidos:
         return []
-    execs = await _executions(owner, [r["bid_id"] for r in aprovadas])
     entries = {e["id"]: e async for e in db.fin_entries.find(
-        {"owner_id": owner, "id": {"$in": [r.get("entry_id") for r in aprovadas]}})}
+        {"owner_id": owner, "id": {"$in": [r.get("entry_id") for r in pedidos]}})}
     out = []
-    for r in aprovadas:
+    for r in pedidos:
         e = entries.get(r.get("entry_id"))
-        unit = _unit(execs.get(r["bid_id"]), r.get("remessa_id"))
-        if not e or not unit or e["status"] == CANCELADO:
+        if not e or e["status"] == CANCELADO:
             continue
-        atual = _value_cents(unit.get("valor_empenho"))
-        if atual <= 0 or atual == r.get("source_amount_cents") or atual == r.get("ignored_amount_cents"):
-            continue
-        if atual == e["amount_cents"]:
-            continue
-        if r.get("notified_amount_cents") != atual:
-            # Primeira vez que ESTE novo valor aparece: registra no histórico (uma vez).
-            await db.fin_requests.update_one({"_id": r["_id"]}, {"$set": {"notified_amount_cents": atual}})
-            await log_event(current, "atualizacao_recebida", module="receber", entity_type="lancamento",
-                            entity_id=e["id"], entity_label=_entry_label(e), origin="Execução",
-                            changes=[{"field": "amount_cents", "label": "Valor na Execução",
-                                      "before": e["amount_cents"], "after": atual}],
-                            metadata={"request_id": r["id"]})
+        up = r["update_request"]
+        recebido = int(e.get("settled_cents") or 0)
+        sn = r.get("snapshot") or {}
         out.append({"request_id": r["id"], "entry_id": e["id"], "label": _request_label(r),
+                    "pregao": sn.get("pregao"), "remessa_nome": sn.get("remessa_nome"),
                     "description": e["description"], "client_supplier": e.get("client_supplier"),
-                    "valor_anterior_cents": e["amount_cents"], "valor_novo_cents": atual,
-                    "entry_status": e["status"], "due_date": e["due_date"], "received_cents": int(e.get("settled_cents") or 0)})
+                    "valor_anterior_cents": e["amount_cents"], "valor_novo_cents": up["amount_cents"],
+                    "diferenca_cents": up["amount_cents"] - e["amount_cents"], "origem": up.get("origin") or "Execução & Pós-Venda",
+                    "requested_at": up.get("requested_at"), "requested_by_name": up.get("requested_by_name"),
+                    "entry_status": e["status"], "due_date": e["due_date"], "received_cents": recebido,
+                    # Novo valor abaixo do já recebido: não pode ser aplicado sem tratar os recebimentos.
+                    "bloqueado": up["amount_cents"] < recebido})
     return out
 
 
@@ -367,39 +407,60 @@ async def decide_update(request_id: str, body: UpdateDecision, current=Depends(g
     e = await db.fin_entries.find_one({"owner_id": owner, "id": r.get("entry_id")})
     if not e:
         raise HTTPException(status_code=404, detail="Recebível não encontrado")
-    unit = _unit((await _executions(owner, [r["bid_id"]])).get(r["bid_id"]), r.get("remessa_id"))
-    atual = _value_cents(unit.get("valor_empenho")) if unit else None
-    if atual != body.valor_novo_cents:
-        raise HTTPException(status_code=409, detail="O valor na Execução mudou de novo. Recarregue para ver o valor atual.")
+    up = r.get("update_request") or {}
+    if up.get("status") != "pendente":
+        raise HTTPException(status_code=409, detail="Esta solicitação de atualização já foi resolvida.")
+    novo = int(up["amount_cents"])
+    if novo != body.valor_novo_cents:
+        raise HTTPException(status_code=409, detail="A Execução enviou outro valor. Recarregue para ver a solicitação atual.")
     ts = now_iso()
+    decided = {"update_request.decided_by": current.get("actor_id") or current["id"],
+               "update_request.decided_by_name": current.get("actor_name") or current.get("name"),
+               "update_request.decided_at": ts, "updated_at": ts}
+    pend = {"_id": r["_id"], "update_request.status": "pendente", "update_request.amount_cents": novo}
     if body.action == "ignorar":
         async def tx_ign(s):
-            await db.fin_requests.update_one({"_id": r["_id"]}, {"$set": {"ignored_amount_cents": atual, "updated_at": ts}}, session=s)
+            res = await db.fin_requests.update_one(pend, {"$set": {"update_request.status": "ignorada", **decided}}, session=s)
+            if not res.modified_count:
+                raise HTTPException(status_code=409, detail="Esta solicitação de atualização já foi resolvida.")
             await log_event(current, "atualizacao_ignorada", module="receber", entity_type="lancamento", entity_id=e["id"],
                             entity_label=_entry_label(e), origin="Execução",
-                            changes=[{"field": "amount_cents", "label": "Valor na Execução", "before": e["amount_cents"],
-                                      "after": atual}], metadata={"request_id": r["id"]}, session=s)
+                            changes=[{"field": "amount_cents", "label": "Valor solicitado pela Execução",
+                                      "before": e["amount_cents"], "after": novo}],
+                            metadata={"request_id": r["id"]}, session=s)
         await in_transaction(tx_ign)
         return {"ok": True}
     if body.action != "aplicar":
         raise HTTPException(status_code=400, detail="Ação inválida")
-    if e.get("settled_cents") and not body.include_settled:
+    recebido = int(e.get("settled_cents") or 0)
+    if novo < recebido:
+        raise HTTPException(status_code=400, detail={"code": "below_received", "msg": (
+            f"O novo valor do empenho ({_brl(novo)}) é menor que o total já recebido ({_brl(recebido)}). "
+            "Estorne ou corrija os recebimentos antes de atualizar, ou ignore esta solicitação.")})
+    if recebido and not body.include_settled:
         raise HTTPException(status_code=409, detail={"code": "settled", "msg": "Este recebível já tem recebimento registrado. Confirme para alterar o valor de um registro realizado."})
-    if atual < int(e.get("settled_cents") or 0):
-        raise HTTPException(status_code=400, detail="O novo valor é menor que o já recebido. Estorne recebimentos antes.")
 
     async def tx(s):
-        novo = {"amount_cents": atual, "updated_at": ts}
-        if e.get("settled_cents"):
-            novo["status"] = RECEBIDO if atual == e["settled_cents"] else PARCIAL
-        await db.fin_entries.update_one({"_id": e["_id"]}, {"$set": novo, "$inc": {"version": 1}}, session=s)
-        await db.fin_requests.update_one({"_id": r["_id"]}, {"$set": {"source_amount_cents": atual, "updated_at": ts}}, session=s)
+        novo_entry = {"amount_cents": novo, "updated_at": ts}
+        if recebido:
+            # Valor original muda; o total recebido fica intacto e o saldo é recalculado.
+            novo_entry["status"] = RECEBIDO if novo == recebido else PARCIAL
+        res = await db.fin_requests.update_one(pend, {"$set": {"update_request.status": "aplicada",
+                                                               "source_amount_cents": novo, **decided}}, session=s)
+        if not res.modified_count:
+            raise HTTPException(status_code=409, detail="Esta solicitação de atualização já foi resolvida.")
+        await db.fin_entries.update_one({"_id": e["_id"]}, {"$set": novo_entry, "$inc": {"version": 1}}, session=s)
         await log_event(current, "recebivel_atualizado", module="receber", entity_type="lancamento", entity_id=e["id"],
-                        entity_label=_entry_label(e), amount_cents=atual, origin="Execução",
-                        changes=[{"field": "amount_cents", "label": "Valor", "before": e["amount_cents"], "after": atual}],
-                        metadata={"request_id": r["id"]}, session=s)
+                        entity_label=_entry_label(e), amount_cents=novo, origin="Execução",
+                        changes=[{"field": "amount_cents", "label": "Valor", "before": e["amount_cents"], "after": novo}],
+                        metadata={"request_id": r["id"], "recebido_cents": recebido}, session=s)
     await in_transaction(tx)
     return {"ok": True}
+
+
+def _brl(cents: int) -> str:
+    s = f"{cents / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {s}"
 
 
 # ---------------- Sincronização com a timeline ----------------

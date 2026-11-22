@@ -15,7 +15,7 @@ const GRUPOS = [
   ["pagamento_baixado,recebimento_baixado", "Baixas"],
   ["pagamento_estornado,recebimento_reaberto,lancamento_reativado", "Estornos e reaberturas"],
   ["lancamento_cancelado,lancamento_excluido", "Cancelamentos e exclusões"],
-  ["solicitacao_enviada,solicitacao_retirada,recebivel_aprovado,recebivel_rejeitado,atualizacao_recebida,atualizacao_ignorada,recebivel_atualizado,execucao_atualizada", "Integração com a Execução"],
+  ["solicitacao_enviada,solicitacao_retirada,solicitacao_valor_atualizado,recebivel_aprovado,recebivel_rejeitado,atualizacao_recebida,atualizacao_solicitada,atualizacao_ignorada,recebivel_atualizado,execucao_atualizada", "Integração com a Execução"],
   ["saldo_ajustado,conta_criado,conta_editado,conta_inativado,conta_reativado,conta_excluido,cartao_criado,cartao_editado,cartao_inativado,cartao_reativado,cartao_excluido", "Bancos e cartões"],
   ["cliente_criado,fornecedor_criado,cliente_fornecedor_criado,contato_editado,contato_inativado,contato_reativado,contato_excluido,contato_alterado", "Clientes e fornecedores"],
   ["categoria_criado,categoria_editado,categoria_inativado,categoria_reativado,categoria_excluido,forma_criado,forma_editado,forma_inativado,forma_reativado,forma_excluido", "Categorias e formas"],
