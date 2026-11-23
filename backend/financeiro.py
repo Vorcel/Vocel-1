@@ -1637,8 +1637,8 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
       as que VENCEM no intervalo; o em aberto anterior a ele compõe o saldo inicial e vem
       em `anterior` (entra no caixa projetado, nunca nos totais do período).
     - `granularity` + `periods` a partir de hoje (Visão Geral): vencidos caem no 1º período.
-    `bank_ids` (várias contas) e `tag_ids` (QUALQUER uma das tags) valem para tudo. Saldo
-    bancário é por conta: tags não o alteram."""
+    `bank_ids` (várias contas) vale para tudo. `tag_ids` (QUALQUER uma das tags) filtra SOMENTE
+    as despesas: os recebíveis continuam todos. Saldo bancário é por conta: tags não o alteram."""
     owner = _owner(current)
     if granularity not in GRANULARITIES:
         raise HTTPException(status_code=400, detail="Granularidade inválida")
@@ -1673,7 +1673,8 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
         card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": {"$in": ids}})]
         match["$or"] = [{"bank_account_id": {"$in": ids}}, {"card_id": {"$in": card_ids}}]
     if tags:
-        match["tag_ids"] = {"$in": tags}
+        # Tags são das DESPESAS: recebíveis nunca são filtrados por tag no fluxo.
+        match["$and"] = [{"$or": [{"type": RECEBER}, {"tag_ids": {"$in": tags}}]}]
     # Uma linha por dia e tipo: nenhum lançamento trafega, mesmo em períodos longos.
     rows = [(g["_id"]["d"], g["_id"]["t"], int(g["c"])) async for g in db.fin_entries.aggregate([
         {"$match": match}, {"$group": {"_id": {"d": "$due_date", "t": "$type"}, "c": {"$sum": OPEN_EXPR}}}])]
