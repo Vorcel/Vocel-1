@@ -793,7 +793,7 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     contact = await resolve_contact(owner, body.type, body.contact_id)
     bid_label = await _bid_label(owner, body.bid_id)
     tags = await _resolve_tags(owner, body.tag_ids)
-    if not tags["tag_ids"]:
+    if body.type == PAGAR and not tags["tag_ids"]:   # receita: tag opcional
         raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
     classif = await resolve_classification(owner, body.category_id, body.subcategory_id)
     comp0 = parse_date(body.competence_date, "data de competência") if body.competence_date else None
@@ -1068,11 +1068,11 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         patch.update(classif)
     if "competence_date" in sent:
         patch["competence_date"] = parse_date(body.competence_date, "data de competência") if body.competence_date else None
-    # Categoria e tag obrigatórias também na edição: registro antigo sem elas
+    # Categoria (e tag, só nas despesas) obrigatórias também na edição: registro antigo sem elas
     # precisa recebê-las antes de salvar qualquer alteração (sem migração).
     if not patch.get("category_id", e.get("category_id")):
         raise HTTPException(status_code=400, detail="Selecione uma categoria.")
-    if not patch.get("tag_ids", e.get("tag_ids")):
+    if e["type"] == PAGAR and not patch.get("tag_ids", e.get("tag_ids")):
         raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
     # Fornecedor/cliente (cadastro ou o texto antigo já gravado) e forma: idem.
     final = {**e, **patch}

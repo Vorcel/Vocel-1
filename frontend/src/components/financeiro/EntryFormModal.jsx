@@ -146,7 +146,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
       else if (!/^(20\d{2}|2100)$/.test(String(f.invoice_year))) e.year = "Ano inválido.";
     }
     if (!f.category_id) e.category = "Selecione uma categoria.";
-    if (!(f.tag_ids || []).length) e.tags = "Selecione pelo menos uma tag.";
+    if (f.type === "pagar" && !(f.tag_ids || []).length) e.tags = "Selecione pelo menos uma tag.";
     if (showBank && !f.bank_account_id && payTouched) e.bank = `Selecione o banco/conta (${formaSel?.nome}).`;
     if (contactText.trim() && !contact) {
       e.contact = `Selecione um ${f.type === "receber" ? "cliente" : "fornecedor"} cadastrado na lista — ou use "Cadastrar".`;
@@ -288,6 +288,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
           <Field label="Tipo" className="sm:col-span-2">
             <Segmented testid="fin-entry-type" value={f.type} onChange={(v) => {
               setF((p) => ({ ...p, type: v, category_id: "", ...(v === "receber" ? EMPTY_CARD : {}) }));
+              setErrors((p) => ({ ...p, tags: undefined }));   // tag só é obrigatória na despesa
               // Cadastro que não serve ao novo tipo (ex.: só Cliente em A Pagar) sai da seleção.
               if (contact && !contatoServe(contact, v)) { setContact(null); setContactText(""); }
             }}
@@ -417,7 +418,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             </p>
           )}
 
-          <Field as="div" label="Tags" required className="sm:col-span-2" error={errors.tags} testid="fin-entry-tags-field"
+          <Field as="div" label="Tags" required={f.type === "pagar"} className="sm:col-span-2" error={errors.tags} testid="fin-entry-tags-field"
             hint="Selecione uma ou mais (ex.: urgente, licitação, frete). Diferente da categoria.">
             <TagSelect value={f.tag_ids} invalid={!!errors.tags} testid="fin-entry-tags"
               onChange={(v) => { set("tag_ids")(v); setErrors((p) => ({ ...p, tags: undefined })); }} />
