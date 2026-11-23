@@ -42,7 +42,7 @@ export function Pagar() {
       <PageHeader icon={ArrowUpFromLine} title="Contas a Pagar" subtitle="Despesas, parcelas, recorrências e vencimentos." />
       <PeriodHeading period={filters.period} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight flow="out" label="A pagar no período" value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo)} />
+        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight flow="out" label={filters.period.mode === "all" ? "Total a pagar" : "A pagar no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo)} />
         <KpiCard testid="fin-pagar-vencidas" icon={AlertTriangle} tone="danger" flow="out" label="Vencidas" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas)} />
         <KpiCard testid="fin-pagar-pagas" icon={CheckCircle2} tone="success" flow="out" label="Pago no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo)} · ${data?.parciais?.count ?? 0} parcialmente pago(s)`} />
@@ -92,7 +92,7 @@ export function Receber() {
       <PageHeader icon={ArrowDownToLine} title="Contas a Receber" subtitle="Recebíveis oficiais, aprovações da Execução e baixa de recebimentos." />
       <PeriodHeading period={filters.period} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight flow="in" label="A receber no período" value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo, "recebível", "recebíveis")} />
+        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight flow="in" label={filters.period.mode === "all" ? "Total a receber" : "A receber no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo, "recebível", "recebíveis")} />
         <KpiCard testid="fin-receber-atraso" icon={AlertTriangle} tone="danger" flow="in" label="Em atraso" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas, "recebível", "recebíveis")} />
         <KpiCard testid="fin-receber-recebido" icon={CheckCircle2} tone="success" flow="in" label="Recebido no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo)} · ${data?.parciais?.count ?? 0} parcialmente recebido(s)`} />

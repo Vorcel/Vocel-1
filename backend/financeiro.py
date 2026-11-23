@@ -27,6 +27,7 @@ Previsões (cards, fluxo, vencidas) usam sempre o SALDO EM ABERTO
 (amount_cents − settled_cents) de lançamentos pendentes ou parciais."""
 import re
 from bisect import bisect_right
+from calendar import monthrange
 import unicodedata
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
@@ -1578,32 +1579,40 @@ def _buckets(granularity: str, n: int, today: str) -> list:
     return out
 
 
-PERIOD_MODES = {"mensal": "dia", "trimestral": "mes", "semestral": "mes", "anual": "mes", "personalizado": None}
+PERIOD_MODES = {"mensal": "dia", "trimestral": "mes", "semestral": "mes", "anual": "mes", "personalizado": None, "todos": None}
 MAX_FLOW_MONTHS = 60
 
 
 def _range_buckets(mode: str, ini: str, fim: str) -> tuple:
     """Divide [ini, fim] em dias, semanas ou meses (pontas recortadas no intervalo).
-    Personalizado: até 62 dias = por dia; até 26 semanas = por semana; acima = por mês."""
+    Personalizado: até 62 dias = por dia; até 26 semanas = por semana; acima = por mês.
+    Todos os períodos: sem limite de horizonte; até 62 dias = por dia, até 10 anos = por mês, acima = por ano."""
     a, b = date.fromisoformat(ini), date.fromisoformat(fim)
     if b < a:
         raise HTTPException(status_code=400, detail="A data final deve ser igual ou posterior à inicial")
-    if (b.year - a.year) * 12 + b.month - a.month >= MAX_FLOW_MONTHS:
+    todos = mode == "todos"
+    if not todos and (b.year - a.year) * 12 + b.month - a.month >= MAX_FLOW_MONTHS:
         raise HTTPException(status_code=400, detail=f"Escolha um período de até {MAX_FLOW_MONTHS // 12} anos")
     dias = (b - a).days + 1
-    gran = PERIOD_MODES[mode] or ("dia" if dias <= GRANULARITIES["dia"] else "semana" if dias <= GRANULARITIES["semana"] * 7 else "mes")
+    gran = PERIOD_MODES[mode] or ("dia" if dias <= GRANULARITIES["dia"] else "semana" if not todos and dias <= GRANULARITIES["semana"] * 7
+                                  else "ano" if todos and b.year - a.year > 10 else "mes")
     if gran == "dia" and dias > GRANULARITIES["dia"]:
         gran = "mes"
     out, cur = [], a
     while cur <= b:
-        if gran == "mes":
-            end = (cur.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        if gran == "ano":
+            end = date(cur.year, 12, 31)
+            label = str(cur.year)
+        elif gran == "mes":
+            end = cur.replace(day=monthrange(cur.year, cur.month)[1])
             label = f"{MESES[cur.month - 1]}/{cur.year % 100:02d}"
         else:
             end = cur + timedelta(days=6 - cur.weekday() if gran == "semana" else 0)
             label = f"{cur.day:02d}/{MESES[cur.month - 1]}"
         end = min(end, b)
         out.append((cur.isoformat(), end.isoformat(), label))
+        if end == b:
+            break
         cur = end + timedelta(days=1)
     return gran, out
 
@@ -1621,7 +1630,9 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
     foi pago/recebido (inclusive baixas parciais) está no saldo das contas; cancelados e
     solicitações ainda não aprovadas pela Execução nunca entram.
 
-    Dois recortes:
+    Três recortes:
+    - `period_mode=todos` (padrão da página): de hoje até o vencimento do ÚLTIMO lançamento em
+      aberto que passa pelos filtros (`horizonte`). Sem lançamento futuro = só o dia de hoje.
     - `period_mode` + `date_from`/`date_to` (página Fluxo de Caixa): entradas e saídas são só
       as que VENCEM no intervalo; o em aberto anterior a ele compõe o saldo inicial e vem
       em `anterior` (entra no caixa projetado, nunca nos totais do período).
@@ -1633,13 +1644,15 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
         raise HTTPException(status_code=400, detail="Granularidade inválida")
     today = today_sp()
     ranged = period_mode is not None
-    if ranged:
+    todos = period_mode == "todos"
+    buckets = None   # "todos": só depois de conhecer o último vencimento
+    if ranged and not todos:
         if period_mode not in PERIOD_MODES:
             raise HTTPException(status_code=400, detail="Modo de período inválido")
         if not date_from or not date_to:
             raise HTTPException(status_code=400, detail="Informe a data inicial e a final")
         granularity, buckets = _range_buckets(period_mode, parse_date(date_from), parse_date(date_to))
-    else:
+    elif not ranged:
         buckets = _buckets(granularity, max(1, min(int(periods), GRANULARITIES[granularity])), today)
     contas_docs = await db.fin_cadastros.find({"owner_id": owner, "kind": "conta"}).to_list(500)
     saldos = await _account_balances(owner)
@@ -1652,7 +1665,9 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
         raise HTTPException(status_code=404, detail="Conta não encontrada")
     saldo_atual = sum(c["saldo_cents"] for c in contas if (c["id"] in bancos if bancos else c["ativo"]))
 
-    match = {"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$lte": buckets[-1][1]}}
+    match = {"owner_id": owner, "status": {"$in": list(OPEN)}}
+    if buckets:
+        match["due_date"] = {"$lte": buckets[-1][1]}
     if bancos:
         ids = list(bancos)
         card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": {"$in": ids}})]
@@ -1662,6 +1677,12 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
     # Uma linha por dia e tipo: nenhum lançamento trafega, mesmo em períodos longos.
     rows = [(g["_id"]["d"], g["_id"]["t"], int(g["c"])) async for g in db.fin_entries.aggregate([
         {"$match": match}, {"$group": {"_id": {"d": "$due_date", "t": "$type"}, "c": {"$sum": OPEN_EXPR}}}])]
+    horizonte = None
+    if todos:
+        futuros = [d for d, _, _ in rows if d >= today]
+        fim = max(futuros, default=today)
+        granularity, buckets = _range_buckets("todos", today, fim)
+        horizonte = {"inicio": today, "fim": fim, "vazio": not futuros}
     prefs = await db.preferences.find_one({"owner_id": owner}) or {}
     minimo = int(((prefs.get("financeiro") or {}).get("caixa_minimo_cents")) or 0)
 
@@ -1689,7 +1710,7 @@ async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Opti
                     "vencidas_saidas_cents": v_sai, "alerta": alerta})
         saldo = final
     return {"saldo_atual_cents": saldo_atual, "contas": contas, "periodos": out, "caixa_minimo_cents": minimo,
-            "anterior": anterior, "today": today, "granularity": granularity}
+            "anterior": anterior, "horizonte": horizonte, "today": today, "granularity": granularity}
 
 
 # =================== HISTÓRICO (AUDITORIA) ===================

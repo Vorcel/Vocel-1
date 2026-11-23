@@ -12,15 +12,15 @@ import { EmptyState, KpiCard, Money, PageHeader, Panel } from "@/components/fina
 export default function Fluxo() {
   const { version, cad } = useFinance();
   const { prefs } = useData();
-  const [period, setPeriod] = useState(() => ({ mode: "mensal", ref: todaySP() }));
+  const [period, setPeriod] = useState(() => ({ mode: "todos", ref: todaySP() }));
   const [tags, setTags] = useState([]);
   const [bancos, setBancos] = useState([]);
   const [data, setData] = useState(null);
   const { from, to } = flowBounds(period);
-  const titulo = flowTitle(period);
+  const titulo = flowTitle(period, data?.horizonte);
   // UMA consulta alimenta cards, gráfico, detalhamento e alertas: mesmo recorte sempre.
   const key = JSON.stringify({
-    period_mode: period.mode, date_from: from, date_to: to,
+    period_mode: period.mode, date_from: from || undefined, date_to: to || undefined,
     tag_ids: tags.join(",") || undefined, bank_ids: bancos.join(",") || undefined,
   });
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function Fluxo() {
         <KpiCard testid="fin-flow-final" icon={ChartColumnIncreasing} tone={final < 0 ? "danger" : "success"} label="Caixa final projetado" value={money(final)} sub={per.length ? `em ${fmtDate(per[per.length - 1].fim)}` : ""} />
       </div>
 
-      <CashFlowFilters period={period} onPeriod={setPeriod} tags={tags} onTags={setTags} bancos={bancos} onBancos={setBancos}
+      <CashFlowFilters period={period} onPeriod={setPeriod} title={titulo} tags={tags} onTags={setTags} bancos={bancos} onBancos={setBancos}
         contas={data?.contas || []} tagOptions={cad.tag || []} />
 
       <Panel className="mt-5" icon={ChartColumnIncreasing} title="Fluxo de Caixa Projetado" testid="fin-flow-chart"
@@ -80,7 +80,7 @@ export default function Fluxo() {
           </div>
           {temAnterior && (
             <p className="mt-2.5 text-[13px]" style={{ color: "var(--fin-ink-2)" }} data-testid="fin-flow-anterior">
-              O saldo inicial parte do saldo bancário atual e já considera o que está em aberto com vencimento antes de {fmtDate(from)}:{" "}
+              O saldo inicial parte do saldo bancário atual e já considera o que está em aberto com vencimento antes de {fmtDate(per[0]?.inicio)}:{" "}
               entradas de <Money cents={ant.entradas_cents} flow="in" signed={false} /> e saídas de <Money cents={ant.saidas_cents} flow="out" signed={false} />.
             </p>
           )}

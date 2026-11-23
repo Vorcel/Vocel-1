@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { RangeCalendar } from "@/components/RangeCalendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { fmtDate, monthPeriod, periodBounds, periodTitle, quickFilters, shiftPeriod, todaySP } from "@/lib/financeiro";
+import { ALL_PERIODS, fmtDate, monthPeriod, periodBounds, periodTitle, quickFilters, shiftPeriod, todaySP } from "@/lib/financeiro";
 import { cn } from "@/lib/utils";
 
 // FILTROS COMPARTILHADOS do Financeiro (Visão Geral, A Pagar, A Receber).
@@ -17,9 +17,10 @@ function useDebounced(value, ms = 350) {
 
 export const EMPTY_ADV = { type: "", category_id: "", payment_method_id: "", account_id: "", mode: "", tag_ids: [] };
 
-// `type` fixo (A Pagar / A Receber) ou null (Visão Geral). Nada é persistido.
+// `type` fixo (A Pagar / A Receber: abre em "Todos os períodos") ou null (Visão Geral:
+// abre no mês atual). Nada é persistido.
 export function useEntryFilters({ type = null, initialStatus = "" } = {}) {
-  const [period, setPeriod] = useState(() => monthPeriod(todaySP()));
+  const [period, setPeriod] = useState(() => (type ? ALL_PERIODS : monthPeriod(todaySP())));
   const [status, setStatus] = useState(initialStatus);
   const [qText, setQText] = useState("");
   const q = useDebounced(qText.trim());
@@ -37,8 +38,8 @@ export function useEntryFilters({ type = null, initialStatus = "" } = {}) {
   return { type, period, setPeriod, status, setStatus, qText, setQText, adv, setAdv, key, params };
 }
 
-// ‹  Novembro 2026  ›  [calendário]
-export function PeriodNav({ value, onChange, className }) {
+// ‹  Novembro 2026  ›  [calendário]. `allPeriods`: páginas com "Todos os períodos".
+export function PeriodNav({ value, onChange, className, allPeriods }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ from: "", to: "" });
   const custom = value.mode === "custom";
@@ -53,14 +54,14 @@ export function PeriodNav({ value, onChange, className }) {
   return (
     <div className={cn("inline-flex h-10 max-w-full items-stretch overflow-hidden rounded-lg border", className)} data-testid="fin-period"
       style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface)", color: "var(--fin-ink-2)" }}>
-      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, -1))} title="Mês anterior" aria-label="Mês anterior" data-testid="fin-period-prev">
+      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, -1))} title={value.mode === "all" ? "Mês atual" : "Mês anterior"} aria-label={value.mode === "all" ? "Mês atual" : "Mês anterior"} data-testid="fin-period-prev">
         <ChevronLeft size={17} />
       </button>
       <span className="flex min-w-[132px] items-center justify-center truncate px-1 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}
         data-testid="fin-period-label" aria-live="polite">
         {periodTitle(value)}
       </span>
-      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, 1))} title="Próximo mês" aria-label="Próximo mês" data-testid="fin-period-next">
+      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, 1))} title={value.mode === "all" ? "Mês atual" : "Próximo mês"} aria-label={value.mode === "all" ? "Mês atual" : "Próximo mês"} data-testid="fin-period-next">
         <ChevronRight size={17} />
       </button>
       <Popover open={open} onOpenChange={onOpen}>
@@ -82,9 +83,9 @@ export function PeriodNav({ value, onChange, className }) {
               Aplicar
             </button>
           </div>
-          <button type="button" onClick={() => aplicar({ mode: "custom", from: "", to: "" })} data-testid="fin-period-all"
+          <button type="button" onClick={() => aplicar(allPeriods ? ALL_PERIODS : { mode: "custom", from: "", to: "" })} data-testid="fin-period-all"
             className="mt-2 block w-full text-center text-sm hover:underline" style={{ color: "var(--fin-ink-2)" }}>
-            Ver todo o histórico
+            {allPeriods ? "Todos os períodos" : "Ver todo o histórico"}
           </button>
         </PopoverContent>
       </Popover>

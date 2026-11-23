@@ -113,7 +113,7 @@ export function EntriesTable({ filters, pageKey, onSelectionChange }) {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--fin-ink-3)" }} />
           <FinInput value={qText} onChange={(e) => setQText(e.target.value)} placeholder={type === "receber" ? "Buscar por descrição, cliente, pregão..." : "Buscar por descrição, fornecedor..."} className="pl-9" data-testid="fin-search" />
         </div>
-        <PeriodNav value={period} onChange={setPeriod} />
+        <PeriodNav allPeriods={!!type} value={period} onChange={setPeriod} />
         <FinButton variant="outline" onClick={() => setShowAdv((s) => !s)} data-testid="fin-filter-more">
           <SlidersHorizontal size={15} /> Filtros{advCount ? ` (${advCount})` : ""}
         </FinButton>

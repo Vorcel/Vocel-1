@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Landmark, X } from "lucide-react";
 import { RangeCalendar } from "@/components/RangeCalendar";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { FLOW_MODES, flowBounds, flowTitle, fmtDate, setFlowMode, shiftFlow } from "@/lib/financeiro";
+import { FLOW_MODES, flowBounds, fmtDate, setFlowMode, shiftFlow } from "@/lib/financeiro";
 import { BankLogo } from "./icons";
 import { ChipSelect, FinButton, Segmented } from "./ui";
 
@@ -44,11 +44,11 @@ function PeriodModes({ period, onPeriod }) {
   );
 }
 
-function PeriodStepper({ period, onPeriod }) {
-  const custom = period.mode === "personalizado";
+function PeriodStepper({ period, onPeriod, title }) {
+  const fixo = ["personalizado", "todos"].includes(period.mode);   // sem próximo/anterior
   const arrow = (dir, Icon, label, id) => (
-    <button type="button" disabled={custom} onClick={() => onPeriod(shiftFlow(period, dir))} aria-label={label} data-testid={`fin-flow-${id}`}
-      title={custom ? "Para mudar o intervalo, clique em Personalizado" : label}
+    <button type="button" disabled={fixo} onClick={() => onPeriod(shiftFlow(period, dir))} aria-label={label} data-testid={`fin-flow-${id}`}
+      title={fixo ? (period.mode === "todos" ? "Todos os períodos já vai até o último lançamento" : "Para mudar o intervalo, clique em Personalizado") : label}
       className="flex h-full w-9 shrink-0 items-center justify-center transition-colors enabled:hover:bg-[var(--fin-muted-soft)] disabled:cursor-not-allowed disabled:opacity-40">
       <Icon size={17} />
     </button>
@@ -58,7 +58,7 @@ function PeriodStepper({ period, onPeriod }) {
       style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface)", color: "var(--fin-ink-2)" }}>
       {arrow(-1, ChevronLeft, "Período anterior", "prev")}
       <span className="flex min-w-[176px] items-center justify-center whitespace-nowrap px-1 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}
-        data-testid="fin-flow-period-label" aria-live="polite">{flowTitle(period)}</span>
+        data-testid="fin-flow-period-label" aria-live="polite">{title}</span>
       {arrow(1, ChevronRight, "Próximo período", "next")}
     </div>
   );
@@ -111,7 +111,7 @@ function BankMultiSelect({ value, onChange, contas }) {
   );
 }
 
-export function CashFlowFilters({ period, onPeriod, tags, onTags, bancos, onBancos, contas, tagOptions }) {
+export function CashFlowFilters({ period, onPeriod, title, tags, onTags, bancos, onBancos, contas, tagOptions }) {
   const options = [
     { value: "", label: "Todas" },
     ...tagOptions.map((t) => ({ value: t.id, label: `${t.nome}${t.ativo === false ? " (inativa)" : ""}`, color: t.cor || "#64748B" })),
@@ -123,7 +123,7 @@ export function CashFlowFilters({ period, onPeriod, tags, onTags, bancos, onBanc
           <FilterLabel>Período</FilterLabel>
           <PeriodModes period={period} onPeriod={onPeriod} />
         </div>
-        <PeriodStepper period={period} onPeriod={onPeriod} />
+        <PeriodStepper period={period} onPeriod={onPeriod} title={title} />
         <div className="min-w-[220px] flex-1 space-y-1.5">
           <FilterLabel>Bancos</FilterLabel>
           <BankMultiSelect value={bancos} onChange={onBancos} contas={contas} />
