@@ -1,64 +1,62 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, ChartColumnIncreasing, ClipboardCheck, LayoutDashboard, ListOrdered, Scale } from "lucide-react";
 import { toast } from "sonner";
 import { useFinance } from "@/context/FinanceContext";
 import { useData } from "@/context/DataContext";
-import { apiError, finApi, fmtDate, money, periodPresets, periodRange, todaySP } from "@/lib/financeiro";
+import { apiError, finApi, money, periodTitle } from "@/lib/financeiro";
 import { CashFlowChart, DeficitAlert } from "@/components/financeiro/CashFlowChart";
 import { EntriesTable } from "@/components/financeiro/EntriesTable";
+import { useEntryFilters } from "@/components/financeiro/EntryFilters";
 import { ExecutionUpdates, ReceivableQueue, useReceivableQueue } from "@/components/financeiro/ReceivableQueue";
 import { FinButton, FinSelect, KpiCard, PageHeader, Panel, TonePill } from "@/components/financeiro/ui";
 
 // Página inicial do Financeiro = centro operacional, nesta ordem fixa:
 //   1. Cards  2. Tabela COMPLETA de lançamentos (o mesmo EntriesTable de
 //   A Pagar / A Receber)  3. Fluxo Previsto (Ref10) + fila de aprovação.
-// Os valores dos cards são SALDO EM ABERTO (baixas parciais não contam de novo).
+// Cards e tabela leem os MESMOS filtros (useEntryFilters). Os valores dos cards são
+// SALDO EM ABERTO; no filtro "Pago / Recebido" mostram o realizado desses lançamentos.
 export default function Overview() {
   const { version } = useFinance();
   const { prefs } = useData();
   const navigate = useNavigate();
-  const today = todaySP();
-  const presets = useMemo(() => periodPresets(today), [today]);
-  // PERÍODO ÚNICO da página (nunca persistido): o filtro de período da tabela
-  // controla este estado, e os cards usam o MESMO intervalo. O status rápido
-  // (Todos / Em aberto / Pago / Vencido) continua só dentro da tabela.
-  const [periodKey, setPeriodKey] = useState("mes");
-  const [custom, setCustom] = useState({ from: "", to: "" });
+  const filters = useEntryFilters({ initialStatus: "aberto" });
+  const { params } = filters;
   const [months, setMonths] = useState(6);
   const [ov, setOv] = useState(null);
   const [flow, setFlow] = useState(null);
   const queue = useReceivableQueue();
-  const range = periodRange(periodKey, custom, presets);
-  const periodText = periodKey === "todos" ? "todos os vencimentos"
-    : periodKey === "custom" ? (range.date_from || range.date_to
-      ? `${range.date_from ? fmtDate(range.date_from) : "início"} a ${range.date_to ? fmtDate(range.date_to) : "sem fim"}` : "todos os vencimentos")
-    : (presets.find((p) => p.key === periodKey)?.label || "").toLowerCase();
+  const periodText = periodTitle(filters.period);
+  const realizado = filters.status === "realizado";
 
   useEffect(() => {
-    finApi.visaoGeral({ date_from: range.date_from, date_to: range.date_to, open_range: range.open || undefined })
-      .then(setOv).catch((e) => toast.error(apiError(e)));
-  }, [range.date_from, range.date_to, range.open, version]);
+    let alive = true;
+    finApi.visaoGeral(params).then((d) => alive && setOv(d)).catch((e) => alive && toast.error(apiError(e)));
+    return () => { alive = false; };
+  }, [params, version]);
   useEffect(() => {
     finApi.fluxo({ granularity: "mes", periods: months }).then(setFlow).catch((e) => toast.error(apiError(e)));
   }, [months, version]);
 
   const minimo = prefs?.financeiro?.caixa_minimo_cents || 0;
   const venc = ov?.vencidas || {};
+  const entra = realizado ? [ov?.recebido_cents, ov?.recebido_count] : [ov?.a_receber_cents, ov?.a_receber_count];
+  const sai = realizado ? [ov?.pago_cents, ov?.pago_count] : [ov?.a_pagar_cents, ov?.a_pagar_count];
+  const saldo = (entra[0] || 0) - (sai[0] || 0);
   return (
     <>
       <PageHeader icon={LayoutDashboard} title="Financeiro" subtitle="Gestão de contas, recebimentos, pagamentos e fluxo de caixa." />
 
       {/* 1 — Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="fin-overview-cards">
-        <KpiCard testid="fin-kpi-receber" icon={ArrowDownToLine} tone="success" highlight flow="in" label="A Receber no Período"
-          value={money(ov?.a_receber_cents)} sub={`${ov?.a_receber_count ?? 0} lançamento(s) · ${periodText}`}
+        <KpiCard testid="fin-kpi-receber" icon={ArrowDownToLine} tone="success" highlight flow="in" label={realizado ? "Recebido no Período" : "A Receber no Período"}
+          value={money(entra[0])} sub={`${entra[1] ?? 0} lançamento(s) · ${periodText}`}
           onClick={() => navigate("/financeiro/receber")} />
-        <KpiCard testid="fin-kpi-pagar" icon={ArrowUpFromLine} tone="warning" flow="out" label="A Pagar no Período"
-          value={money(ov?.a_pagar_cents)} sub={`${ov?.a_pagar_count ?? 0} lançamento(s) · ${periodText}`}
+        <KpiCard testid="fin-kpi-pagar" icon={ArrowUpFromLine} tone="warning" flow="out" label={realizado ? "Pago no Período" : "A Pagar no Período"}
+          value={money(sai[0])} sub={`${sai[1] ?? 0} lançamento(s) · ${periodText}`}
           onClick={() => navigate("/financeiro/pagar")} />
-        <KpiCard testid="fin-kpi-saldo" icon={Scale} tone={(ov?.saldo_previsto_cents ?? 0) < 0 ? "danger" : "info"} label="Saldo Previsto"
-          value={money(ov?.saldo_previsto_cents)} sub="A receber − a pagar no período" />
+        <KpiCard testid="fin-kpi-saldo" icon={Scale} tone={saldo < 0 ? "danger" : "info"} label={realizado ? "Saldo Realizado" : "Saldo Previsto"}
+          value={money(saldo)} sub={realizado ? "Recebido − pago no período" : "A receber − a pagar no período"} />
         <KpiCard testid="fin-kpi-vencidas" icon={AlertTriangle} tone="danger" label="Vencidas"
           value={money((venc.receber_cents || 0) + (venc.pagar_cents || 0))}
           sub={`${venc.pagar_count || 0} a pagar · ${venc.receber_count || 0} a receber · ${periodText}`} />
@@ -67,7 +65,7 @@ export default function Overview() {
       {/* 2 — Lançamentos (tabela completa) */}
       <Panel className="mt-5" icon={ListOrdered} title="Lançamentos" testid="fin-overview-entries"
         subtitle="Contas a pagar e a receber, parcelas e recorrências.">
-        <EntriesTable pageKey="lancamentos" quickFilters period={periodKey} onPeriodChange={setPeriodKey} custom={custom} onCustomChange={setCustom} />
+        <EntriesTable filters={filters} pageKey="lancamentos" />
       </Panel>
 
       {/* 3 — Fluxo Previsto (Ref10) + fila de aprovação ao lado */}

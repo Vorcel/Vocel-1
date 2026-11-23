@@ -468,6 +468,12 @@ def _entry_action(action: str):
     return rule
 
 
+async def _entries_settle_batch(cur: dict, req: Request) -> None:
+    # O handler só aceita lançamentos do tipo informado.
+    body = await _json(req)
+    require(cur, fin_type_key(body.get("type"), "settle"))
+
+
 async def _entries_list(cur: dict, req: Request) -> None:
     tipo = req.query_params.get("type")
     if tipo:
@@ -678,6 +684,7 @@ RULES: Dict[Tuple[str, str], Rule] = {
     ("GET", "/api/fin/lancamentos"): _entries_list,
     ("GET", "/api/fin/lancamentos/{entry_id}"): _entry_action("view"),
     ("PUT", "/api/fin/lancamentos/{entry_id}"): _entry_action("edit"),
+    ("POST", "/api/fin/lancamentos/baixar-lote"): _entries_settle_batch,
     ("POST", "/api/fin/lancamentos/{entry_id}/baixar"): _entry_action("settle"),
     ("GET", "/api/fin/lancamentos/{entry_id}/baixas"): _entry_action("view"),
     ("POST", "/api/fin/lancamentos/{entry_id}/baixas/{settlement_id}/estornar"): _entry_action("reverse"),

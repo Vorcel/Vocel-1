@@ -315,8 +315,8 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   --fin-surface-2: #F7FAF9;
   --fin-border: #E3EAE8;
   --fin-ink: #0F1F1C;
-  --fin-ink-2: #475A56;
-  --fin-ink-3: #7A8B88;
+  --fin-ink-2: #1E2D2A;
+  --fin-ink-3: #566662;
   --fin-primary: #0F6B5C;
   --fin-primary-hover: #0B564A;
   --fin-primary-soft: #E4F2EE;
@@ -330,7 +330,7 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   --fin-warning-soft: #FDF1DF;
   --fin-info: #0E6E86;
   --fin-info-soft: #E3F1F5;
-  --fin-muted: #64748B;
+  --fin-muted: #475569;
   --fin-muted-soft: #EEF1F4;
   --fin-radius: 14px;
   --fin-shadow: 0 1px 2px rgba(15, 31, 28, 0.04), 0 4px 16px -8px rgba(15, 31, 28, 0.08);
@@ -343,8 +343,8 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   --fin-surface-2: #15221F;
   --fin-border: #22322F;
   --fin-ink: #E6EFED;
-  --fin-ink-2: #A9BAB6;
-  --fin-ink-3: #7D908C;
+  --fin-ink-2: #D2DDDA;
+  --fin-ink-3: #9AABA7;
   --fin-primary: #2BA88F;
   --fin-primary-hover: #36BFA3;
   --fin-primary-soft: #143A33;
@@ -358,7 +358,7 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   --fin-warning-soft: #3A2A14;
   --fin-info: #5CC3DB;
   --fin-info-soft: #13303A;
-  --fin-muted: #94A3B8;
+  --fin-muted: #A9B6C6;
   --fin-muted-soft: #1E2A33;
   --fin-shadow: none;
 }
@@ -369,20 +369,23 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
   box-shadow: var(--fin-shadow);
 }
 .fin-table th {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--fin-ink-3);
+  color: var(--fin-ink);
   background: var(--fin-surface-2);
   text-align: left;
   white-space: nowrap;
   padding: 10px 12px;
 }
 .fin-table td {
-  padding: 11px 12px;
+  padding: 10px 12px;
   border-top: 1px solid var(--fin-border);
-  font-size: 13px;
+  font-size: 14px;
   vertical-align: middle;
+}
+/* Telas menores: colunas mais juntas, para a fonte maior não criar rolagem lateral. */
+@media (max-width: 1400px) {
+  .fin-table th, .fin-table td { padding-left: 7px; padding-right: 7px; }
 }
 .fin-table tbody tr:hover td { background: var(--fin-surface-2); }
 /* Alerta de vencimento na linha (saldo em aberto): fundo muito suave + filete
@@ -394,7 +397,9 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
 .fin-table tbody tr.fin-row-today:hover td { background: var(--fin-warning-soft); }
 .fin-table tbody tr.fin-row-today td:first-child { box-shadow: inset 3px 0 0 #F59E0B; }
 .fin-scope .recharts-cartesian-grid line { stroke: var(--fin-border); }
-.fin-scope .recharts-cartesian-axis-tick-value { fill: var(--fin-ink-3); font-size: 11px; }
+.fin-scope .recharts-cartesian-axis-tick-value { fill: var(--fin-ink-2); font-size: 12px; }
+/* Placeholder: único cinza dentro dos campos. */
+.fin-scope input::placeholder, .fin-scope textarea::placeholder { color: var(--fin-ink-3); opacity: 0.75; }
 .fin-sidebar {
   background: linear-gradient(180deg, var(--fin-sidebar-1) 0%, var(--fin-sidebar-2) 100%);
 }

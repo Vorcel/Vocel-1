@@ -18,20 +18,16 @@ function CardThumb({ card, size = "sm" }) {
   );
 }
 
-// "Forma de pagamento" do lançamento: UMA seleção com duas seções — as formas
-// cadastradas (Pix, Boleto, Transferência, Dinheiro, Outro…) e, em A Pagar, os
-// CARTÕES de crédito ativos (Configurações › Contas e cartões). Escolher um
-// cartão grava card_id (payment_method = credit_card); não existe mais campo
-// "Cartão de crédito" separado. Lista em popover (não <select>) para mostrar a
-// miniatura do cartão; rola dentro do modal (keepScroll).
-//   state: { payment_method_id, card_id }   onChange(value "f:<id>" | "c:<id>" | "")
+// "Forma de pagamento" do lançamento: UMA seleção com dois grupos — as formas
+// cadastradas (Pix, Boleto…) e, em A Pagar, os CARTÕES de crédito cadastrados.
+//   state: { payment_method_id, card_id }   onChange("f:<id>" | "c:<id>")
 export function PaymentMethodPicker({ type, state, onChange, testid = "fin-entry-method", invalid }) {
   const { cad } = useFinance();
   const [open, setOpen] = useState(false);
   const value = paymentValue(state);
   const formas = activeOptions(cad.forma, state.payment_method_id, (x) => !isFormaCartaoGenerica(x));
-  const cartoes = type === "pagar" ? activeOptions(cad.cartao, state.card_id) : [];
   const forma = state.payment_method_id && (cad.forma || []).find((x) => x.id === state.payment_method_id);
+  const cartoes = type === "pagar" ? activeOptions(cad.cartao, state.card_id) : [];
   const cartao = state.card_id && (cad.cartao || []).find((x) => x.id === state.card_id);
   const choose = (v) => { onChange(v); setOpen(false); };
 
@@ -49,7 +45,7 @@ export function PaymentMethodPicker({ type, state, onChange, testid = "fin-entry
     );
   };
   const section = (label) => (
-    <li className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }} role="presentation">{label}</li>
+    <li className="px-2.5 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }} role="presentation">{label}</li>
   );
 
   return (
@@ -61,7 +57,7 @@ export function PaymentMethodPicker({ type, state, onChange, testid = "fin-entry
           {cartao ? <><CardThumb card={cartao} /><span className="truncate">{cardLabel(cartao)}</span></>
             : forma ? <><FinIcon name={forma.icone} size={15} style={{ color: "var(--fin-ink-3)" }} /><span className="truncate">{forma.nome}</span></>
             : state.card_id ? <span className="truncate">Cartão</span>
-            : <span style={{ color: "var(--fin-ink-3)" }}>—</span>}
+            : <span style={{ color: "var(--fin-ink-3)" }}>Selecione…</span>}
           <ChevronDown size={15} className="ml-auto shrink-0" style={{ color: "var(--fin-ink-3)" }} />
         </button>
       </PopoverTrigger>
@@ -69,13 +65,15 @@ export function PaymentMethodPicker({ type, state, onChange, testid = "fin-entry
         className="fin-scope w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-24px)] p-1.5"
         style={{ background: "var(--fin-surface)", borderColor: "var(--fin-border)" }}>
         <ul role="listbox" className="max-h-[min(320px,50vh)] overflow-y-auto overscroll-contain" data-testid={`${testid}-list`}>
-          {item("", <span style={{ color: "var(--fin-ink-3)" }}>Não informar</span>, "none")}
           {section("Formas de pagamento")}
           {formas.map((x) => item(`f:${x.id}`, <><FinIcon name={x.icone} size={15} style={{ color: "var(--fin-ink-3)" }} /><span className="truncate">{x.nome}{x.ativo === false ? " (inativa)" : ""}</span></>, x.id))}
           {type === "pagar" && (
             <>
               {section("Cartões de crédito")}
-              {cartoes.map((c) => item(`c:${c.id}`, <><CardThumb card={c} /><span className="truncate">{cardLabel(c)}{c.ativo === false ? " (inativo)" : ""}</span></>, c.id))}
+              {cartoes.map((c) => item(`c:${c.id}`, <>
+                <CardThumb card={c} /><span className="truncate">{cardLabel(c)}{c.ativo === false ? " (inativo)" : ""}</span>
+                {!c.vencimento_dia && <span className="shrink-0 text-xs" style={{ color: "var(--fin-warning)" }}>sem dia de vencimento</span>}
+              </>, c.id))}
               {!cartoes.length && (
                 <li className="px-2.5 py-1.5 text-xs" style={{ color: "var(--fin-ink-3)" }}>Nenhum cartão ativo. Cadastre em Configurações › Contas e cartões.</li>
               )}
@@ -128,7 +126,7 @@ export function DescriptionInput({ value, onChange, recent = [], invalid, placeh
         onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => e.preventDefault()}
         className="fin-scope w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-24px)] p-1.5"
         style={{ background: "var(--fin-surface)", borderColor: "var(--fin-border)" }}>
-        <p className="flex items-center gap-1.5 px-2.5 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>
+        <p className="flex items-center gap-1.5 px-2.5 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>
           <History size={12} /> Usadas recentemente
         </p>
         <ul role="listbox" className="max-h-[min(260px,40vh)] overflow-y-auto overscroll-contain" data-testid={`${testid}-suggestions`}>

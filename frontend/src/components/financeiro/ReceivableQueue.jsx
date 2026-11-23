@@ -55,7 +55,7 @@ export function ReceivableQueue({ items, loading, limit, compact }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold" style={{ color: "var(--fin-ink)" }} title={r.label}>{sn.orgao || sn.objeto || r.label}</p>
-                <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>
+                <p className="truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
                   {[sn.pregao && `Pregão ${sn.pregao}`, sn.remessa_nome, `Execução · ${relativeTime(r.sent_at)}`].filter(Boolean).join(" · ")}
                 </p>
                 {r.updated_after_send && r.original_amount_cents != null && (
@@ -128,7 +128,7 @@ function ApproveModal({ request: r, onClose }) {
     } catch (x) { toast.error(apiError(x)); if (x.response?.status === 409) { onClose(); bump(); } } finally { setSaving(false); }
   };
   const info = (label, value) => value ? (
-    <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>{label}</p><p className="truncate text-sm font-medium" style={{ color: "var(--fin-ink)" }} title={value}>{value}</p></div>
+    <div className="min-w-0"><p className="text-xs uppercase tracking-wide" style={{ color: "var(--fin-ink-2)" }}>{label}</p><p className="truncate text-sm font-medium" style={{ color: "var(--fin-ink)" }} title={value}>{value}</p></div>
   ) : null;
   const files = (list) => list?.length ? list.map((d) => (
     <a key={d.id} href={fileUrl(d.id)} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium underline-offset-2 hover:underline" style={{ color: "var(--fin-primary)" }}>{d.filename}</a>
@@ -148,8 +148,8 @@ function ApproveModal({ request: r, onClose }) {
         {info("Remessa", sn.remessa_nome)}
         {info("Valor solicitado", <Money cents={r.amount_cents} flow="in" />)}
         {info("Enviado por", `${r.sent_by_name || "—"} · ${relativeTime(r.sent_at)}`)}
-        {sn.empenhos?.length > 0 && <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>Empenho</p>{files(sn.empenhos)}</div>}
-        {sn.notas_fiscais?.length > 0 && <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>Nota fiscal</p>{files(sn.notas_fiscais)}</div>}
+        {sn.empenhos?.length > 0 && <div className="min-w-0"><p className="text-xs uppercase tracking-wide" style={{ color: "var(--fin-ink-2)" }}>Empenho</p>{files(sn.empenhos)}</div>}
+        {sn.notas_fiscais?.length > 0 && <div className="min-w-0"><p className="text-xs uppercase tracking-wide" style={{ color: "var(--fin-ink-2)" }}>Nota fiscal</p>{files(sn.notas_fiscais)}</div>}
         {r.notes && <div className="col-span-2 sm:col-span-3">{info("Observação da Execução", r.notes)}</div>}
       </div>
       {r.valor_execucao_atual_cents != null && r.valor_execucao_atual_cents !== r.amount_cents && (
@@ -167,7 +167,7 @@ function ApproveModal({ request: r, onClose }) {
         </Field>
         <Field label="Descrição" className="sm:col-span-2"><FinInput value={f.description} onChange={set("description")} /></Field>
         <div className="min-w-0" data-testid="fin-approve-contact-field">
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+          <div className="mb-1.5 text-sm font-medium" style={{ color: "var(--fin-ink)" }}>
             <ContactFieldLabel type="receber" onCreate={() => setQuick({ name: contact ? "" : contactText || sn.orgao || "" })} testid="fin-approve-contact-quick" />
           </div>
           <ContactPicker type="receber" value={contact} onSelect={(c) => { setContact(c); setSuggested(false); setErr((p) => ({ ...p, contact: undefined })); }}
@@ -254,8 +254,8 @@ export function ExecutionUpdates({ updates }) {
         <div key={u.request_id} className="rounded-xl border p-3" style={{ borderColor: "var(--fin-warning)", background: "var(--fin-warning-soft)" }} data-testid={`fin-update-${u.request_id}`}>
           <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--fin-warning)" }}><RefreshCcw size={15} /> Alteração recebida da Execução</p>
           <p className="mt-1 truncate text-xs font-medium" style={{ color: "var(--fin-ink)" }} title={u.label}>{u.label}</p>
-          <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }} title={u.description}>{u.description} · vence {fmtDate(u.due_date)} · Origem: {u.origem || "Execução & Pós-Venda"}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: "var(--fin-ink-2)" }}>
+          <p className="truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }} title={u.description}>{u.description} · vence {fmtDate(u.due_date)} · Origem: {u.origem || "Execução & Pós-Venda"}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
             <span>Valor atual no Financeiro: <b className="font-mono-num">{money(u.valor_anterior_cents)}</b></span>
             <span>Novo valor do Empenho: <Money cents={u.valor_novo_cents} flow="in" strong /></span>
             <span>Diferença: <b className="font-mono-num" data-testid={`fin-update-diff-${u.request_id}`}>{dif > 0 ? "+" : dif < 0 ? "−" : ""}{money(Math.abs(dif))}</b></span>

@@ -66,7 +66,7 @@ function Movimentacoes() {
               const c = byId[e.bank_account_id];
               return (
                 <tr key={e.id} className="cursor-pointer" onClick={() => finApi.lancamento(e.entry_id).then((x) => acaoLancamento("detail", x)).catch(() => {})}>
-                  <td className="font-mono-num whitespace-nowrap" style={{ color: "var(--fin-ink-2)" }}>{fmtDate(e.financial_date)}</td>
+                  <td className="font-mono-num whitespace-nowrap" style={{ color: "var(--fin-ink)" }}>{fmtDate(e.financial_date)}</td>
                   <td>
                     {e.bank_account_id
                       ? <span className="flex items-center gap-2"><BankLogo item={c} size={22} /><span className="truncate">{c?.nome || e.account_name}</span></span>

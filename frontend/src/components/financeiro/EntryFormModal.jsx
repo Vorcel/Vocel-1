@@ -5,7 +5,7 @@ import { DatePickerInput } from "@/components/DatePickerInput";
 import { useData } from "@/context/DataContext";
 import { activeOptions, useFinance } from "@/context/FinanceContext";
 import {
-  FREQUENCIAS, MODOS, apiError, apiErrorCode, applyPaymentChoice, centsToInput, contatoServe, finApi, formaExigeConta, money,
+  EMPTY_CARD, FREQUENCIAS, MESES, MODOS, apiError, apiErrorCode, applyPaymentChoice, cardDueDate, centsToInput, contatoServe, finApi, fmtDate, formaExigeConta, money,
   parseMoney, paymentValue, splitInstallments, todaySP,
 } from "@/lib/financeiro";
 import { ContactModal } from "./CadastroModals";
@@ -21,12 +21,14 @@ const SCOPES = [
   { value: "all", label: "Todos — anteriores, este e próximos" },
 ];
 
+const SEM_DIA = "Defina o dia de vencimento deste cartão em Configurações antes de utilizá-lo em um novo lançamento.";
+
 const uid = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 function initialState(mode, entry, defaults) {
   const base = {
     type: "pagar", description: "", client_supplier: "", category_id: "", payment_method_id: "", bank_account_id: "",
-    card_id: "", notes: "", bid_id: "", mode: "avista", amount: "", installments: "2", frequency: "mensal", due_date: todaySP(),
+    ...EMPTY_CARD, notes: "", bid_id: "", mode: "avista", amount: "", installments: "2", frequency: "mensal", due_date: todaySP(),
     tag_ids: [], subcategory_id: "", competence_date: "",
   };
   if (!entry) return { ...base, ...(defaults || {}) };
@@ -41,6 +43,9 @@ function initialState(mode, entry, defaults) {
     payment_method_id: entry.payment_method_id || "",
     bank_account_id: entry.bank_account_id || "",
     card_id: entry.card_id || "",
+    // Editar: a fatura já gravada. Duplicar: mês em branco (escolha consciente) e ano atual.
+    invoice_month: entry.card_id && mode === "edit" ? String(Number((entry.due_date || "").slice(5, 7)) || "") : "",
+    invoice_year: !entry.card_id ? "" : mode === "edit" ? (entry.due_date || "").slice(0, 4) : todaySP().slice(0, 4),
     notes: entry.notes || "",
     bid_id: entry.bid_id || "",
     tag_ids: entry.tag_ids || [],
@@ -64,7 +69,6 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const [contact, setContact] = useState(() => (entryProp?.contact_id ? { id: entryProp.contact_id, name: entryProp.client_supplier || "" } : null));
   const [contactText, setContactText] = useState(() => (entryProp?.contact_id ? entryProp.client_supplier || "" : ""));
   const legacyText = !entryProp?.contact_id && mode === "edit" ? entryProp?.client_supplier || "" : "";
-  const [dropLegacy, setDropLegacy] = useState(false);
   const [quick, setQuick] = useState(null);            // cadastro rápido aberto { name }
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -117,27 +121,44 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
   const payTouched = !origPay || paymentValue(f) !== paymentValue(origPay) || (f.bank_account_id || "") !== (origPay.bank_account_id || "");
   const subOptions = f.category_id ? activeOptions(cad.subcategoria, f.subcategory_id, (x) => x.categoria_id === f.category_id)
     .filter((x) => x.categoria_id === f.category_id) : [];
-  const competence = compTouched ? f.competence_date : f.due_date;
+  // Cartão: vencimento = dia fixo do cartão + mês + ano. Na edição, sem trocar cartão
+  // nem fatura, vale a data JÁ GRAVADA (mesmo que o dia do cartão tenha mudado depois).
+  const cartaoSel = f.card_id ? (cad.cartao || []).find((x) => x.id === f.card_id) : null;
+  const faturaIntacta = !!origPay?.card_id && f.card_id === origPay.card_id
+    && String(f.invoice_month) === String(origPay.invoice_month) && String(f.invoice_year) === String(origPay.invoice_year);
+  const semDia = !!cartaoSel && !cartaoSel.vencimento_dia && !faturaIntacta;
+  const due = !f.card_id ? f.due_date : faturaIntacta ? entryProp.due_date : cardDueDate(cartaoSel?.vencimento_dia, f.invoice_month, f.invoice_year);
+  const competence = compTouched ? f.competence_date : due;
+  // No cartão a recorrência segue a fatura (mensal ou maior).
+  const frequencias = f.card_id ? FREQUENCIAS.filter((x) => !["semanal", "quinzenal"].includes(x.value)) : FREQUENCIAS;
   const catOptions = activeOptions(cad.categoria, f.category_id, (c) => c.tipo === (f.type === "receber" ? "receita" : "despesa"));
   const bidOptions = useMemo(() => [...(bids || [])].sort((a, b) => (b.data_disputa || "").localeCompare(a.data_disputa || "")), [bids]);
 
   const validate = () => {
     const e = {};
     if (!f.description.trim()) e.description = "Informe a descrição.";
+    if (!contact && !contactText.trim() && !legacyText) e.contact = `Selecione um ${f.type === "receber" ? "cliente" : "fornecedor"}.`;
+    if (!paymentValue(f)) e.payment = "Selecione uma forma de pagamento.";
+    if (f.card_id) {
+      if (semDia) e.payment = SEM_DIA;
+      if (!f.invoice_month) e.month = "Selecione o mês da fatura.";
+      if (!f.invoice_year) e.year = "Informe o ano da fatura.";
+      else if (!/^(20\d{2}|2100)$/.test(String(f.invoice_year))) e.year = "Ano inválido.";
+    }
     if (!f.category_id) e.category = "Selecione uma categoria.";
     if (!(f.tag_ids || []).length) e.tags = "Selecione pelo menos uma tag.";
     if (showBank && !f.bank_account_id && payTouched) e.bank = `Selecione o banco/conta (${formaSel?.nome}).`;
     if (contactText.trim() && !contact) {
       e.contact = `Selecione um ${f.type === "receber" ? "cliente" : "fornecedor"} cadastrado na lista — ou use "Cadastrar".`;
-    } else if (contact && !contatoServe(contact, f.type)) {
+    } else if (contact?.role && !contatoServe(contact, f.type)) {   // sem role = cadastro ainda carregando
       e.contact = `"${contact.name}" não está cadastrado como ${f.type === "receber" ? "cliente" : "fornecedor"}.`;
     }
     if (!cents || cents <= 0) e.amount = "Informe um valor maior que zero.";
     else if (isEdit && cents < (entry?.settled_cents || 0)) e.amount = `Não pode ser menor que o já baixado (${money(entry.settled_cents)}).`;
-    if (!f.due_date) e.due_date = "Informe a data.";
+    if (!f.card_id && !f.due_date) e.due_date = "Informe a data.";
     if (!isEdit && f.mode !== "avista" && (n < 1 || n > 360)) e.installments = "Entre 1 e 360.";
     setErrors(e);
-    if (Object.keys(e).length) toast.error(e.category || e.tags || e.bank || "Preencha os campos obrigatórios.");
+    if (Object.keys(e).length) toast.error(e.contact || e.payment || e.month || e.year || e.category || e.tags || e.bank || "Preencha os campos obrigatórios.");
     return !Object.keys(e).length;
   };
 
@@ -146,14 +167,15 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
     const orig = initialState("edit", entry);
     const out = {};
     if ((contact?.id || null) !== (entry.contact_id || null)) out.contact_id = contact?.id || null;
-    else if (dropLegacy && legacyText) out.client_supplier = "";
-    for (const k of ["description", "category_id", "subcategory_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id", "due_date"]) {
+    for (const k of ["description", "category_id", "subcategory_id", "payment_method_id", "bank_account_id", "card_id", "notes", "bid_id"]) {
       if ((f[k] || "") !== (orig[k] || "")) out[k] = f[k] || null;
     }
+    if (!f.card_id) { if (f.due_date !== orig.due_date) out.due_date = f.due_date; }
+    else if (!faturaIntacta) { out.invoice_month = Number(f.invoice_month); out.invoice_year = Number(f.invoice_year); }
     // Competência: compara a competência EFETIVA (sem campo = vencimento).
     // Registro antigo sem competência só ganha o campo se a pessoa mexer nele.
     const compOrig = entry.competence_date || entry.due_date;
-    const compNew = compTouched ? (f.competence_date || f.due_date) : f.due_date;
+    const compNew = compTouched ? (f.competence_date || due) : due;
     if (compNew !== compOrig && (compTouched || entry.competence_date)) out.competence_date = compNew;
     if (cents !== entry.amount_cents) out.amount = (cents / 100).toFixed(2);
     const a = [...(f.tag_ids || [])].sort().join();
@@ -186,7 +208,10 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
         type: f.type, description: f.description.trim(), contact_id: contact?.id || null,
         category_id: f.category_id || null, payment_method_id: f.payment_method_id || null,
         bank_account_id: f.bank_account_id || null, card_id: f.card_id || null, notes: f.notes || null,
-        bid_id: f.bid_id || null, mode: f.mode, amount: (cents / 100).toFixed(2), due_date: f.due_date,
+        bid_id: f.bid_id || null, mode: f.mode, amount: (cents / 100).toFixed(2),
+        // Cartão: o backend calcula o vencimento (dia do cartão + mês + ano).
+        due_date: f.card_id ? null : f.due_date,
+        invoice_month: f.card_id ? Number(f.invoice_month) : null, invoice_year: f.card_id ? Number(f.invoice_year) : null,
         subcategory_id: f.subcategory_id || null, competence_date: compTouched ? (f.competence_date || null) : null,
         installments: f.mode === "avista" ? null : n, frequency: f.mode === "recorrente" ? f.frequency : null,
         client_token: token.current, duplicated_from: mode === "duplicate" ? entry.id : null, tag_ids: f.tag_ids,
@@ -251,9 +276,10 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
               </label>
             </div>
           )}
-          {f.due_date !== entry?.due_date && isSeq && scope !== "one" && (
+          {due !== entry?.due_date && isSeq && scope !== "one" && (
             <p className="flex items-start gap-2 text-xs" style={{ color: "var(--fin-ink-3)" }}>
-              <Info size={14} className="mt-0.5 shrink-0" /> A mudança de vencimento desloca as demais ocorrências pelo mesmo número de dias.
+              <Info size={14} className="mt-0.5 shrink-0" /> {f.card_id ? "As demais ocorrências mudam o mesmo número de meses e caem no dia de vencimento do cartão."
+                : "A mudança de vencimento desloca as demais ocorrências pelo mesmo número de dias."}
             </p>
           )}
         </div>
@@ -261,7 +287,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Tipo" className="sm:col-span-2">
             <Segmented testid="fin-entry-type" value={f.type} onChange={(v) => {
-              setF((p) => ({ ...p, type: v, category_id: "", ...(v === "receber" && p.card_id ? { card_id: "" } : {}) }));
+              setF((p) => ({ ...p, type: v, category_id: "", ...(v === "receber" ? EMPTY_CARD : {}) }));
               // Cadastro que não serve ao novo tipo (ex.: só Cliente em A Pagar) sai da seleção.
               if (contact && !contatoServe(contact, v)) { setContact(null); setContactText(""); }
             }}
@@ -272,21 +298,64 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
               placeholder={f.type === "receber" ? "Ex.: Recebimento – Pregão 90012/2026" : "Ex.: Fornecedor – Mercadoria do pregão"} />
           </Field>
           {/* div (não <label>): o atalho "Cadastrar" no rótulo não pode virar o alvo do label */}
-          <div className="min-w-0" data-testid="fin-entry-contact-field">
-            <div className="mb-1.5 text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
-              <ContactFieldLabel type={f.type} onCreate={() => openQuick()} />
+          <div className="min-w-0 sm:col-span-2" data-testid="fin-entry-contact-field">
+            <div className="mb-1.5 text-sm font-medium" style={{ color: "var(--fin-ink)" }}>
+              <ContactFieldLabel type={f.type} required onCreate={() => openQuick()} />
             </div>
             <ContactPicker type={f.type} value={contact} onSelect={(c) => { setContact(c); setErrors((p) => ({ ...p, contact: undefined })); }}
               text={contactText} onText={setContactText} invalid={!!errors.contact} onCreate={openQuick} testid="fin-entry-client" />
             {errors.contact ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-danger)" }} data-testid="fin-entry-contact-error">{errors.contact}</span>
               : contact?.ativo === false ? <span className="mt-1 block text-xs" style={{ color: "var(--fin-warning)" }}>Cadastro inativo: mantido neste lançamento, mas não aparece em novas seleções.</span>
-              : legacyText && !contact && !dropLegacy ? (
+              : legacyText && !contact ? (
                 <span className="mt-1 block text-xs" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-entry-contact-legacy">
-                  Registro antigo: “{legacyText}” (texto, sem cadastro). Selecione um {papel} para vincular ou{" "}
-                  <button type="button" className="font-semibold underline" onClick={() => setDropLegacy(true)}>remova o texto</button>.
+                  Registro antigo: “{legacyText}” (texto, sem cadastro). Selecione um {papel} para vincular.
                 </span>
               ) : null}
           </div>
+          <Field as="div" label="Forma de pagamento" required error={errors.payment || (semDia ? SEM_DIA : undefined)} className={showBank ? "" : "sm:col-span-2"}>
+            <PaymentMethodPicker type={f.type} state={f} invalid={!!errors.payment || semDia}
+              onChange={(v) => {
+                setF((p) => {
+                  const nx = applyPaymentChoice(p, v, cad.forma);
+                  return nx.card_id && ["semanal", "quinzenal"].includes(nx.frequency) ? { ...nx, frequency: "mensal" } : nx;
+                }); setErrors((p) => ({ ...p, bank: undefined, payment: undefined, month: undefined, year: undefined, due_date: undefined })); }} />
+          </Field>
+          {showBank && (
+            <Field label={f.type === "receber" ? "Conta de recebimento" : "Banco / conta"} required={payTouched} error={errors.bank}>
+              <FinSelect value={f.bank_account_id} invalid={!!errors.bank} data-testid="fin-entry-account"
+                onChange={(e) => { set("bank_account_id")(e); setErrors((p) => ({ ...p, bank: undefined })); }}>
+                <option value="">Selecione…</option>
+                {activeOptions(cad.conta, f.bank_account_id).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </FinSelect>
+            </Field>
+          )}
+          {f.card_id && (
+            <div className="grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-2" data-testid="fin-entry-card-fields">
+              <Field label={!isEdit && f.mode !== "avista" ? "Mês da 1ª fatura" : "Mês da fatura"} required error={errors.month}>
+                <FinSelect value={f.invoice_month} invalid={!!errors.month} data-testid="fin-entry-invoice-month"
+                  onChange={(e) => { set("invoice_month")(e); setErrors((p) => ({ ...p, month: undefined })); }}>
+                  <option value="" disabled>Selecione…</option>
+                  {MESES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </FinSelect>
+              </Field>
+              <Field label="Ano" required error={errors.year}>
+                <FinInput type="number" min={2000} max={2100} value={f.invoice_year} invalid={!!errors.year} data-testid="fin-entry-invoice-year"
+                  onChange={(e) => { set("invoice_year")(e); setErrors((p) => ({ ...p, year: undefined })); }} />
+              </Field>
+              {due && (
+                <p className="text-[13px] sm:col-span-2" style={{ color: "var(--fin-ink-2)" }} data-testid="fin-entry-card-due">
+                  Vencimento automático{!isEdit && f.mode !== "avista" ? " (1ª parcela/ocorrência)" : ""}: <span className="font-mono-num font-semibold" style={{ color: "var(--fin-ink)" }}>{fmtDate(due)}</span>
+                  {faturaIntacta && cartaoSel?.vencimento_dia && due !== cardDueDate(cartaoSel.vencimento_dia, f.invoice_month, f.invoice_year) ? " (data já gravada, mantida)" : ""}
+                </p>
+              )}
+            </div>
+          )}
+          {!isEdit && (
+            <Field label="Modo de lançamento" className="sm:col-span-2">
+              <Segmented testid="fin-entry-mode" value={f.mode} onChange={set("mode")}
+                options={Object.entries(MODOS).map(([value, label]) => ({ value, label }))} />
+            </Field>
+          )}
           <Field label="Categoria" required error={errors.category}>
             <FinSelect value={f.category_id} invalid={!!errors.category} data-testid="fin-entry-category"
               onChange={(e) => {
@@ -300,7 +369,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             </FinSelect>
           </Field>
           {subOptions.length > 0 && (
-            <Field label="Subcategoria (opcional)" className="sm:col-start-2">
+            <Field label="Subcategoria (opcional)">
               <FinSelect value={f.subcategory_id} onChange={set("subcategory_id")} data-testid="fin-entry-subcategory">
                 <option value="">Nenhuma</option>
                 {subOptions.map((x) => <option key={x.id} value={x.id}>{`${x.nome}${x.ativo === false ? " (inativa)" : ""}`}</option>)}
@@ -308,21 +377,17 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             </Field>
           )}
 
-          {!isEdit && (
-            <Field label="Modo de lançamento" className="sm:col-span-2">
-              <Segmented testid="fin-entry-mode" value={f.mode} onChange={set("mode")}
-                options={Object.entries(MODOS).map(([value, label]) => ({ value, label }))} />
-            </Field>
-          )}
           <Field required error={errors.amount}
             hint={isEdit && entry?.settled_cents > 0 ? `Já baixado: ${money(entry.settled_cents)} · em aberto: ${money(entry.amount_cents - entry.settled_cents)}` : undefined}
             label={isEdit ? "Valor deste lançamento" : f.mode === "parcelado" ? "Valor total" : f.mode === "recorrente" ? "Valor por ocorrência" : "Valor"}>
             <FinInput value={f.amount} onChange={set("amount")} inputMode="decimal" placeholder="0,00" invalid={!!errors.amount}
               onBlur={() => cents != null && setF((p) => ({ ...p, amount: centsToInput(cents) }))} data-testid="fin-entry-amount" />
           </Field>
-          <Field label={!isEdit && f.mode !== "avista" ? "Primeiro vencimento" : "Vencimento"} required error={errors.due_date}>
-            <DatePickerInput value={f.due_date} onChange={set("due_date")} testid="fin-entry-due" invalid={!!errors.due_date} />
-          </Field>
+          {!f.card_id && (
+            <Field label={!isEdit && f.mode !== "avista" ? "Primeiro vencimento" : "Vencimento"} required error={errors.due_date}>
+              <DatePickerInput value={f.due_date} onChange={set("due_date")} testid="fin-entry-due" invalid={!!errors.due_date} />
+            </Field>
+          )}
           <Field label="Competência (DRE)"
             hint={compTouched ? (
               <>Mês em que a {f.type === "receber" ? "receita" : "despesa"} aconteceu.{" "}
@@ -330,7 +395,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
                   data-testid="fin-entry-competence-reset">Usar o vencimento</button></>
             ) : (!isEdit && f.mode === "parcelado" ? "Igual ao 1º vencimento. Mude se a compra/venda foi em outro mês (vale para todas as parcelas)."
               : "Igual ao vencimento. Mude se a receita/despesa pertence a outro mês.")}>
-            <DatePickerInput value={competence} testid="fin-entry-competence"
+            <DatePickerInput key={f.card_id && !due ? "sem-fatura" : "data"} value={competence} testid="fin-entry-competence"
               onChange={(v) => { setCompTouched(true); setF((p) => ({ ...p, competence_date: v })); }} />
           </Field>
           {!isEdit && f.mode !== "avista" && (
@@ -341,7 +406,7 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
           {!isEdit && f.mode === "recorrente" && (
             <Field label="Periodicidade">
               <FinSelect value={f.frequency} onChange={set("frequency")} data-testid="fin-entry-frequency">
-                {FREQUENCIAS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+                {frequencias.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </FinSelect>
             </Field>
           )}
@@ -352,19 +417,6 @@ export function EntryFormModal({ mode, entry: entryProp, defaults, onClose, onSa
             </p>
           )}
 
-          <Field as="div" label="Forma de pagamento" className={showBank ? "" : "sm:col-span-2"}>
-            <PaymentMethodPicker type={f.type} state={f}
-              onChange={(v) => { setF((p) => applyPaymentChoice(p, v, cad.forma)); setErrors((p) => ({ ...p, bank: undefined })); }} />
-          </Field>
-          {showBank && (
-            <Field label={f.type === "receber" ? "Conta de recebimento" : "Banco / conta"} required={payTouched} error={errors.bank}>
-              <FinSelect value={f.bank_account_id} invalid={!!errors.bank} data-testid="fin-entry-account"
-                onChange={(e) => { set("bank_account_id")(e); setErrors((p) => ({ ...p, bank: undefined })); }}>
-                <option value="">Selecione…</option>
-                {activeOptions(cad.conta, f.bank_account_id).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-              </FinSelect>
-            </Field>
-          )}
           <Field as="div" label="Tags" required className="sm:col-span-2" error={errors.tags} testid="fin-entry-tags-field"
             hint="Selecione uma ou mais (ex.: urgente, licitação, frete). Diferente da categoria.">
             <TagSelect value={f.tag_ids} invalid={!!errors.tags} testid="fin-entry-tags"

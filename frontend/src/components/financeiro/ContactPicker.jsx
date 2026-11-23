@@ -131,11 +131,11 @@ export function ContactPicker({ type, value, onSelect, text, onText, invalid, on
 }
 
 // Rótulo do campo com o atalho discreto "+ Cadastrar fornecedor/cliente".
-export function ContactFieldLabel({ type, onCreate, testid = "fin-contact-quick" }) {
+export function ContactFieldLabel({ type, onCreate, required, testid = "fin-contact-quick" }) {
   const papel = PAPEL_DO_TIPO[type] || "cliente";
   return (
     <span className="flex items-center justify-between gap-2">
-      <span>{papel === "fornecedor" ? "Fornecedor" : "Cliente"}</span>
+      <span>{papel === "fornecedor" ? "Fornecedor" : "Cliente"}{required && <span style={{ color: "var(--fin-danger)" }}> *</span>}</span>
       {onCreate && (
         <button type="button" onClick={(e) => { e.preventDefault(); onCreate(); }} data-testid={testid}
           className="inline-flex items-center gap-0.5 text-xs font-semibold hover:underline" style={{ color: "var(--fin-primary)" }}>

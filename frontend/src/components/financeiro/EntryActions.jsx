@@ -36,7 +36,7 @@ export function EntryRowActions({ entry: e }) {
     <div className="flex items-center justify-end gap-1">
       {open && p("settle") && (
         <button data-testid={`fin-settle-${e.id}`} onClick={() => acaoLancamento("settle", e)}
-          className="rounded-md px-2 py-1 text-xs font-semibold transition-colors hover:brightness-95"
+          className="rounded-md px-2 py-1 text-[13px] font-semibold transition-colors hover:brightness-95"
           style={{ background: "var(--fin-primary-soft)", color: "var(--fin-primary)" }}>
           {e.type === "pagar" ? "Pagar" : "Receber"}
         </button>
@@ -64,42 +64,54 @@ export function EntryRowActions({ entry: e }) {
 }
 
 export function EntryActionModals({ action, onClose, onDone, onEdit, onDuplicate }) {
-  const [syncEntry, setSyncEntry] = useState(null);
+  // Recebimentos quitados vinculados à Execução (um, ou vários na baixa em lote).
+  const [sync, setSync] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const kind = action?.kind;
   const e = action?.entry;
   const done = () => { onClose(); onDone(); };
+  // Só a QUITAÇÃO integral pode levar a Execução a Pagamento Recebido;
+  // recebimento parcial mantém a timeline em Aguardando Pagamento.
+  const oferecerSync = (saved) => setSync(saved.filter((x) => x.type === "receber" && x.request_id && x.quitado));
 
   const syncExecution = async () => {
     setSyncing(true);
-    try {
-      await finApi.sincronizarExecucao(syncEntry.id);
-      toast.success("Execução atualizada para Pagamento Recebido");
-      setSyncEntry(null);
-      onDone();
-    } catch (err) { toast.error(apiError(err)); } finally { setSyncing(false); }
+    let falhas = 0;
+    let erro = null;
+    for (const x of sync) {
+      try { await finApi.sincronizarExecucao(x.id); } catch (err) { falhas += 1; erro = err; }
+    }
+    const ok = sync.length - falhas;
+    if (ok) toast.success(ok === 1 ? "Execução atualizada para Pagamento Recebido" : `${ok} execuções atualizadas para Pagamento Recebido`);
+    if (falhas) toast.error(falhas === 1 ? apiError(erro) : `${falhas} execuções não foram atualizadas: ${apiError(erro)}`);
+    setSyncing(false);
+    if (ok || sync.length > 1) { setSync([]); onDone(); }
   };
 
   return (
     <>
       {kind === "settle" && <SettleModal entry={e} onClose={onClose}
-        onSettled={(saved) => {
-          done();
-          // Só a QUITAÇÃO integral pode levar a Execução a Pagamento Recebido;
-          // recebimento parcial mantém a timeline em Aguardando Pagamento.
-          if (saved.type === "receber" && saved.request_id && saved.quitado) setSyncEntry(saved);
-        }} />}
+        onSettled={(saved) => { done(); oferecerSync([saved]); }} />}
+      {kind === "settle-batch" && <SettleBatchModal type={e.type} entries={e.entries} onClose={onClose}
+        onSettled={(saved) => { done(); oferecerSync(saved); }} />}
       {kind === "settlements" && <SettlementsModal entry={e} onClose={onClose} onChanged={onDone} />}
       {kind === "reopen" && <ReopenModal entry={e} onClose={onClose} onDone={done} />}
       {(kind === "cancel" || kind === "delete") && <RemoveModal kind={kind} entry={e} onClose={onClose} onDone={done} />}
       <EntryDetailSheet entry={kind === "detail" ? e : null} onClose={onClose} onEdit={onEdit} onDuplicate={onDuplicate} />
-      <FinConfirm open={!!syncEntry} onClose={() => setSyncEntry(null)} loading={syncing} testid="fin-sync-execution"
-        title="Recebimento concluído" confirmLabel="Confirmar" cancelLabel="Cancelar"
-        description="Deseja atualizar a Execução & Pós-Venda para “Pagamento Recebido”?"
+      <FinConfirm open={sync.length > 0} onClose={() => setSync([])} loading={syncing} testid="fin-sync-execution"
+        title={sync.length > 1 ? "Recebimentos concluídos" : "Recebimento concluído"} confirmLabel="Confirmar" cancelLabel="Cancelar"
+        description={sync.length > 1 ? `Deseja atualizar as ${sync.length} execuções vinculadas para “Pagamento Recebido”?`
+          : "Deseja atualizar a Execução & Pós-Venda para “Pagamento Recebido”?"}
         onConfirm={syncExecution}>
         <p className="flex items-center gap-2 rounded-lg p-3 text-sm" style={{ background: "var(--fin-info-soft)", color: "var(--fin-info)" }}>
-          <Truck size={16} /> A timeline da execução{syncEntry?.remessa_id ? " (remessa)" : ""} será concluída (100%). O Atestado não muda.
+          <Truck size={16} className="shrink-0" /> {sync.length > 1 ? "A timeline de cada execução vinculada será concluída (100%). O Atestado não muda."
+            : `A timeline da execução${sync[0]?.remessa_id ? " (remessa)" : ""} será concluída (100%). O Atestado não muda.`}
         </p>
+        {sync.length > 1 && (
+          <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-xs" style={{ color: "var(--fin-ink-2)" }}>
+            {sync.map((x) => <li key={x.id} className="truncate">• {x.description}</li>)}
+          </ul>
+        )}
       </FinConfirm>
     </>
   );
@@ -111,7 +123,7 @@ function Valores({ e, compact }) {
   // Original e saldo em aberto são neutros; o realizado (pago/recebido) leva a cor do fluxo.
   const item = (label, v, strong, flow) => (
     <div className="min-w-0">
-      <p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--fin-ink-3)" }}>{label}</p>
+      <p className="text-xs uppercase tracking-wide" style={{ color: "var(--fin-ink-2)" }}>{label}</p>
       <p className={`${compact ? "text-sm" : "text-base"} ${strong ? "font-bold" : "font-semibold"}`}><Money cents={v} flow={flow} /></p>
     </div>
   );
@@ -157,7 +169,7 @@ function SettleModal({ entry: e, onClose, onSettled }) {
   return (
     <FinModal open onClose={onClose} busy={saving} size="sm" icon={CheckCircle2} testid="fin-settle-modal"
       title={pagar ? "Registrar pagamento" : "Registrar recebimento"}
-      description={`${e.description} · vence ${fmtDate(e.due_date)}`}
+      description={<span style={{ color: "var(--fin-ink)" }}>{e.description} · vence {fmtDate(e.due_date)}</span>}
       footer={<>
         <FinButton variant="outline" onClick={onClose} disabled={saving}>Cancelar</FinButton>
         <FinButton onClick={submit} loading={saving} data-testid="fin-settle-confirm">
@@ -179,10 +191,68 @@ function SettleModal({ entry: e, onClose, onSettled }) {
           <AccountChips value={conta} invalid={contaErr} onChange={(v) => { setConta(v); setContaErr(false); }} />
         </Field>
         {formaOriginal && (
-          <p className="text-xs" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-settle-original-method">
+          <p className="text-xs" style={{ color: "var(--fin-ink-2)" }} data-testid="fin-settle-original-method">
             {pagar ? "Pagamento via" : "Recebimento via"}: <span className="font-medium" style={{ color: "var(--fin-ink-2)" }}>{formaOriginal}</span> (forma registrada no lançamento)
           </p>
         )}
+        <Field label="Observação"><FinTextarea rows={2} value={notes} onChange={(x) => setNotes(x.target.value)} /></Field>
+      </div>
+    </FinModal>
+  );
+}
+
+// Baixa EM LOTE: quita o saldo em aberto só das linhas marcadas, com a mesma data
+// e conta. Parcelas/ocorrências não marcadas nunca são tocadas (sem escopo de série).
+function SettleBatchModal({ type, entries, onClose, onSettled }) {
+  const pagar = type === "pagar";
+  const n = entries.length;
+  const total = entries.reduce((s, x) => s + x.open_cents, 0);
+  const [date, setDate] = useState(todaySP());
+  const [conta, setConta] = useState("");
+  const [contaErr, setContaErr] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const contaMsg = pagar ? "Selecione a conta utilizada no pagamento." : "Selecione a conta em que o recebimento entrou.";
+  const submit = async () => {
+    if (!date) { toast.error("Informe a data."); return; }
+    if (!conta) { setContaErr(true); toast.error(contaMsg); return; }
+    setSaving(true);
+    try {
+      const r = await finApi.baixarLote({ type, ids: entries.map((x) => x.id), date, bank_account_id: conta, notes: notes || null, expected_total_cents: total });
+      toast.success(`${r.count} ${pagar ? "pagamento(s) registrado(s)" : "recebimento(s) registrado(s)"} · ${money(r.total_cents)}`);
+      onSettled(r.items);
+    } catch (err) { toast.error(apiError(err)); } finally { setSaving(false); }
+  };
+  return (
+    <FinModal open onClose={onClose} busy={saving} size="sm" icon={CheckCircle2} testid="fin-settle-batch-modal"
+      title={`Baixar ${n} lançamento${n === 1 ? "" : "s"}`}
+      description={pagar ? "Registra o pagamento do saldo em aberto de cada um." : "Registra o recebimento do saldo em aberto de cada um."}
+      footer={<>
+        <FinButton variant="outline" onClick={onClose} disabled={saving}>Cancelar</FinButton>
+        <FinButton onClick={submit} loading={saving} data-testid="fin-settle-batch-confirm">{pagar ? "Confirmar pagamentos" : "Confirmar recebimentos"}</FinButton>
+      </>}>
+      <div className="space-y-4">
+        <div className="rounded-xl border p-3" style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface-2)" }}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm" style={{ color: "var(--fin-ink-2)" }}>Total</span>
+            <span className="font-mono-num text-xl font-bold" style={{ color: "var(--fin-ink)" }} data-testid="fin-settle-batch-total">{money(total)}</span>
+          </div>
+          <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t pt-2 text-[13px]" style={{ borderColor: "var(--fin-border)", color: "var(--fin-ink)" }}>
+            {entries.map((x) => (
+              <li key={x.id} className="flex items-baseline justify-between gap-3">
+                <span className="truncate" title={x.description}>{x.description}{x.sequence_id ? ` (${x.sequence_index}/${x.sequence_total})` : ""} · {fmtDate(x.due_date)}</span>
+                <span className="font-mono-num shrink-0">{money(x.open_cents)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <Field label={pagar ? "Data do pagamento" : "Data do recebimento"} required hint="Aplicada a todos os selecionados. Pode ser retroativa.">
+          <DatePickerInput value={date} onChange={setDate} testid="fin-settle-batch-date" />
+        </Field>
+        <Field as="div" label={pagar ? "Conta utilizada" : "Conta de entrada"} required error={contaErr ? contaMsg : undefined}
+          hint="Aplicada a todos os selecionados, independente da forma original de cada lançamento.">
+          <AccountChips value={conta} invalid={contaErr} onChange={(v) => { setConta(v); setContaErr(false); }} />
+        </Field>
         <Field label="Observação"><FinTextarea rows={2} value={notes} onChange={(x) => setNotes(x.target.value)} /></Field>
       </div>
     </FinModal>
@@ -210,7 +280,7 @@ function SettlementsList({ items, onReverse, type }) {
         {items.map((b) => (
           <li key={b.id} className="flex items-center gap-3 px-3 py-2.5 text-sm" style={{ borderColor: "var(--fin-border)", opacity: b.reversed ? 0.55 : 1 }}>
             <span className="font-mono-num w-[78px] shrink-0" style={{ color: "var(--fin-ink-2)" }}>{fmtDate(b.financial_date)}</span>
-            <span className="min-w-0 flex-1 truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>
+            <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
               {[b.account_name, b.payment_method_name, b.created_by_name && `por ${b.created_by_name}`].filter(Boolean).join(" · ") || "—"}
               {b.reversed && <span className="block" style={{ color: "var(--fin-danger)" }}>Estornada{b.reversal_reason ? `: ${b.reversal_reason}` : ""}</span>}
             </span>
@@ -224,7 +294,7 @@ function SettlementsList({ items, onReverse, type }) {
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-right text-xs" style={{ color: "var(--fin-ink-3)" }}>Total baixado: <Amount cents={ativo} type={type} strong /></p>
+      <p className="mt-1.5 text-right text-[13px]" style={{ color: "var(--fin-ink-2)" }}>Total baixado: <Amount cents={ativo} type={type} strong /></p>
     </div>
   );
 }
@@ -251,7 +321,7 @@ function SettlementsModal({ entry, onClose, onChanged }) {
   return (
     <>
       <FinModal open={!alvo} onClose={onClose} size="md" icon={Receipt} testid="fin-settlements-modal"
-        title="Baixas e estornos" description={e.description}
+        title="Baixas e estornos" description={<span style={{ color: "var(--fin-ink)" }}>{e.description}</span>}
         footer={<FinButton variant="outline" onClick={onClose}>Fechar</FinButton>}>
         <div className="space-y-4">
           <Valores e={e} />
@@ -337,7 +407,7 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
   const name = (id, snap) => (id && byId[id]?.nome) || snap || "—";
   const row = (label, value) => (
     <div className="flex justify-between gap-4 border-b py-2 text-sm" style={{ borderColor: "var(--fin-border)" }}>
-      <span style={{ color: "var(--fin-ink-3)" }}>{label}</span>
+      <span style={{ color: "var(--fin-ink-2)" }}>{label}</span>
       <span className="text-right font-medium" style={{ color: "var(--fin-ink)" }}>{value}</span>
     </div>
   );
@@ -361,7 +431,7 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
                 {row("Vencimento / previsão", fmtDate(e.due_date))}
                 {e.settled_date && row(e.type === "pagar" ? "Quitado em" : "Recebido integralmente em", fmtDate(e.settled_date))}
                 {row(e.type === "pagar" ? "Fornecedor" : "Cliente", e.client_supplier
-                  ? <>{e.client_supplier}{!e.contact_id && <span className="block text-[11px] font-normal" style={{ color: "var(--fin-ink-3)" }}>texto antigo, sem cadastro</span>}</>
+                  ? <>{e.client_supplier}{!e.contact_id && <span className="block text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>texto antigo, sem cadastro</span>}</>
                   : "—")}
                 {row("Categoria", <CategoryChip id={e.category_id} name={e.category_name} />)}
                 {e.subcategory_id && row("Subcategoria", name(e.subcategory_id, e.subcategory_name))}
@@ -390,10 +460,10 @@ function EntryDetailSheet({ entry, onClose, onEdit, onDuplicate }) {
                 {hist.map((h) => {
                   const t = fmtTimestamp(h.ts);
                   return (
-                    <li key={h.id} className="rounded-lg border p-2.5 text-xs" style={{ borderColor: "var(--fin-border)" }}>
+                    <li key={h.id} className="rounded-lg border p-2.5 text-[13px]" style={{ borderColor: "var(--fin-border)" }}>
                       <div className="flex items-center justify-between gap-2">
                         <TonePill tone={ACOES[h.action]?.tone}>{ACOES[h.action]?.label || h.action}</TonePill>
-                        <span style={{ color: "var(--fin-ink-3)" }}>{t.date} {t.time}</span>
+                        <span style={{ color: "var(--fin-ink-2)" }}>{t.date} {t.time}</span>
                       </div>
                       <p className="mt-1" style={{ color: "var(--fin-ink-2)" }}>
                         por {h.user_name || "—"}{h.amount_cents != null && /baixad|parcial|estornad|reaberto/.test(h.action) ? ` · ${money(h.amount_cents)}` : ""}{h.financial_date ? ` · data financeira ${fmtDate(h.financial_date)}` : ""}

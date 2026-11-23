@@ -40,8 +40,8 @@ from db import db, now_iso
 from fin_contatos import resolve_contact
 from permissions import FIN_FORM_KEYS, allowed_fin_types, cadastro_key, has, has_any
 from fin_core import (
-    ATRASADO, CANCELADO, MAX_OCCURRENCES, MODES, OPEN, OPEN_EXPR, PAGAR, PARCIAL, PENDENTE, RECEBER,
-    RECEBIDO, SETTLED, SP_TZ, TYPES, brl, days_between, diff, effective_status, in_transaction, log_event,
+    ATRASADO, CANCELADO, FREQUENCIES, MAX_OCCURRENCES, MODES, OPEN, OPEN_EXPR, PAGAR, PARCIAL, PENDENTE, RECEBER,
+    RECEBIDO, SETTLED, SP_TZ, TYPES, add_months, brl, days_between, diff, effective_status, in_transaction, log_event,
     new_id, occurrence_dates, open_cents, parse_date, settled_status, shift_days, signed_cents,
     split_installments, to_cents, today_sp,
 )
@@ -275,6 +275,9 @@ async def _validated_fields(owner: str, kind: str, body: CadastroInput, creating
     if kind == "conta" and data.get("tipo_conta") and data["tipo_conta"] not in ACCOUNT_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de conta inválido.")
     if kind == "cartao":
+        # Cartão antigo sem o dia continua acessível; ao cadastrar ou salvar o campo, é obrigatório.
+        if (creating or "vencimento_dia" in data) and data.get("vencimento_dia") is None:
+            raise HTTPException(status_code=400, detail="Informe o dia de vencimento da fatura (1 a 31).")
         if data.get("final") and not re.fullmatch(r"\d{4}", data["final"]):
             raise HTTPException(status_code=400, detail="Informe apenas os 4 últimos dígitos do cartão.")
         for f in ("fechamento_dia", "vencimento_dia"):
@@ -535,6 +538,48 @@ async def _payment_fields(owner: str, tipo: str, pm_id: Optional[str], bank_id: 
     return {"payment_method": "forma", "payment_method_id": pm_id, "bank_account_id": bank_id, "card_id": None}
 
 
+def _card_generic(forma_nome: Optional[str]) -> bool:
+    return _norm(forma_nome or "") in {"cartao", "cartao de credito", "credito"}
+
+
+def _require_contact_payment(tipo: str, contact_present: bool, pay: dict) -> None:
+    """Fornecedor/Cliente e forma de pagamento obrigatórios (criar e editar)."""
+    if not contact_present:
+        raise HTTPException(status_code=400, detail="Selecione um fornecedor." if tipo == PAGAR else "Selecione um cliente.")
+    if not pay.get("card_id") and not pay.get("payment_method_id"):
+        raise HTTPException(status_code=400, detail="Selecione uma forma de pagamento.")
+
+
+async def _forbid_generic_card(owner: str, tipo: str, pm_id: Optional[str]) -> None:
+    # A forma genérica "Cartão" não diz QUAL cartão: em A Pagar é preciso o cartão cadastrado.
+    if tipo != PAGAR or not pm_id:
+        return
+    forma = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "forma", "id": pm_id}, {"nome": 1})
+    if forma and _card_generic(forma.get("nome")):
+        raise HTTPException(status_code=400, detail="Selecione um cartão.")
+
+
+async def _card_due(owner: str, card_id: str, month: Optional[int], year: Optional[int]) -> tuple:
+    """Vencimento da fatura = dia fixo do cartão + mês + ano (último dia válido do
+    mês, se o dia não existir). Devolve (data ISO, dia configurado). A data nunca
+    vem do cliente."""
+    if not month:
+        raise HTTPException(status_code=400, detail="Selecione o mês da fatura.")
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Mês da fatura inválido.")
+    if not year:
+        raise HTTPException(status_code=400, detail="Informe o ano da fatura.")
+    if not 2000 <= year <= 2100:
+        raise HTTPException(status_code=400, detail="Ano da fatura inválido.")
+    card = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "cartao", "id": card_id}, {"vencimento_dia": 1})
+    if not card:
+        raise HTTPException(status_code=400, detail="Cartão não encontrado(a).")
+    day = card.get("vencimento_dia")
+    if not day:
+        raise HTTPException(status_code=400, detail="Defina o dia de vencimento deste cartão em Configurações antes de utilizá-lo em um novo lançamento.")
+    return add_months(f"{year:04d}-{month:02d}-01", 0, int(day)), int(day)
+
+
 async def _remember_description(owner: str, desc: str, session=None) -> None:
     """Memória das últimas descrições do usuário (sem duplicata; a repetida sobe
     para o topo). Só sugestão: o campo continua texto livre."""
@@ -668,7 +713,9 @@ class EntryInput(BaseModel):
     amount: Any                     # à vista: valor; parcelado: TOTAL; recorrente: valor POR ocorrência
     installments: Optional[int] = None
     frequency: Optional[str] = None
-    due_date: str                   # vencimento (1ª data na série)
+    due_date: Optional[str] = None  # vencimento (1ª data na série); no cartão é CALCULADO e este campo é ignorado
+    invoice_month: Optional[int] = None  # cartão: mês/ano da fatura (1ª parcela na série)
+    invoice_year: Optional[int] = None
     client_token: Optional[str] = None   # idempotência contra clique duplo
     duplicated_from: Optional[str] = None
     tag_ids: Optional[list] = None
@@ -698,7 +745,6 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     desc = (body.description or "").strip()
     if not desc:
         raise HTTPException(status_code=400, detail="Informe a descrição.")
-    first = parse_date(body.due_date, "data de vencimento")
     amount = to_cents(body.amount)
 
     if body.client_token:
@@ -706,6 +752,18 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
         if existing:
             today = today_sp()
             return {"created": len(existing), "items": [_entry_out(e, today) for e in existing], "idempotent": True}
+
+    if (body.client_supplier or "").strip() and not body.contact_id:
+        raise _free_text_contact_error(body.type)
+    _require_contact_payment(body.type, bool(body.contact_id), {"card_id": body.card_id, "payment_method_id": body.payment_method_id})
+    due_day = None
+    if body.card_id:
+        first, due_day = await _card_due(owner, body.card_id, body.invoice_month, body.invoice_year)
+        if body.mode == "recorrente" and FREQUENCIES.get(body.frequency or "mensal", ("", 1, 0))[2]:
+            raise HTTPException(status_code=400, detail="No cartão de crédito a recorrência segue a fatura: use periodicidade mensal ou maior.")
+    else:
+        await _forbid_generic_card(owner, body.type, body.payment_method_id)
+        first = parse_date(body.due_date, "data de vencimento")
 
     if body.mode == "avista":
         values, dates = [amount], [first]
@@ -718,11 +776,11 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
         if body.mode == "parcelado":
             # Parcelado: o valor informado é o TOTAL, dividido sem perder centavos.
             values = split_installments(amount, n)
-            dates = occurrence_dates(first, n, "mensal")
+            dates = occurrence_dates(first, n, "mensal", due_day)
         else:
             # Recorrente: o valor informado é POR OCORRÊNCIA — nunca é dividido.
             values = [amount] * n
-            dates = occurrence_dates(first, n, body.frequency or "mensal")
+            dates = occurrence_dates(first, n, body.frequency or "mensal", due_day)
 
     if not body.category_id:
         raise HTTPException(status_code=400, detail="Selecione uma categoria.")
@@ -730,8 +788,6 @@ async def create_entries(body: EntryInput, current=Depends(get_current_user)):
     refs = await _resolve_refs(owner, body.type, {"category_id": body.category_id,
                                                   **{k: pay[k] for k in ("payment_method_id", "bank_account_id", "card_id")}})
     refs["payment_method"] = pay["payment_method"]
-    if (body.client_supplier or "").strip() and not body.contact_id:
-        raise _free_text_contact_error(body.type)
     contact = await resolve_contact(owner, body.type, body.contact_id)
     bid_label = await _bid_label(owner, body.bid_id)
     tags = await _resolve_tags(owner, body.tag_ids)
@@ -843,6 +899,8 @@ def _entries_query(owner: str, *, type: Optional[str], status: Optional[str], ca
         rng["$lte"] = parse_date(date_to)
     if rng:
         if date_field in query and isinstance(query[date_field], dict):
+            if "$gte" in query[date_field] and "$gte" in rng:   # "a vencer": nunca antes de hoje
+                rng["$gte"] = max(rng["$gte"], query[date_field]["$gte"])
             query[date_field].update(rng)
         else:
             query[date_field] = rng
@@ -854,31 +912,43 @@ def _entries_query(owner: str, *, type: Optional[str], status: Optional[str], ca
     return query
 
 
+class EntryFilters:
+    """Filtros de lançamentos (query string). FONTE ÚNICA: a lista e os cards
+    (`/visao-geral`, `/resumo`) recebem exatamente os mesmos parâmetros."""
+    def __init__(self, type: Optional[str] = None, status: Optional[str] = None, category_id: Optional[str] = None,
+                 payment_method_id: Optional[str] = None, account_id: Optional[str] = None, q: Optional[str] = None,
+                 date_from: Optional[str] = None, date_to: Optional[str] = None, mode: Optional[str] = None,
+                 date_field: str = "due_date", sequence_id: Optional[str] = None, tag_ids: Optional[str] = None,
+                 subcategory_id: Optional[str] = None):
+        self.sequence_id = sequence_id
+        self.fields = dict(
+            type=type, status=status, category_id=category_id, payment_method_id=payment_method_id,
+            account_id=account_id, q=q, date_from=date_from, date_to=date_to, mode=mode, tag_ids=tag_ids,
+            subcategory_id=subcategory_id, date_field="settled_date" if date_field == "settled_date" else "due_date")
+
+    async def query(self, current: dict, today: str) -> dict:
+        owner = _owner(current)
+        account_id = self.fields["account_id"]
+        card_ids = None
+        if account_id:
+            card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": account_id})]
+        query = _entries_query(owner, today=today, card_ids=card_ids, **self.fields)
+        if self.sequence_id:
+            query["sequence_id"] = self.sequence_id
+        if not self.fields["type"] and not has(current, "finance.overview.view"):
+            # Sem a Visão Geral, a lista mistura só os tipos que o usuário pode ver.
+            query["type"] = {"$in": allowed_fin_types(current)}
+        return query
+
+
 @fin_router.get("/lancamentos")
 async def list_entries(
-    type: Optional[str] = None, status: Optional[str] = None, category_id: Optional[str] = None,
-    payment_method_id: Optional[str] = None, account_id: Optional[str] = None, q: Optional[str] = None,
-    date_from: Optional[str] = None, date_to: Optional[str] = None, mode: Optional[str] = None,
-    date_field: str = "due_date", sequence_id: Optional[str] = None, tag_ids: Optional[str] = None,
-    subcategory_id: Optional[str] = None,
+    f: EntryFilters = Depends(),
     page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=200),
     sort: str = "due_date", dir: str = "asc", current=Depends(get_current_user),
 ):
-    owner = _owner(current)
     today = today_sp()
-    card_ids = None
-    if account_id:
-        card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": account_id})]
-    query = _entries_query(owner, type=type, status=status, category_id=category_id,
-                           payment_method_id=payment_method_id, account_id=account_id, q=q,
-                           date_from=date_from, date_to=date_to, mode=mode,
-                           date_field="settled_date" if date_field == "settled_date" else "due_date",
-                           today=today, card_ids=card_ids, tag_ids=tag_ids, subcategory_id=subcategory_id)
-    if sequence_id:
-        query["sequence_id"] = sequence_id
-    if not type and not has(current, "finance.overview.view"):
-        # Sem a Visão Geral, a lista mistura só os tipos que o usuário pode ver.
-        query["type"] = {"$in": allowed_fin_types(current)}
+    query = await f.query(current, today)
     key = SORTS.get(sort, "due_date")
     direction = -1 if dir == "desc" else 1
     total = await db.fin_entries.count_documents(query)
@@ -936,6 +1006,8 @@ class EntryUpdate(BaseModel):
     bid_id: Optional[str] = None
     amount: Optional[Any] = None
     due_date: Optional[str] = None
+    invoice_month: Optional[int] = None  # cartão: só quando a fatura (ou o cartão) muda
+    invoice_year: Optional[int] = None
     tag_ids: Optional[list] = None
     subcategory_id: Optional[str] = None
     competence_date: Optional[str] = None
@@ -1000,10 +1072,33 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
         raise HTTPException(status_code=400, detail="Selecione uma categoria.")
     if not patch.get("tag_ids", e.get("tag_ids")):
         raise HTTPException(status_code=400, detail="Selecione pelo menos uma tag.")
-    delta_days = 0
-    if "due_date" in sent:
+    # Fornecedor/cliente (cadastro ou o texto antigo já gravado) e forma: idem.
+    final = {**e, **patch}
+    _require_contact_payment(e["type"], bool(final.get("contact_id") or (final.get("client_supplier") or "").strip()), final)
+    if final.get("payment_method_id") and final["payment_method_id"] != e.get("payment_method_id"):
+        await _forbid_generic_card(owner, e["type"], final["payment_method_id"])
+    # Cartão: a data já gravada é PRESERVADA (mesmo que o dia do cartão tenha mudado);
+    # só recalcula quando a pessoa troca o cartão ou o mês/ano da fatura.
+    delta_days, card_day, card_first = 0, None, None
+    if final.get("card_id"):
+        novo_cartao = final["card_id"] != e.get("card_id")
+        pediu = {"invoice_month", "invoice_year"} & sent
+        mesma_fatura = (f"{body.invoice_year or 0:04d}-{body.invoice_month or 0:02d}" == e["due_date"][:7]) and not novo_cartao
+        if novo_cartao or (pediu and not mesma_fatura):
+            card_first, card_day = await _card_due(owner, final["card_id"], body.invoice_month, body.invoice_year)
+            delta_days = days_between(e["due_date"], card_first)
+        elif body.due_date and parse_date(body.due_date, "data de vencimento") != e["due_date"]:
+            raise HTTPException(status_code=400, detail="No cartão de crédito o vencimento é calculado: escolha o mês e o ano da fatura.")
+    elif "due_date" in sent:
         new_due = parse_date(body.due_date, "data de vencimento")
         delta_days = days_between(e["due_date"], new_due)
+
+    def new_due_of(x: dict) -> str:
+        if not card_day:
+            return shift_days(x["due_date"], delta_days)
+        # Série no cartão: cada parcela anda o mesmo nº de MESES e cai no dia do cartão.
+        a, b = date.fromisoformat(e["due_date"]), date.fromisoformat(card_first)
+        return add_months(x["due_date"], (b.year - a.year) * 12 + b.month - a.month, card_day)
 
     alvo = await _scope_entries(owner, e, body.scope)
     alvo = [x for x in alvo if x["status"] != CANCELADO]
@@ -1020,7 +1115,7 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
     before_view = {**e}
     after_view = {**e, **patch}
     if delta_days:
-        after_view["due_date"] = shift_days(e["due_date"], delta_days)
+        after_view["due_date"] = new_due_of(e)
     changes = diff(before_view, after_view, _entry_labels(e["type"]))
     if not changes:
         return {"updated": 0, "skipped_settled": 0}
@@ -1037,10 +1132,10 @@ async def update_entry(entry_id: str, body: EntryUpdate, current=Depends(get_cur
             if "amount_cents" in upd and x.get("settled_cents"):
                 # Valor ajustado num lançamento com baixas: o status acompanha o novo saldo.
                 upd["status"] = settled_status(x["type"]) if upd["amount_cents"] == x["settled_cents"] else PARCIAL
-            if delta_days:
-                upd["due_date"] = shift_days(x["due_date"], delta_days)
+            if delta_days or card_day:
+                upd["due_date"] = new_due_of(x)
                 if "competence_date" not in patch and x.get("competence_date") and x.get("mode") != "parcelado":
-                    upd["competence_date"] = shift_days(x["competence_date"], delta_days)
+                    upd["competence_date"] = shift_days(x["competence_date"], days_between(x["due_date"], upd["due_date"]))
             await db.fin_entries.update_one({"_id": x["_id"]}, {"$set": {**upd, "updated_at": ts, "updated_by": current["id"]},
                                                                 "$inc": {"version": 1}}, session=s)
         if "description" in patch and patch["description"] != e.get("description"):
@@ -1074,6 +1169,83 @@ def _settle_action(tipo: str, parcial: bool) -> str:
     return "recebimento_parcial" if parcial else "recebimento_baixado"
 
 
+async def _settle_account(owner: str, tipo: str, bank_account_id: Optional[str]) -> dict:
+    """Conta da baixa: movimentação REAL do dinheiro, obrigatória para QUALQUER
+    forma original (inclusive cartão e dinheiro)."""
+    if not bank_account_id:
+        raise HTTPException(status_code=400, detail="Selecione a conta utilizada no pagamento." if tipo == PAGAR
+                            else "Selecione a conta em que o recebimento entrou.")
+    return await _resolve_refs(owner, tipo, {"bank_account_id": bank_account_id})
+
+
+async def _prepare_settlement(current: dict, e: dict, refs: dict, *, amount: Any, data_fin: str, notes: Optional[str],
+                              ts: str) -> dict:
+    """Valida UMA baixa e monta o que será gravado. REGRA ÚNICA da baixa:
+    usada pela baixa individual e pela baixa em lote."""
+    owner = _owner(current)
+    if e["status"] not in OPEN:
+        raise HTTPException(status_code=409, detail="Este lançamento já foi quitado ou está cancelado.")
+    aberto = open_cents(e)
+    valor = to_cents(amount, "valor da baixa") if amount not in (None, "") else aberto
+    if valor > aberto:
+        raise HTTPException(status_code=400, detail=f"O valor ({brl(valor)}) é maior que o saldo em aberto ({brl(aberto)}).")
+    # A forma NÃO é escolhida de novo — é a do lançamento.
+    forma_original = e.get("card_name") if e.get("card_id") else e.get("payment_method_name")
+    if e.get("card_id") and forma_original:
+        cartao = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "cartao", "id": e["card_id"]}, {"final": 1})
+        if cartao and cartao.get("final"):
+            forma_original = f"{forma_original} •••• {cartao['final']}"
+    restante = aberto - valor
+    quitado = restante == 0
+    settlement = {
+        "id": new_id(), "owner_id": owner, "entry_id": e["id"], "type": e["type"], "amount_cents": valor,
+        "financial_date": data_fin, "bank_account_id": refs.get("bank_account_id"), "account_name": refs.get("account_name"),
+        # Forma ORIGINAL do lançamento (snapshot informativo; a baixa não a altera).
+        "payment_method_id": e.get("payment_method_id"), "payment_method_name": forma_original,
+        "card_id": e.get("card_id"),
+        "notes": (notes or "").strip() or None, "description": e.get("description"),
+        "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"), "created_at": ts, "reversed": False,
+    }
+    upd = {"status": settled_status(e["type"]) if quitado else PARCIAL, "updated_at": ts, "last_settled_date": data_fin}
+    if quitado:
+        upd.update({"settled_date": data_fin, "settled_at": ts})
+    return {"entry": e, "settlement": settlement, "upd": upd, "valor": valor, "aberto": aberto, "restante": restante,
+            "quitado": quitado}
+
+
+async def _write_settlement(current: dict, p: dict, session, metadata: Optional[dict] = None) -> None:
+    e, st = p["entry"], p["settlement"]
+    # Concorrência: só grava se ninguém baixou/estornou no meio do caminho
+    # (a versão muda a cada baixa) — duas baixas simultâneas nunca somam errado.
+    res = await db.fin_entries.update_one(
+        {"_id": e["_id"], "status": {"$in": list(OPEN)}, "version": e.get("version", 1)},
+        {"$set": p["upd"], "$inc": {"settled_cents": p["valor"], "version": 1}}, session=session)
+    if not res.modified_count:
+        raise HTTPException(status_code=409, detail="O saldo deste lançamento mudou. Recarregue e tente de novo.")
+    await db.fin_settlements.insert_one(st, session=session)
+    await log_event(current, _settle_action(e["type"], not p["quitado"]), module=_module(e["type"]),
+                    entity_type="lancamento", entity_id=e["id"], entity_label=_entry_label(e), amount_cents=p["valor"],
+                    financial_date=st["financial_date"],
+                    changes=[{"field": "open_cents", "label": "Saldo em aberto", "before": p["aberto"], "after": p["restante"]}],
+                    metadata={"conta": st["account_name"], "bank_account_id": st["bank_account_id"],
+                              "forma": st["payment_method_name"],
+                              "observacao": st["notes"], "settlement_id": st["id"],
+                              "valor_original": e["amount_cents"], **(metadata or {})}, session=session)
+
+
+def _settled_out(p: dict) -> dict:
+    e = p["entry"]
+    out = _entry_out({**e, **p["upd"], "settled_cents": int(e.get("settled_cents") or 0) + p["valor"],
+                      "version": e.get("version", 1) + 1}, today_sp())
+    out["quitado"] = p["quitado"]
+    out["baixa_cents"] = p["valor"]
+    return out
+
+
+def _settle_date(tipo: str, value: str) -> str:
+    return parse_date(value, "data do pagamento" if tipo == PAGAR else "data do recebimento")
+
+
 @fin_router.post("/lancamentos/{entry_id}/baixar")
 async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_current_user)):
     """Registra UMA baixa (pagamento ou recebimento), total ou parcial.
@@ -1084,63 +1256,64 @@ async def settle_entry(entry_id: str, body: SettleInput, current=Depends(get_cur
     e = await _require_entry(owner, entry_id)
     if e["status"] not in OPEN:
         raise HTTPException(status_code=409, detail="Este lançamento já foi quitado ou está cancelado.")
-    aberto = open_cents(e)
-    valor = to_cents(body.amount, "valor da baixa") if body.amount not in (None, "") else aberto
-    if valor > aberto:
-        raise HTTPException(status_code=400, detail=f"O valor ({brl(valor)}) é maior que o saldo em aberto ({brl(aberto)}).")
-    data_fin = parse_date(body.date, "data do pagamento" if e["type"] == PAGAR else "data do recebimento")
-    # A baixa é a movimentação REAL do dinheiro: a conta é obrigatória para
-    # QUALQUER forma original (inclusive cartão e dinheiro). A forma NÃO é
-    # escolhida de novo — é a do lançamento (`body.payment_method_id` é ignorado).
-    if not body.bank_account_id:
-        raise HTTPException(status_code=400, detail="Selecione a conta utilizada no pagamento." if e["type"] == PAGAR
-                            else "Selecione a conta em que o recebimento entrou.")
-    refs = await _resolve_refs(owner, e["type"], {"bank_account_id": body.bank_account_id})
-    forma_original = e.get("card_name") if e.get("card_id") else e.get("payment_method_name")
-    if e.get("card_id") and forma_original:
-        cartao = await db.fin_cadastros.find_one({"owner_id": owner, "kind": "cartao", "id": e["card_id"]}, {"final": 1})
-        if cartao and cartao.get("final"):
-            forma_original = f"{forma_original} •••• {cartao['final']}"
-    restante = aberto - valor
-    quitado = restante == 0
-    novo_status = settled_status(e["type"]) if quitado else PARCIAL
-    ts = now_iso()
-    settlement = {
-        "id": new_id(), "owner_id": owner, "entry_id": e["id"], "type": e["type"], "amount_cents": valor,
-        "financial_date": data_fin, "bank_account_id": refs.get("bank_account_id"), "account_name": refs.get("account_name"),
-        # Forma ORIGINAL do lançamento (snapshot informativo; a baixa não a altera).
-        "payment_method_id": e.get("payment_method_id"), "payment_method_name": forma_original,
-        "card_id": e.get("card_id"),
-        "notes": (body.notes or "").strip() or None, "description": e.get("description"),
-        "created_by": current.get("actor_id") or current["id"], "created_by_name": current.get("actor_name") or current.get("name"), "created_at": ts, "reversed": False,
-    }
-    upd = {"status": novo_status, "updated_at": ts, "last_settled_date": data_fin}
-    if quitado:
-        upd.update({"settled_date": data_fin, "settled_at": ts})
-    pago_antes = int(e.get("settled_cents") or 0)
+    data_fin = _settle_date(e["type"], body.date)
+    refs = await _settle_account(owner, e["type"], body.bank_account_id)
+    p = await _prepare_settlement(current, e, refs, amount=body.amount, data_fin=data_fin, notes=body.notes, ts=now_iso())
 
     async def tx(s):
-        # Concorrência: só grava se ninguém baixou/estornou no meio do caminho
-        # (a versão muda a cada baixa) — duas baixas simultâneas nunca somam errado.
-        res = await db.fin_entries.update_one(
-            {"_id": e["_id"], "status": {"$in": list(OPEN)}, "version": e.get("version", 1)},
-            {"$set": upd, "$inc": {"settled_cents": valor, "version": 1}}, session=s)
-        if not res.modified_count:
-            raise HTTPException(status_code=409, detail="O saldo deste lançamento mudou. Recarregue e tente de novo.")
-        await db.fin_settlements.insert_one(settlement, session=s)
-        await log_event(current, _settle_action(e["type"], not quitado), module=_module(e["type"]),
-                        entity_type="lancamento", entity_id=e["id"], entity_label=_entry_label(e), amount_cents=valor,
-                        financial_date=data_fin,
-                        changes=[{"field": "open_cents", "label": "Saldo em aberto", "before": aberto, "after": restante}],
-                        metadata={"conta": refs.get("account_name"), "bank_account_id": refs.get("bank_account_id"),
-                                  "forma": forma_original,
-                                  "observacao": settlement["notes"], "settlement_id": settlement["id"],
-                                  "valor_original": e["amount_cents"]}, session=s)
+        await _write_settlement(current, p, s)
     await in_transaction(tx)
-    out = _entry_out({**e, **upd, "settled_cents": pago_antes + valor, "version": e.get("version", 1) + 1}, today_sp())
-    out["quitado"] = quitado
-    out["baixa_cents"] = valor
-    return out
+    return _settled_out(p)
+
+
+MAX_LOTE = 50   # maior página da tabela
+
+
+class SettleBatchInput(BaseModel):
+    type: str
+    ids: list[str]
+    date: str
+    bank_account_id: Optional[str] = None
+    notes: Optional[str] = None
+    expected_total_cents: Optional[int] = None   # total que o usuário viu no modal
+
+
+@fin_router.post("/lancamentos/baixar-lote")
+async def settle_batch(body: SettleBatchInput, current=Depends(get_current_user)):
+    """Quita o saldo em aberto EXATAMENTE dos lançamentos informados (cada parcela
+    ou ocorrência é um lançamento; a sequência nunca é expandida). Mesma regra da
+    baixa individual, numa única transação: ou todos são baixados, ou nenhum."""
+    owner = _owner(current)
+    if body.type not in TYPES:
+        raise HTTPException(status_code=400, detail="Tipo inválido")
+    ids = list(dict.fromkeys(body.ids))
+    if not ids:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos um lançamento.")
+    if len(ids) > MAX_LOTE:
+        raise HTTPException(status_code=400, detail=f"Selecione no máximo {MAX_LOTE} lançamentos por vez.")
+    found = {e["id"]: e async for e in db.fin_entries.find({"owner_id": owner, "type": body.type, "id": {"$in": ids}})}
+    if len(found) != len(ids):
+        raise HTTPException(status_code=404, detail="Algum lançamento selecionado não foi encontrado. Recarregue e tente de novo.")
+    data_fin = _settle_date(body.type, body.date)
+    refs = await _settle_account(owner, body.type, body.bank_account_id)
+    ts = now_iso()
+    lote = {"lote_id": new_id(), "lote_total": len(ids)}
+    preparados = []
+    for i in ids:
+        e = found[i]
+        try:
+            preparados.append(await _prepare_settlement(current, e, refs, amount=None, data_fin=data_fin, notes=body.notes, ts=ts))
+        except HTTPException as ex:
+            raise HTTPException(status_code=ex.status_code, detail=f"{_entry_label(e)}: {ex.detail} Nenhuma baixa foi registrada.")
+    total = sum(p["valor"] for p in preparados)
+    if body.expected_total_cents is not None and body.expected_total_cents != total:
+        raise HTTPException(status_code=409, detail=f"O saldo dos selecionados mudou (agora {brl(total)}). Nenhuma baixa foi registrada; recarregue e tente de novo.")
+
+    async def tx(s):
+        for p in preparados:
+            await _write_settlement(current, p, s, lote)
+    await in_transaction(tx)
+    return {"count": len(preparados), "total_cents": total, "items": [_settled_out(p) for p in preparados]}
 
 
 @fin_router.get("/lancamentos/{entry_id}/baixas")
@@ -1307,96 +1480,73 @@ async def delete_entry(entry_id: str, scope: str = "one", current=Depends(get_cu
 
 
 # =================== VISÃO GERAL / RESUMOS ===================
-async def _sum_by_type(match: dict) -> dict:
-    out = {PAGAR: {"count": 0, "cents": 0}, RECEBER: {"count": 0, "cents": 0}}
-    async for g in db.fin_entries.aggregate([{"$match": match},
-                                             {"$group": {"_id": "$type", "n": {"$sum": 1}, "t": {"$sum": OPEN_EXPR}}}]):
-        out[g["_id"]] = {"count": g["n"], "cents": g["t"]}
+async def _entry_totals(query: dict, today: str) -> dict:
+    """Totais por tipo dos lançamentos que atendem a `query` (a MESMA consulta da
+    lista, sem paginação): em aberto, vencidas e realizado. Aberto/vencidas usam o
+    saldo em aberto (baixa parcial não conta de novo); realizado = o que já foi
+    baixado desses mesmos lançamentos."""
+    is_open = {"$in": ["$status", list(OPEN)]}
+    late = {"$and": [is_open, {"$lt": ["$due_date", today]}]}
+    settled = {"$ifNull": ["$settled_cents", 0]}
+    paid = {"$gt": [settled, 0]}
+    parcial = {"$eq": ["$status", PARCIAL]}
+
+    def n(cond):
+        return {"$sum": {"$cond": [cond, 1, 0]}}
+
+    def s(cond, v):
+        return {"$sum": {"$cond": [cond, v, 0]}}
+
+    out = {t: {k: {"count": 0, "cents": 0} for k in ("aberto", "vencidas", "realizado", "parciais")} for t in (PAGAR, RECEBER)}
+    async for g in db.fin_entries.aggregate([{"$match": query}, {"$group": {
+            "_id": "$type", "an": n(is_open), "a": s(is_open, OPEN_EXPR), "vn": n(late), "v": s(late, OPEN_EXPR),
+            "rn": n(paid), "r": s(paid, settled), "pn": n(parcial), "p": s(parcial, OPEN_EXPR)}}]):
+        out[g["_id"]] = {"aberto": {"count": g["an"], "cents": g["a"]}, "vencidas": {"count": g["vn"], "cents": g["v"]},
+                         "realizado": {"count": g["rn"], "cents": g["r"]}, "parciais": {"count": g["pn"], "cents": g["p"]}}
     return out
 
 
-def _period(date_from: Optional[str], date_to: Optional[str], open_range: bool = False) -> tuple:
-    # open_range: limite não informado = sem limite (período "Todos os vencimentos"
-    # ou personalizado com uma ponta só — o mesmo critério da tabela).
-    if open_range:
-        return (parse_date(date_from) if date_from else "0000-01-01", parse_date(date_to) if date_to else "9999-12-31")
-    today = date.fromisoformat(today_sp())
-    start = parse_date(date_from) if date_from else today.replace(day=1).isoformat()
-    if date_to:
-        end = parse_date(date_to)
-    else:
-        nxt = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
-        end = (nxt - timedelta(days=1)).isoformat()
-    return start, end
-
-
 @fin_router.get("/visao-geral")
-async def overview(date_from: Optional[str] = None, date_to: Optional[str] = None, open_range: bool = False,
-                   current=Depends(get_current_user)):
+async def overview(f: EntryFilters = Depends(), current=Depends(get_current_user)):
+    """Cards da Visão Geral: mesmos filtros (período, status, busca…) da tabela."""
     owner = _owner(current)
     today = today_sp()
-    # O período vem do filtro da TABELA da Visão Geral (fonte única): cards e
-    # tabela usam o mesmo intervalo de vencimento. Status rápido não entra aqui.
-    start, end = _period(date_from, date_to, open_range)
-    # Saldo EM ABERTO (pendentes + parciais): o que já foi pago/recebido não conta de novo.
-    periodo = await _sum_by_type({"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$gte": start, "$lte": end}})
-    # Vencidas DENTRO do período: vencimento no período e antes de hoje.
-    venc_fim = min(end, shift_days(today, -1))
-    vencidas = await _sum_by_type({"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$gte": start, "$lte": venc_fim}})
+    tot = await _entry_totals(await f.query(current, today), today)
+    rec, pag = tot[RECEBER], tot[PAGAR]
     pend = await db.fin_requests.aggregate([{"$match": {"owner_id": owner, "status": "pendente"}},
                                             {"$group": {"_id": None, "n": {"$sum": 1}, "t": {"$sum": "$amount_cents"}}}]).to_list(1)
     return {
-        "periodo": {"inicio": start, "fim": end},
-        "a_receber_cents": periodo[RECEBER]["cents"], "a_receber_count": periodo[RECEBER]["count"],
-        "a_pagar_cents": periodo[PAGAR]["cents"], "a_pagar_count": periodo[PAGAR]["count"],
-        "saldo_previsto_cents": periodo[RECEBER]["cents"] - periodo[PAGAR]["cents"],
-        "vencidas": {"receber_cents": vencidas[RECEBER]["cents"], "receber_count": vencidas[RECEBER]["count"],
-                     "pagar_cents": vencidas[PAGAR]["cents"], "pagar_count": vencidas[PAGAR]["count"]},
+        "a_receber_cents": rec["aberto"]["cents"], "a_receber_count": rec["aberto"]["count"],
+        "a_pagar_cents": pag["aberto"]["cents"], "a_pagar_count": pag["aberto"]["count"],
+        "saldo_previsto_cents": rec["aberto"]["cents"] - pag["aberto"]["cents"],
+        "recebido_cents": rec["realizado"]["cents"], "recebido_count": rec["realizado"]["count"],
+        "pago_cents": pag["realizado"]["cents"], "pago_count": pag["realizado"]["count"],
+        "vencidas": {"receber_cents": rec["vencidas"]["cents"], "receber_count": rec["vencidas"]["count"],
+                     "pagar_cents": pag["vencidas"]["cents"], "pagar_count": pag["vencidas"]["count"]},
         "solicitacoes_pendentes": {"count": pend[0]["n"] if pend else 0, "cents": pend[0]["t"] if pend else 0},
         "today": today,
     }
 
 
 @fin_router.get("/resumo")
-async def type_summary(type: str, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                       current=Depends(get_current_user)):
-    """Indicadores das páginas A Pagar / A Receber (sempre do tipo pedido)."""
-    owner = _owner(current)
-    if type not in TYPES:
+async def type_summary(f: EntryFilters = Depends(), current=Depends(get_current_user)):
+    """Indicadores das páginas A Pagar / A Receber (sempre do tipo pedido), com os
+    mesmos filtros da tabela."""
+    tipo = f.fields["type"]
+    if tipo not in TYPES:
         raise HTTPException(status_code=400, detail="Tipo inválido")
     today = today_sp()
-    start, end = _period(date_from, date_to)
-    base = {"owner_id": owner, "type": type}
-
-    async def agg(extra: dict) -> dict:
-        # Sempre o saldo em aberto: parcial conta só o que falta.
-        r = await db.fin_entries.aggregate([{"$match": {**base, **extra}},
-                                            {"$group": {"_id": None, "n": {"$sum": 1}, "t": {"$sum": OPEN_EXPR}}}]).to_list(1)
-        return {"count": r[0]["n"] if r else 0, "cents": r[0]["t"] if r else 0}
-
-    # Realizado no período = baixas (totais e parciais) com data financeira no período.
-    real = await db.fin_settlements.aggregate([
-        {"$match": {"owner_id": owner, "type": type, "reversed": {"$ne": True}, "financial_date": {"$gte": start, "$lte": end}}},
-        {"$group": {"_id": None, "n": {"$sum": 1}, "t": {"$sum": "$amount_cents"}}}]).to_list(1)
-
-    semana = (date.fromisoformat(today) + timedelta(days=7)).isoformat()
+    query = await f.query(current, today)
+    tot = (await _entry_totals(query, today))[tipo]
     por_categoria = []
     async for g in db.fin_entries.aggregate([
-        {"$match": {**base, "status": {"$ne": CANCELADO}, "due_date": {"$gte": start, "$lte": end}}},
+        {"$match": query},
         {"$group": {"_id": "$category_id", "nome": {"$last": "$category_name"}, "t": {"$sum": "$amount_cents"}, "n": {"$sum": 1}}},
         {"$sort": {"t": -1}}]):
         por_categoria.append({"category_id": g["_id"], "nome": g["nome"] or "Sem categoria", "cents": g["t"], "count": g["n"]})
     return {
-        "periodo": {"inicio": start, "fim": end},
-        "aberto_periodo": await agg({"status": {"$in": list(OPEN)}, "due_date": {"$gte": start, "$lte": end}}),
-        "vencidas": await agg({"status": {"$in": list(OPEN)}, "due_date": {"$lt": today}}),
-        "proximos_7": await agg({"status": {"$in": list(OPEN)}, "due_date": {"$gte": today, "$lte": semana}}),
-        "parciais": await agg({"status": PARCIAL}),
-        "realizado_periodo": {"count": real[0]["n"] if real else 0, "cents": real[0]["t"] if real else 0},
-        "parceladas_abertas": await agg({"status": {"$in": list(OPEN)}, "mode": "parcelado"}),
-        "recorrentes_abertas": await agg({"status": {"$in": list(OPEN)}, "mode": "recorrente"}),
-        "por_categoria": por_categoria,
-        "today": today,
+        "aberto_periodo": tot["aberto"], "vencidas": tot["vencidas"], "realizado_periodo": tot["realizado"],
+        "parciais": tot["parciais"], "por_categoria": por_categoria, "today": today,
     }
 
 

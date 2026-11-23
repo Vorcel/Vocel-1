@@ -109,14 +109,14 @@ export default function Dre() {
     return list.map((e) => (
       <tr key={`${path}/${e.id}`} className="dre-entry cursor-pointer hover:bg-[var(--fin-muted-soft)]" onClick={() => acaoLancamento("detail", e)} data-testid={`fin-dre-entry-${e.id}`}>
         <td style={{ paddingLeft: 16 + depth * 20 }}>
-          <div className="flex min-w-0 items-center gap-2 text-[13px]">
-            <span className="font-mono-num shrink-0 text-xs" style={{ color: "var(--fin-ink-3)" }}>{fmtDate(e.competence_date)}</span>
-            <span className="truncate" style={{ color: "var(--fin-ink-2)" }} title={e.description}>
+          <div className="flex min-w-0 items-center gap-2 text-sm">
+            <span className="font-mono-num shrink-0 text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{fmtDate(e.competence_date)}</span>
+            <span className="truncate" style={{ color: "var(--fin-ink)" }} title={e.description}>
               {e.description}{e.sequence_total ? ` (${e.sequence_index}/${e.sequence_total})` : ""}
             </span>
           </div>
         </td>
-        <td className="text-right text-[13px]">{fmtSigned(e.net_cents)}</td>
+        <td className="text-right text-sm">{fmtSigned(e.net_cents)}</td>
         {compare && <><td /><td /></>}
       </tr>
     ));
@@ -143,7 +143,7 @@ export default function Dre() {
           style={{ color: "var(--fin-ink)" }}>
           <span className="shrink-0" style={{ color: "var(--fin-ink-3)" }}><Chevron on={on} /></span>
           <span className="truncate">{label}</span>
-          {count > 0 && <span className="shrink-0 text-[11px] font-normal" style={{ color: "var(--fin-ink-3)" }}>{count}</span>}
+          {count > 0 && <span className="shrink-0 text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>{count}</span>}
         </button>
       ) : (
         <span className={cn("inline-flex items-center gap-1.5 pl-[21px]", bold && "font-semibold")} style={{ color: "var(--fin-ink)" }}>{label}</span>

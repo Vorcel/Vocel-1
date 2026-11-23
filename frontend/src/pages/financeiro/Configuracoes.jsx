@@ -167,7 +167,7 @@ function Categorias() {
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: `${c.cor}1F`, color: c.cor }}><FinIcon name={c.icone} size={18} /></span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium" style={{ color: "var(--fin-ink)" }}>{c.nome}</p>
-                  <p className="flex flex-wrap items-center gap-x-1.5 text-xs" style={{ color: "var(--fin-ink-3)" }}>
+                  <p className="flex flex-wrap items-center gap-x-1.5 text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
                     <span>{c.tipo === "receita" ? "Receita" : "Despesa"}</span>·
                     {grupo ? <span>DRE: {grupo}</span> : <span style={{ color: "var(--fin-warning)" }}>Sem grupo DRE</span>}
                     {subs.length > 0 && (
@@ -191,7 +191,7 @@ function Categorias() {
                     return (
                       <li key={x.id} className="flex items-center gap-2 border-b px-3 py-2 text-sm last:border-0" style={{ borderColor: "var(--fin-border)", opacity: x.ativo === false ? 0.6 : 1 }}>
                         <span className="min-w-0 flex-1 truncate" style={{ color: "var(--fin-ink)" }}>{x.nome}</span>
-                        <span className="hidden text-xs sm:inline" style={{ color: "var(--fin-ink-3)" }}>{g ? `DRE: ${g} (próprio)` : "herda o grupo"}</span>
+                        <span className="hidden text-xs sm:inline" style={{ color: "var(--fin-ink-2)" }}>{g ? `DRE: ${g} (próprio)` : "herda o grupo"}</span>
                         <Inactive item={x} />
                         <RowMenu item={x} kind="subcategoria" onEdit={() => setSubModal({ category: c, item: x })} askDelete={askDelete} />
                       </li>
@@ -293,7 +293,7 @@ function EstruturaDre() {
           </div>
         ) : (
           <div key={b.title} className="rounded-lg border" style={{ borderColor: "var(--fin-border)" }}>
-            <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--fin-border)", color: "var(--fin-ink-3)" }}>
+            <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--fin-border)", color: "var(--fin-ink-2)" }}>
               <span className="flex-1">{b.sinal} {b.title}</span>
               <button type="button" onClick={() => setModal({ defaultTipo: b.tipos[0] })} className="inline-flex items-center gap-1 normal-case tracking-normal hover:underline" style={{ color: "var(--fin-primary)" }}>
                 <Plus size={13} /> Grupo
@@ -456,10 +456,10 @@ function ClientesFornecedores() {
                   <div className="truncate font-medium" style={{ color: "var(--fin-ink)" }} title={c.name}>{c.name}</div>
                   <div className="text-xs" style={{ color: "var(--fin-ink-3)" }}>{PESSOAS[c.person_type]}</div>
                 </td>
-                <td className="font-mono-num whitespace-nowrap text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{fmtDocument(c.document)}</td>
+                <td className="font-mono-num whitespace-nowrap text-sm" style={{ color: "var(--fin-ink)" }}>{fmtDocument(c.document)}</td>
                 <td><TonePill tone={c.role === "ambos" ? "info" : c.role === "fornecedor" ? "warning" : "success"}>{PAPEIS[c.role]}</TonePill></td>
-                <td className="whitespace-nowrap text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{c.phone ? maskPhone(c.phone) : "—"}</td>
-                <td className="max-w-[200px] truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }} title={c.email || ""}>{c.email || "—"}</td>
+                <td className="whitespace-nowrap text-sm" style={{ color: "var(--fin-ink)" }}>{c.phone ? maskPhone(c.phone) : "—"}</td>
+                <td className="max-w-[200px] truncate text-sm" style={{ color: "var(--fin-ink)" }} title={c.email || ""}>{c.email || "—"}</td>
                 <td>{c.ativo === false ? <TonePill tone="muted">Inativo</TonePill> : <TonePill tone="success">Ativo</TonePill>}</td>
                 <td>
                   <DropdownMenu>
@@ -528,13 +528,13 @@ export function ContasList({ compact }) {
             <BankLogo item={c} size={42} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold" style={{ color: "var(--fin-ink)" }}>{c.nome}</p>
-              <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>
+              <p className="truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
                 {[c.titular && `Titular: ${c.titular}`, TIPOS_CONTA.find((t) => t.value === c.tipo_conta)?.label, c.agencia && `Ag. ${c.agencia}`, c.numero && `Cc. ${c.numero}`, !c.titular && institutionName(c.instituicao)].filter(Boolean).join(" · ")}
               </p>
             </div>
             <Inactive item={c} />
             <div className="text-right">
-              <p className="text-[11px]" style={{ color: "var(--fin-ink-3)" }}>Saldo atual</p>
+              <p className="text-xs" style={{ color: "var(--fin-ink-2)" }}>Saldo atual</p>
               <p className="font-mono-num font-semibold" style={{ color: c.saldo_atual_cents < 0 ? "var(--fin-danger)" : "var(--fin-ink)" }}>{money(c.saldo_atual_cents)}</p>
             </div>
             <RowMenu item={c} kind="conta" onEdit={() => setModal({ item: c })} askDelete={askDelete}
@@ -569,12 +569,12 @@ export function CartoesList({ compact }) {
               : <span className="flex h-[38px] w-[60px] shrink-0 items-center justify-center rounded-md" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-3)" }}><CreditCard size={20} /></span>}
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold" style={{ color: "var(--fin-ink)" }}>{c.nome}{c.final ? ` •••• ${c.final}` : ""}</p>
-              <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>
+              <p className="truncate text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
                 {[c.bandeira, institutionName(c.instituicao), c.fechamento_dia && `fecha dia ${c.fechamento_dia}`, c.vencimento_dia && `vence dia ${c.vencimento_dia}`, c.conta_id && byId[c.conta_id]?.nome && `conta ${byId[c.conta_id].nome}`].filter(Boolean).join(" · ")}
               </p>
             </div>
             <Inactive item={c} />
-            {c.limite_cents != null && <div className="hidden text-right sm:block"><p className="text-[11px]" style={{ color: "var(--fin-ink-3)" }}>Limite</p><p className="font-mono-num font-semibold" style={{ color: "var(--fin-ink)" }}>{money(c.limite_cents)}</p></div>}
+            {c.limite_cents != null && <div className="hidden text-right sm:block"><p className="text-xs" style={{ color: "var(--fin-ink-2)" }}>Limite</p><p className="font-mono-num font-semibold" style={{ color: "var(--fin-ink)" }}>{money(c.limite_cents)}</p></div>}
             <RowMenu item={c} kind="cartao" onEdit={() => setModal({ item: c })} askDelete={askDelete} />
           </li>
         ))}

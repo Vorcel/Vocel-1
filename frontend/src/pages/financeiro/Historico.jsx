@@ -118,22 +118,22 @@ export default function Historico() {
                   <Fragment key={h.id}>
                     <tr data-testid={`fin-history-row-${h.id}`} className={hasMore ? "cursor-pointer" : undefined} onClick={() => hasMore && toggle(h.id)}>
                       <td style={{ color: "var(--fin-ink-3)" }}>{hasMore && (isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />)}</td>
-                      <td className="whitespace-nowrap"><div className="font-medium" style={{ color: "var(--fin-ink)" }}>{t.date}</div><div className="font-mono-num text-xs" style={{ color: "var(--fin-ink-3)" }}>{t.time}</div></td>
+                      <td className="whitespace-nowrap"><div className="font-medium" style={{ color: "var(--fin-ink)" }}>{t.date}</div><div className="font-mono-num text-xs" style={{ color: "var(--fin-ink-2)" }}>{t.time}</div></td>
                       <td className="whitespace-nowrap">
                         <span className="flex items-center gap-2">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-2)" }}>{initials}</span>
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-2)" }}>{initials}</span>
                           <span className="leading-tight">
                             <span className="block" style={{ color: "var(--fin-ink)" }}>{h.user_name || "—"}</span>
                             {h.user_type === "internal" && h.user_login && (
-                              <span className="block font-mono-num text-[11px]" style={{ color: "var(--fin-ink-3)" }} data-testid="fin-history-user-login">{h.user_login}</span>
+                              <span className="block font-mono-num text-xs" style={{ color: "var(--fin-ink-2)" }} data-testid="fin-history-user-login">{h.user_login}</span>
                             )}
                           </span>
                         </span>
                       </td>
                       <td><TonePill tone={a.tone}>{a.label}</TonePill></td>
-                      <td className="whitespace-nowrap" style={{ color: "var(--fin-ink-2)" }}>{MODULOS[h.module] || h.module}</td>
-                      <td className="max-w-[220px]"><div className="truncate font-medium" style={{ color: "var(--fin-ink)" }} title={h.entity_label}>{h.entity_label || "—"}</div><div className="font-mono-num text-[11px]" style={{ color: "var(--fin-ink-3)" }}>#{(h.entity_id || "").slice(0, 8)}</div></td>
-                      <td className="max-w-[300px] text-xs" style={{ color: "var(--fin-ink-2)" }}>
+                      <td className="whitespace-nowrap" style={{ color: "var(--fin-ink)" }}>{MODULOS[h.module] || h.module}</td>
+                      <td className="max-w-[180px]"><div className="truncate font-medium" style={{ color: "var(--fin-ink)" }} title={h.entity_label}>{h.entity_label || "—"}</div><div className="font-mono-num text-xs" style={{ color: "var(--fin-ink-3)" }}>#{(h.entity_id || "").slice(0, 8)}</div></td>
+                      <td className="max-w-[250px] text-[13px]" style={{ color: "var(--fin-ink)" }}>
                         {h.changes?.length === 1
                           ? <>{h.changes[0].label}: {changeValue(h.changes[0].field, h.changes[0].before)} → <b>{changeValue(h.changes[0].field, h.changes[0].after)}</b></>
                           : h.changes?.length > 1 ? `${h.changes.length} campos alterados` : null}
@@ -150,9 +150,9 @@ export default function Historico() {
                         <td colSpan={7} style={{ background: "var(--fin-surface-2)" }}>
                           {h.changes?.length > 0 && (
                             <table className="text-xs">
-                              <thead><tr><th className="pr-6 text-left" style={{ color: "var(--fin-ink-3)" }}>Campo</th><th className="pr-6 text-left" style={{ color: "var(--fin-ink-3)" }}>Antes</th><th className="text-left" style={{ color: "var(--fin-ink-3)" }}>Depois</th></tr></thead>
+                              <thead><tr><th className="pr-6 text-left" style={{ color: "var(--fin-ink)" }}>Campo</th><th className="pr-6 text-left" style={{ color: "var(--fin-ink)" }}>Antes</th><th className="text-left" style={{ color: "var(--fin-ink)" }}>Depois</th></tr></thead>
                               <tbody>{h.changes.map((c) => (
-                                <tr key={c.field}><td className="pr-6 py-0.5">{c.label}</td><td className="pr-6 py-0.5" style={{ color: "var(--fin-ink-3)" }}>{changeValue(c.field, c.before)}</td><td className="py-0.5 font-semibold">{changeValue(c.field, c.after)}</td></tr>
+                                <tr key={c.field}><td className="pr-6 py-0.5">{c.label}</td><td className="pr-6 py-0.5" style={{ color: "var(--fin-ink-2)" }}>{changeValue(c.field, c.before)}</td><td className="py-0.5 font-semibold">{changeValue(c.field, c.after)}</td></tr>
                               ))}</tbody>
                             </table>
                           )}

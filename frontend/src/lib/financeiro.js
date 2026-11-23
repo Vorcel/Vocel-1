@@ -80,28 +80,27 @@ export function relativeTime(ts) {
   return `há ${Math.floor(diff / 1440)} d`;
 }
 
-// Períodos rápidos (Visão Geral / páginas). Nunca persistidos.
-export function periodPresets(today) {
-  const [m0a, m0b] = monthBounds(today, 0);
-  const [m1a, m1b] = monthBounds(today, 1);
-  return [
-    { key: "mes", label: "Este mês", from: m0a, to: m0b },
-    { key: "mes_passado", label: "Mês passado", from: monthBounds(today, -1)[0], to: monthBounds(today, -1)[1] },
-    { key: "prox_mes", label: "Próximo mês", from: m1a, to: m1b },
-    { key: "30d", label: "Próximos 30 dias", from: today, to: addDays(today, 30) },
-    { key: "90d", label: "Próximos 90 dias", from: today, to: addDays(today, 90) },
-    { key: "ano", label: "Este ano", from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` },
-  ];
+// PERÍODO das páginas (Visão Geral, A Pagar, A Receber): UM único estado, nunca
+// persistido — { mode: "month", month: "2026-11" } ou { mode: "custom", from, to }
+// (limite vazio = sem limite; os dois vazios = todos os vencimentos).
+export const monthPeriod = (iso) => ({ mode: "month", month: iso.slice(0, 7) });
+export function periodBounds(p) {
+  if (p.mode === "custom") return { from: p.from || "", to: p.to || "" };
+  const [from, to] = monthBounds(`${p.month}-01`);
+  return { from, to };
 }
-
-// Intervalo de um período escolhido nos filtros ("todos", preset ou "custom").
-// FONTE ÚNICA: a tabela e os cards da Visão Geral usam exatamente este cálculo.
-// `open` = algum limite ausente significa "sem limite" (nunca "mês atual").
-export function periodRange(key, custom, presets) {
-  if (key === "todos") return { open: true };
-  if (key === "custom") return { date_from: custom?.from || undefined, date_to: custom?.to || undefined, open: true };
-  const p = presets.find((x) => x.key === key);
-  return p ? { date_from: p.from, date_to: p.to } : { open: true };
+// Setas: sempre voltam ao modo mensal (a partir do mês do período atual).
+export function shiftPeriod(p, n) {
+  const base = p.mode === "month" ? `${p.month}-01` : (p.from || todaySP());
+  return monthPeriod(monthBounds(base, n)[0]);
+}
+// "Novembro 2026" | "01 nov – 18 nov 2026" | "Todos os vencimentos"
+export function periodTitle(p) {
+  if (p.mode === "month") return `${MESES[Number(p.month.slice(5, 7)) - 1]} ${p.month.slice(0, 4)}`;
+  if (!p.from && !p.to) return "Todos os vencimentos";
+  const d = (iso, year) => `${iso.slice(8, 10)} ${MESES[Number(iso.slice(5, 7)) - 1].slice(0, 3).toLowerCase()}${year ? ` ${iso.slice(0, 4)}` : ""}`;
+  if (p.from === p.to) return d(p.from, true);
+  return `${d(p.from, p.from.slice(0, 4) !== p.to.slice(0, 4))} – ${d(p.to, true)}`;
 }
 
 // Períodos da DRE (competência). Trimestre = trimestre civil atual.
@@ -184,22 +183,36 @@ const FORMAS_CARTAO = new Set(["cartao", "cartao de credito", "credito"]);
 export const formaExigeConta = (forma) => !!forma && !FORMAS_SEM_CONTA.has(norm(forma.nome));
 export const isFormaCartaoGenerica = (forma) => !!forma && FORMAS_CARTAO.has(norm(forma.nome));
 export const cardLabel = (c) => (c ? `${c.nome}${c.final ? ` •••• ${c.final}` : ""}` : "");
-// Valor único da seleção "Forma de pagamento": "f:<forma>" | "c:<cartão>" | "".
+// Seleção ÚNICA "Forma de pagamento": "f:<forma>" | "c:<cartão>" | "". Escolher um
+// cartão grava card_id (no backend, payment_method = credit_card).
 export const paymentValue = (f) => (f.card_id ? `c:${f.card_id}` : f.payment_method_id ? `f:${f.payment_method_id}` : "");
-// Troca de forma LIMPA o que ficou incompatível (sem banco escondido):
-// cartão => sem forma e sem banco; forma sem conta => sem banco; Pix etc. => sem cartão.
+export const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+export const EMPTY_CARD = { card_id: "", invoice_month: "", invoice_year: "" };
+// Troca de forma LIMPA o que ficou incompatível (nada escondido): cartão => sem
+// forma e sem banco, mês em branco e ano atual; outra forma => sem dados de cartão.
+// De um cartão para outro, mês e ano escolhidos continuam.
 export function applyPaymentChoice(state, value, formas) {
-  if (!value) return { ...state, payment_method_id: "", card_id: "", bank_account_id: "" };
-  const [k, id] = [value.slice(0, 1), value.slice(2)];
-  if (k === "c") return { ...state, payment_method_id: "", card_id: id, bank_account_id: "" };
+  const id = value ? value.slice(2) : "";
+  if (value.startsWith("c:")) {
+    const fatura = state.card_id ? {} : { invoice_month: "", invoice_year: todaySP().slice(0, 4) };
+    return { ...state, ...fatura, card_id: id, payment_method_id: "", bank_account_id: "" };
+  }
   const forma = (formas || []).find((x) => x.id === id);
-  return { ...state, payment_method_id: id, card_id: "", bank_account_id: formaExigeConta(forma) ? state.bank_account_id : "" };
+  return { ...state, ...EMPTY_CARD, payment_method_id: id, bank_account_id: formaExigeConta(forma) ? state.bank_account_id : "" };
 }
-// Filtro rápido da tabela da Visão Geral -> status da API.
-export const QUICK_FILTERS = [
+// Vencimento da fatura: dia fixo do cartão + mês + ano (último dia válido do mês).
+// Só conferência na tela — quem calcula e grava é o backend.
+export function cardDueDate(day, month, year) {
+  const [d, m, y] = [Number(day), Number(month), Number(year)];
+  if (!d || !m || !(y >= 2000 && y <= 2100)) return "";
+  const last = new Date(y, m, 0).getDate();
+  return `${y}-${pad(m)}-${pad(Math.min(d, last))}`;
+}
+// Filtros rápidos (Visão Geral, A Pagar, A Receber) -> status da API.
+export const quickFilters = (type) => [
   { key: "todos", label: "Todos", status: "", color: null },
   { key: "aberto", label: "Em aberto", status: "aberto", color: "var(--fin-info)" },
-  { key: "pago", label: "Pago", status: "realizado", color: "var(--fin-success)" },
+  { key: "pago", label: type === "receber" ? "Recebido" : type === "pagar" ? "Pago" : "Pago / Recebido", status: "realizado", color: "var(--fin-success)" },
   { key: "vencido", label: "Vencido", status: "atrasado", color: "var(--fin-danger)" },
 ];
 
@@ -439,6 +452,7 @@ export const finApi = {
   dreSalvarTitulos: (titles) => api.put("/fin/dre/titulos", { titles }).then((r) => r.data),
   descricoesRecentes: () => api.get("/fin/descricoes-recentes").then((r) => r.data.items || []),
   baixar: (id, body) => api.post(`/fin/lancamentos/${id}/baixar`, body).then((r) => r.data),
+  baixarLote: (body) => api.post("/fin/lancamentos/baixar-lote", body).then((r) => r.data),
   baixas: (id) => api.get(`/fin/lancamentos/${id}/baixas`).then((r) => r.data),
   estornarBaixa: (id, sid, body) => api.post(`/fin/lancamentos/${id}/baixas/${sid}/estornar`, body).then((r) => r.data),
   movimentos: (params) => api.get("/fin/movimentos", { params }).then((r) => r.data),

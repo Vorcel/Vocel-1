@@ -140,11 +140,12 @@ def add_months(iso: str, months: int, anchor_day: Optional[int] = None) -> str:
     return date(y, m, day).isoformat()
 
 
-def occurrence_dates(first: str, n: int, frequency: str) -> list:
+def occurrence_dates(first: str, n: int, frequency: str, anchor_day: Optional[int] = None) -> list:
     if frequency not in FREQUENCIES:
         raise HTTPException(status_code=400, detail="Periodicidade inválida.")
     _, months, days = FREQUENCIES[frequency]
-    anchor = date.fromisoformat(first).day
+    # anchor_day: dia fixo (fatura do cartão) — 31 em fevereiro não vira 28 para sempre.
+    anchor = anchor_day or date.fromisoformat(first).day
     out = []
     for i in range(n):
         if months:

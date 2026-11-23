@@ -96,7 +96,7 @@ export function KpiCard({ icon: Icon, label, value, sub, tone = "info", highligh
         </span>
       )}
       <div className="min-w-0">
-        <p className="truncate text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>{label}</p>
+        <p className="truncate text-sm font-medium" style={{ color: "var(--fin-ink)" }}>{label}</p>
         <p className="font-mono-num truncate text-xl font-bold leading-snug tracking-tight sm:text-[22px]" style={{ color: FLOW_COLOR[flow] || "var(--fin-ink)" }}>{value}</p>
         {sub && <p className="truncate text-xs" style={{ color: "var(--fin-ink-3)" }}>{sub}</p>}
       </div>
@@ -125,7 +125,7 @@ export function Panel({ icon: Icon, title, subtitle, actions, children, classNam
 export function TonePill({ tone = "muted", children, className, title }) {
   const t = TONES[tone] || TONES.muted;
   return (
-    <span title={title} className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold", className)}
+    <span title={title} className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[13px] font-semibold", className)}
       style={{ background: t.bg, color: t.fg }}>
       {children}
     </span>
@@ -161,14 +161,14 @@ export function TagChips({ ids = [], names = [], max = 2, className }) {
   return (
     <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-1", className)} title={all} data-testid="fin-tag-chips">
       {tags.slice(0, max).map((t) => (
-        <span key={t.id} className="inline-flex max-w-[120px] items-center gap-1 truncate rounded-full px-1.5 py-px text-[10.5px] font-medium"
+        <span key={t.id} className="inline-flex max-w-[120px] items-center gap-1 truncate rounded-full px-1.5 py-px text-[11.5px] font-medium"
           style={{ background: `${t.cor}1A`, color: t.cor }}>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.cor }} />
           <span className="truncate">{t.nome}</span>
         </span>
       ))}
       {tags.length > max && (
-        <span className="rounded-full px-1.5 py-px text-[10.5px] font-semibold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-2)" }}>
+        <span className="rounded-full px-1.5 py-px text-[11.5px] font-semibold" style={{ background: "var(--fin-muted-soft)", color: "var(--fin-ink-2)" }}>
           +{tags.length - max}
         </span>
       )}
@@ -204,9 +204,9 @@ export function CategoryChip({ id, name }) {
   if (!label) return <span style={{ color: "var(--fin-ink-3)" }}>—</span>;
   const cor = c?.cor || "#64748B";
   return (
-    <span className="inline-flex max-w-[170px] items-center gap-1.5 truncate rounded-md px-2 py-0.5 text-xs font-medium"
-      style={{ background: `${cor}1A`, color: cor }} title={label}>
-      <FinIcon name={c?.icone} size={12} className="shrink-0" />
+    <span className="inline-flex max-w-[170px] items-center gap-1.5 truncate rounded-md px-2 py-0.5 text-[13px] font-medium"
+      style={{ background: `${cor}1A`, color: "var(--fin-ink)" }} title={label}>
+      <FinIcon name={c?.icone} size={13} className="shrink-0" style={{ color: cor }} />
       <span className="truncate">{label}</span>
     </span>
   );
@@ -239,7 +239,7 @@ function blockEmptyLabelClick(e) {
 export function Field({ label, required, hint, error, children, className, as: Tag = "label", testid }) {
   return (
     <Tag className={cn("block min-w-0", className)} data-testid={testid} onClick={Tag === "label" ? blockEmptyLabelClick : undefined}>
-      <span data-field-caption className="mb-1.5 block w-fit max-w-full text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+      <span data-field-caption className="mb-1.5 block w-fit max-w-full text-sm font-medium" style={{ color: "var(--fin-ink)" }}>
         {label}{required && <span style={{ color: "var(--fin-danger)" }}> *</span>}
       </span>
       {children}
@@ -376,7 +376,7 @@ export function Pager({ page, pageSize, total, onPage, onPageSize, sizes = [10, 
   const to = Math.min(page * pageSize, total);
   const btn = "flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-sm disabled:opacity-40";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-3 text-xs" style={{ color: "var(--fin-ink-3)" }}>
+    <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-3 text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
       <span>Mostrando {from} a {to} de {total}</span>
       <div className="flex items-center gap-2">
         {onPageSize && (

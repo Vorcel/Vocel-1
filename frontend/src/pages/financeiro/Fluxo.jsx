@@ -72,7 +72,7 @@ export default function Fluxo() {
                       {p.label}
                       {i === 0 && (p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <span className="ml-1 text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>(inclui vencidos)</span>}
                     </td>
-                    <td className="font-mono-num text-right" style={{ color: "var(--fin-ink-2)" }}>{money(p.saldo_inicial_cents)}</td>
+                    <td className="font-mono-num text-right" style={{ color: "var(--fin-ink)" }}>{money(p.saldo_inicial_cents)}</td>
                     <td className="text-right"><Money cents={p.entradas_cents} flow="in" /></td>
                     <td className="text-right"><Money cents={p.saidas_cents} flow="out" signed={false} /></td>
                     <td className="font-mono-num text-right font-semibold" style={{ color: p.alerta ? "var(--fin-danger)" : "var(--fin-ink)" }}>{money(p.saldo_final_cents)}</td>
@@ -91,7 +91,7 @@ export default function Fluxo() {
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: "var(--fin-danger)" }} />
                     <div>
                       <p className="font-semibold" style={{ color: "var(--fin-danger)" }}>{p.alerta === "negativo" ? "Déficit previsto" : "Saldo baixo previsto"}</p>
-                      <p className="text-xs" style={{ color: "var(--fin-ink-2)" }}>{p.label}: saldo estimado de {money(p.saldo_final_cents)}</p>
+                      <p className="text-[13px]" style={{ color: "var(--fin-ink-2)" }}>{p.label}: saldo estimado de {money(p.saldo_final_cents)}</p>
                     </div>
                   </li>
                 ))}

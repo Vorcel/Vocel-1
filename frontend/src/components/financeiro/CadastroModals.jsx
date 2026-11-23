@@ -355,7 +355,8 @@ export function CardModal({ item, onClose }) {
     const e = {};
     if (!f.nome.trim()) e.nome = "Informe um nome/apelido.";
     if (f.final && !/^\d{4}$/.test(f.final)) e.final = "Somente os 4 últimos dígitos.";
-    for (const k of ["fechamento_dia", "vencimento_dia"]) if (f[k] !== "" && !(Number(f[k]) >= 1 && Number(f[k]) <= 31)) e[k] = "Dia entre 1 e 31.";
+    for (const k of ["fechamento_dia", "vencimento_dia"]) if (f[k] !== "" && !(Number.isInteger(Number(f[k])) && Number(f[k]) >= 1 && Number(f[k]) <= 31)) e[k] = "Dia entre 1 e 31.";
+    if (f.vencimento_dia === "") e.vencimento_dia = "Informe o dia de vencimento da fatura.";
     if (f.limite && parseMoney(f.limite) == null) e.limite = "Valor inválido.";
     setErr(e);
     if (Object.keys(e).length) return;
@@ -380,7 +381,9 @@ export function CardModal({ item, onClose }) {
           <FinInput value={f.final} onChange={(e) => setF({ ...f, final: e.target.value.replace(/\D/g, "").slice(0, 4) })} inputMode="numeric" placeholder="1234" data-testid="fin-card-final" />
         </Field>
         <Field label="Dia de fechamento" error={err.fechamento_dia}><FinInput type="number" min={1} max={31} value={f.fechamento_dia} onChange={set("fechamento_dia")} /></Field>
-        <Field label="Dia de vencimento" error={err.vencimento_dia}><FinInput type="number" min={1} max={31} value={f.vencimento_dia} onChange={set("vencimento_dia")} /></Field>
+        <Field label="Dia de vencimento da fatura" required error={err.vencimento_dia} hint="Só o dia (1 a 31). Vale para novos lançamentos; os já criados não mudam.">
+          <FinInput type="number" min={1} max={31} value={f.vencimento_dia} onChange={set("vencimento_dia")} invalid={!!err.vencimento_dia} data-testid="fin-card-vencimento" />
+        </Field>
         <Field label="Limite" error={err.limite}><FinInput value={f.limite} onChange={set("limite")} inputMode="decimal" placeholder="0,00" /></Field>
         <Field label="Conta associada">
           <FinSelect value={f.conta_id} onChange={set("conta_id")}>
@@ -551,7 +554,7 @@ export function ContactModal({ item, defaultRole, defaultName, onClose, onSaved,
         </Field>
 
         <fieldset className="sm:col-span-6" data-testid="fin-contact-role">
-          <legend className="mb-1.5 block text-[13px] font-medium" style={{ color: "var(--fin-ink-2)" }}>
+          <legend className="mb-1.5 block text-sm font-medium" style={{ color: "var(--fin-ink)" }}>
             Tipo de cadastro<span style={{ color: "var(--fin-danger)" }}> *</span>
           </legend>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup">
@@ -580,7 +583,7 @@ export function ContactModal({ item, defaultRole, defaultName, onClose, onSaved,
           <FinInput value={f.phone} onChange={(e) => set("phone")(maskPhone(e.target.value))} inputMode="tel" placeholder="(00) 00000-0000" data-testid="fin-contact-phone" />
         </Field>
 
-        <p className="-mb-2 text-[13px] font-semibold sm:col-span-6" style={{ color: "var(--fin-ink)" }}>Endereço</p>
+        <p className="-mb-2 text-sm font-semibold sm:col-span-6" style={{ color: "var(--fin-ink)" }}>Endereço</p>
         <Field label="CEP" error={errors.cep} className="sm:col-span-2">
           <FinInput value={f.cep} onChange={(e) => set("cep")(maskCep(e.target.value))} inputMode="numeric" placeholder="00000-000" invalid={!!errors.cep} data-testid="fin-contact-cep" />
         </Field>

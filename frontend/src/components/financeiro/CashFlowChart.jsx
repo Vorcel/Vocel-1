@@ -21,11 +21,11 @@ function Tip({ active, payload }) {
   );
   return (
     <div className="rounded-xl px-3.5 py-2.5 text-xs leading-relaxed text-white shadow-xl" style={{ background: "#1B2A44" }} data-testid="fin-flow-tooltip">
-      <p className="mb-1 text-[13px] font-bold">{p.label}</p>
+      <p className="mb-1 text-sm font-bold">{p.label}</p>
       {row(CHART.receber, "A Receber", p.entradas_cents, false, "in")}
       {row(CHART.pagar, "A Pagar", p.saidas_cents, false, "out")}
       {row(CHART.caixa, "Caixa Projetado", p.saldo_final_cents, true)}
-      {(p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <p className="mt-1 text-[11px] text-white/60">Inclui vencidos em aberto.</p>}
+      {(p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <p className="mt-1 text-xs text-white/60">Inclui vencidos em aberto.</p>}
       {p.alerta && <p className="mt-1 font-semibold text-red-300">{p.alerta === "negativo" ? "Saldo projetado negativo" : "Abaixo do caixa mínimo"}</p>}
     </div>
   );
@@ -71,7 +71,7 @@ export function CashFlowChart({ periodos, height = 280, minimo }) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs" style={{ color: "var(--fin-ink-2)" }}>
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[13px]" style={{ color: "var(--fin-ink-2)" }}>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: CHART.receber }} /> A Receber</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: CHART.pagar }} /> A Pagar</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "#fff", boxShadow: `0 0 0 2.5px ${CHART.caixa}` }} /> Caixa Projetado</span>
