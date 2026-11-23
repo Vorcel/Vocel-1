@@ -3,30 +3,31 @@ import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, ChartColumnIncreasing,
 import { toast } from "sonner";
 import { useData } from "@/context/DataContext";
 import { useFinance } from "@/context/FinanceContext";
-import { apiError, finApi, money } from "@/lib/financeiro";
+import { apiError, finApi, flowBounds, flowTitle, fmtDate, money, todaySP } from "@/lib/financeiro";
 import { CashFlowChart } from "@/components/financeiro/CashFlowChart";
+import { CashFlowFilters } from "@/components/financeiro/CashFlowFilters";
 import { BankLogo } from "@/components/financeiro/icons";
-import { EmptyState, FinSelect, KpiCard, Money, PageHeader, Panel } from "@/components/financeiro/ui";
-
-const VIEWS = [
-  { key: "mes-3", g: "mes", n: 3, label: "Próximos 3 meses" },
-  { key: "mes-6", g: "mes", n: 6, label: "Próximos 6 meses" },
-  { key: "mes-12", g: "mes", n: 12, label: "Próximos 12 meses" },
-  { key: "semana-8", g: "semana", n: 8, label: "Próximas 8 semanas" },
-  { key: "semana-13", g: "semana", n: 13, label: "Próximas 13 semanas" },
-  { key: "dia-30", g: "dia", n: 30, label: "Próximos 30 dias (diário)" },
-];
+import { EmptyState, KpiCard, Money, PageHeader, Panel } from "@/components/financeiro/ui";
 
 export default function Fluxo() {
-  const { version } = useFinance();
+  const { version, cad } = useFinance();
   const { prefs } = useData();
-  const [view, setView] = useState("mes-6");
-  const [conta, setConta] = useState("");
+  const [period, setPeriod] = useState(() => ({ mode: "mensal", ref: todaySP() }));
+  const [tags, setTags] = useState([]);
+  const [bancos, setBancos] = useState([]);
   const [data, setData] = useState(null);
-  const v = VIEWS.find((x) => x.key === view);
+  const { from, to } = flowBounds(period);
+  const titulo = flowTitle(period);
+  // UMA consulta alimenta cards, gráfico, detalhamento e alertas: mesmo recorte sempre.
+  const key = JSON.stringify({
+    period_mode: period.mode, date_from: from, date_to: to,
+    tag_ids: tags.join(",") || undefined, bank_ids: bancos.join(",") || undefined,
+  });
   useEffect(() => {
-    finApi.fluxo({ granularity: v.g, periods: v.n, account_id: conta || undefined }).then(setData).catch((e) => toast.error(apiError(e)));
-  }, [v.g, v.n, conta, version]);
+    let alive = true;
+    finApi.fluxo(JSON.parse(key)).then((d) => alive && setData(d)).catch((e) => alive && toast.error(apiError(e)));
+    return () => { alive = false; };
+  }, [key, version]);
 
   const per = data?.periodos || [];
   const entradas = per.reduce((s, p) => s + p.entradas_cents, 0);
@@ -34,29 +35,25 @@ export default function Fluxo() {
   const final = per.length ? per[per.length - 1].saldo_final_cents : 0;
   const alertas = per.filter((p) => p.alerta);
   const minimo = prefs?.financeiro?.caixa_minimo_cents || 0;
-  const contasAtivas = (data?.contas || []).filter((c) => c.ativo || c.id === conta);
+  const contasSel = (data?.contas || []).filter((c) => (bancos.length ? bancos.includes(c.id) : c.ativo));
+  const ant = data?.anterior || {};
+  const temAnterior = ant.entradas_cents > 0 || ant.saidas_cents > 0;
 
   return (
     <>
       <PageHeader icon={ChartColumnIncreasing} title="Fluxo de Caixa" subtitle="Projeção consolidada: saldo dos bancos + recebíveis − contas a pagar." />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-flow-saldo" icon={Wallet} tone="info" highlight label="Saldo bancário atual" value={money(data?.saldo_atual_cents)} sub={conta ? "Conta selecionada" : `${contasAtivas.length} conta(s) ativa(s)`} />
-        <KpiCard testid="fin-flow-entradas" icon={ArrowDownToLine} tone="success" flow="in" label="Entradas previstas" value={money(entradas)} sub={v.label} />
-        <KpiCard testid="fin-flow-saidas" icon={ArrowUpFromLine} tone="warning" flow="out" label="Saídas previstas" value={money(saidas)} sub={v.label} />
-        <KpiCard testid="fin-flow-final" icon={ChartColumnIncreasing} tone={final < 0 ? "danger" : "success"} label="Caixa final projetado" value={money(final)} sub={per.length ? `ao fim de ${per[per.length - 1].label}` : ""} />
+        <KpiCard testid="fin-flow-saldo" icon={Wallet} tone="info" highlight label="Saldo bancário atual" value={money(data?.saldo_atual_cents)} sub={bancos.length ? `${contasSel.length} banco(s) selecionado(s)` : `${contasSel.length} conta(s) ativa(s)`} />
+        <KpiCard testid="fin-flow-entradas" icon={ArrowDownToLine} tone="success" flow="in" label="Entradas previstas" value={money(entradas)} sub={titulo} />
+        <KpiCard testid="fin-flow-saidas" icon={ArrowUpFromLine} tone="warning" flow="out" label="Saídas previstas" value={money(saidas)} sub={titulo} />
+        <KpiCard testid="fin-flow-final" icon={ChartColumnIncreasing} tone={final < 0 ? "danger" : "success"} label="Caixa final projetado" value={money(final)} sub={per.length ? `em ${fmtDate(per[per.length - 1].fim)}` : ""} />
       </div>
 
+      <CashFlowFilters period={period} onPeriod={setPeriod} tags={tags} onTags={setTags} bancos={bancos} onBancos={setBancos}
+        contas={data?.contas || []} tagOptions={cad.tag || []} />
+
       <Panel className="mt-5" icon={ChartColumnIncreasing} title="Fluxo de Caixa Projetado" testid="fin-flow-chart"
-        subtitle="Somente lançamentos em aberto. Solicitações aguardando aprovação não entram."
-        actions={<>
-          <FinSelect value={view} onChange={(e) => setView(e.target.value)} className="w-auto" data-testid="fin-flow-view">
-            {VIEWS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-          </FinSelect>
-          <FinSelect value={conta} onChange={(e) => setConta(e.target.value)} className="w-auto" data-testid="fin-flow-account">
-            <option value="">Todos os bancos</option>
-            {(data?.contas || []).map((c) => <option key={c.id} value={c.id}>{`${c.nome}${c.ativo ? "" : " (inativa)"}`}</option>)}
-          </FinSelect>
-        </>}>
+        subtitle={`Somente lançamentos em aberto, pelo vencimento. Solicitações aguardando aprovação não entram.${bancos.length ? " Lançamentos sem banco definido não entram no filtro de bancos." : ""}`}>
         <CashFlowChart periodos={per} height={300} minimo={minimo} />
       </Panel>
 
@@ -66,11 +63,11 @@ export default function Fluxo() {
             <table className="fin-table w-full min-w-[620px]">
               <thead><tr><th>Período</th><th className="text-right">Saldo inicial</th><th className="text-right">+ Entradas</th><th className="text-right">− Saídas</th><th className="text-right">= Saldo final</th></tr></thead>
               <tbody>
-                {per.map((p, i) => (
+                {per.map((p) => (
                   <tr key={p.inicio}>
                     <td className="whitespace-nowrap font-medium" style={{ color: "var(--fin-ink)" }}>
                       {p.label}
-                      {i === 0 && (p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <span className="ml-1 text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>(inclui vencidos)</span>}
+                      {(p.vencidas_entradas_cents > 0 || p.vencidas_saidas_cents > 0) && <span className="ml-1 text-xs font-normal" style={{ color: "var(--fin-ink-3)" }}>(inclui vencidos)</span>}
                     </td>
                     <td className="font-mono-num text-right" style={{ color: "var(--fin-ink)" }}>{money(p.saldo_inicial_cents)}</td>
                     <td className="text-right"><Money cents={p.entradas_cents} flow="in" /></td>
@@ -81,6 +78,12 @@ export default function Fluxo() {
               </tbody>
             </table>
           </div>
+          {temAnterior && (
+            <p className="mt-2.5 text-[13px]" style={{ color: "var(--fin-ink-2)" }} data-testid="fin-flow-anterior">
+              O saldo inicial parte do saldo bancário atual e já considera o que está em aberto com vencimento antes de {fmtDate(from)}:{" "}
+              entradas de <Money cents={ant.entradas_cents} flow="in" signed={false} /> e saídas de <Money cents={ant.saidas_cents} flow="out" signed={false} />.
+            </p>
+          )}
         </Panel>
         <div className="space-y-5">
           <Panel icon={AlertTriangle} title="Alertas de caixa" subtitle={minimo ? `Negativo ou abaixo do mínimo de ${money(minimo)}.` : "Períodos com saldo projetado negativo."} testid="fin-flow-alerts">
@@ -98,10 +101,10 @@ export default function Fluxo() {
               </ul>
             ) : <p className="text-sm" style={{ color: "var(--fin-ink-3)" }}>Nenhum alerta no período projetado.</p>}
           </Panel>
-          <Panel icon={Landmark} title="Saldos por banco" subtitle="Saldo atual de cada conta ativa.">
-            {contasAtivas.length ? (
+          <Panel icon={Landmark} title="Saldos por banco" subtitle={bancos.length ? "Saldo atual dos bancos selecionados." : "Saldo atual de cada conta ativa."}>
+            {contasSel.length ? (
               <ul className="divide-y" style={{ borderColor: "var(--fin-border)" }}>
-                {contasAtivas.map((c) => (
+                {contasSel.map((c) => (
                   <li key={c.id} className="flex items-center gap-3 py-2.5" style={{ borderColor: "var(--fin-border)" }}>
                     <BankLogo item={c} size={30} />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: "var(--fin-ink)" }}>{c.nome}</span>

@@ -103,6 +103,37 @@ export function periodTitle(p) {
   return `${d(p.from, p.from.slice(0, 4) !== p.to.slice(0, 4))} – ${d(p.to, true)}`;
 }
 
+// PERÍODO do Fluxo de Caixa: { mode, ref, from, to } — `ref` é um dia qualquer dentro
+// do período (modos fixos do calendário); from/to só valem no personalizado.
+export const FLOW_MODES = [
+  { value: "mensal", label: "Mensal", months: 1 },
+  { value: "trimestral", label: "Trimestral", months: 3 },
+  { value: "semestral", label: "Semestral", months: 6 },
+  { value: "anual", label: "Anual", months: 12 },
+  { value: "personalizado", label: "Personalizado" },
+];
+const flowMonths = (mode) => FLOW_MODES.find((m) => m.value === mode).months;
+export function flowBounds(p) {
+  if (p.mode === "personalizado") return { from: p.from, to: p.to };
+  const n = flowMonths(p.mode);
+  const first = Math.floor((Number(p.ref.slice(5, 7)) - 1) / n) * n;
+  const from = `${p.ref.slice(0, 4)}-${pad(first + 1)}-01`;
+  return { from, to: monthBounds(from, n - 1)[1] };
+}
+export const shiftFlow = (p, dir) => ({ ...p, ref: monthBounds(flowBounds(p).from, dir * flowMonths(p.mode))[0] });
+export const setFlowMode = (p, mode) => ({ mode, ref: p.mode === "personalizado" ? p.from : p.ref });
+// "Novembro 2026" | "2º trimestre de 2027" | "1º semestre de 2027" | "2027" | "15/01/2027 — 20/05/2027"
+export function flowTitle(p) {
+  const { from, to } = flowBounds(p);
+  const ano = from.slice(0, 4);
+  const mes = Number(from.slice(5, 7)) - 1;
+  if (p.mode === "personalizado") return `${fmtDate(from)} — ${fmtDate(to)}`;
+  if (p.mode === "mensal") return `${MESES[mes]} ${ano}`;
+  if (p.mode === "trimestral") return `${mes / 3 + 1}º trimestre de ${ano}`;
+  if (p.mode === "semestral") return `${mes / 6 + 1}º semestre de ${ano}`;
+  return ano;
+}
+
 // Períodos da DRE (competência). Trimestre = trimestre civil atual.
 export function drePresets(today) {
   const [m0a, m0b] = monthBounds(today, 0);

@@ -26,6 +26,7 @@ porque o saldo é sempre derivado das baixas ativas.
 Previsões (cards, fluxo, vencidas) usam sempre o SALDO EM ABERTO
 (amount_cents − settled_cents) de lançamentos pendentes ou parciais."""
 import re
+from bisect import bisect_right
 import unicodedata
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
@@ -1577,67 +1578,118 @@ def _buckets(granularity: str, n: int, today: str) -> list:
     return out
 
 
+PERIOD_MODES = {"mensal": "dia", "trimestral": "mes", "semestral": "mes", "anual": "mes", "personalizado": None}
+MAX_FLOW_MONTHS = 60
+
+
+def _range_buckets(mode: str, ini: str, fim: str) -> tuple:
+    """Divide [ini, fim] em dias, semanas ou meses (pontas recortadas no intervalo).
+    Personalizado: até 62 dias = por dia; até 26 semanas = por semana; acima = por mês."""
+    a, b = date.fromisoformat(ini), date.fromisoformat(fim)
+    if b < a:
+        raise HTTPException(status_code=400, detail="A data final deve ser igual ou posterior à inicial")
+    if (b.year - a.year) * 12 + b.month - a.month >= MAX_FLOW_MONTHS:
+        raise HTTPException(status_code=400, detail=f"Escolha um período de até {MAX_FLOW_MONTHS // 12} anos")
+    dias = (b - a).days + 1
+    gran = PERIOD_MODES[mode] or ("dia" if dias <= GRANULARITIES["dia"] else "semana" if dias <= GRANULARITIES["semana"] * 7 else "mes")
+    if gran == "dia" and dias > GRANULARITIES["dia"]:
+        gran = "mes"
+    out, cur = [], a
+    while cur <= b:
+        if gran == "mes":
+            end = (cur.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+            label = f"{MESES[cur.month - 1]}/{cur.year % 100:02d}"
+        else:
+            end = cur + timedelta(days=6 - cur.weekday() if gran == "semana" else 0)
+            label = f"{cur.day:02d}/{MESES[cur.month - 1]}"
+        end = min(end, b)
+        out.append((cur.isoformat(), end.isoformat(), label))
+        cur = end + timedelta(days=1)
+    return gran, out
+
+
 @fin_router.get("/fluxo")
 async def cash_flow(granularity: str = "mes", periods: int = 6, account_id: Optional[str] = None,
+                    period_mode: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                    tag_ids: Optional[str] = None, bank_ids: Optional[str] = None,
                     current=Depends(get_current_user)):
     """Caixa projetado, período a período:
-        saldo inicial (1º período) = saldo atual das contas
+        saldo inicial (1º período) = saldo atual das contas + em aberto ANTERIOR ao 1º período
         saldo final = saldo inicial + entradas previstas − saídas previstas
         saldo inicial do período seguinte = saldo final do anterior
     Entra SOMENTE o SALDO EM ABERTO de lançamentos pendentes/parciais — o que já
-    foi pago/recebido (inclusive baixas parciais) está no saldo das contas; cancelados e solicitações ainda não aprovadas pela
-    Execução nunca entram. Em aberto já vencidos caem no 1º período (ainda são
-    esperados) e aparecem destacados em `vencidas_*`."""
+    foi pago/recebido (inclusive baixas parciais) está no saldo das contas; cancelados e
+    solicitações ainda não aprovadas pela Execução nunca entram.
+
+    Dois recortes:
+    - `period_mode` + `date_from`/`date_to` (página Fluxo de Caixa): entradas e saídas são só
+      as que VENCEM no intervalo; o em aberto anterior a ele compõe o saldo inicial e vem
+      em `anterior` (entra no caixa projetado, nunca nos totais do período).
+    - `granularity` + `periods` a partir de hoje (Visão Geral): vencidos caem no 1º período.
+    `bank_ids` (várias contas) e `tag_ids` (QUALQUER uma das tags) valem para tudo. Saldo
+    bancário é por conta: tags não o alteram."""
     owner = _owner(current)
     if granularity not in GRANULARITIES:
         raise HTTPException(status_code=400, detail="Granularidade inválida")
-    n = max(1, min(int(periods), GRANULARITIES[granularity]))
     today = today_sp()
-    buckets = _buckets(granularity, n, today)
+    ranged = period_mode is not None
+    if ranged:
+        if period_mode not in PERIOD_MODES:
+            raise HTTPException(status_code=400, detail="Modo de período inválido")
+        if not date_from or not date_to:
+            raise HTTPException(status_code=400, detail="Informe a data inicial e a final")
+        granularity, buckets = _range_buckets(period_mode, parse_date(date_from), parse_date(date_to))
+    else:
+        buckets = _buckets(granularity, max(1, min(int(periods), GRANULARITIES[granularity])), today)
     contas_docs = await db.fin_cadastros.find({"owner_id": owner, "kind": "conta"}).to_list(500)
     saldos = await _account_balances(owner)
     contas = [{"id": c["id"], "nome": c.get("nome"), "instituicao": c.get("instituicao"), "logo_preset": c.get("logo_preset"),
                "logo_file_id": c.get("logo_file_id"), "ativo": c.get("ativo", True), "saldo_cents": saldos.get(c["id"], 0)}
               for c in contas_docs]
-    if account_id:
-        contas_sel = [c for c in contas if c["id"] == account_id]
-        if not contas_sel:
-            raise HTTPException(status_code=404, detail="Conta não encontrada")
-    else:
-        contas_sel = [c for c in contas if c["ativo"]]
-    saldo_atual = sum(c["saldo_cents"] for c in contas_sel)
+    bancos = {x for x in (bank_ids or account_id or "").split(",") if x}
+    tags = [x for x in (tag_ids or "").split(",") if x]
+    if bancos - {c["id"] for c in contas}:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    saldo_atual = sum(c["saldo_cents"] for c in contas if (c["id"] in bancos if bancos else c["ativo"]))
 
     match = {"owner_id": owner, "status": {"$in": list(OPEN)}, "due_date": {"$lte": buckets[-1][1]}}
-    if account_id:
-        card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": account_id})]
-        match["$or"] = [{"bank_account_id": account_id}, {"card_id": {"$in": card_ids}}]
-    rows = await db.fin_entries.find(match, {"type": 1, "amount_cents": 1, "settled_cents": 1, "due_date": 1}).to_list(20000)
-    for r in rows:
-        r["amount_cents"] = open_cents(r)
+    if bancos:
+        ids = list(bancos)
+        card_ids = [c["id"] async for c in db.fin_cadastros.find({"owner_id": owner, "kind": "cartao", "conta_id": {"$in": ids}})]
+        match["$or"] = [{"bank_account_id": {"$in": ids}}, {"card_id": {"$in": card_ids}}]
+    if tags:
+        match["tag_ids"] = {"$in": tags}
+    # Uma linha por dia e tipo: nenhum lançamento trafega, mesmo em períodos longos.
+    rows = [(g["_id"]["d"], g["_id"]["t"], int(g["c"])) async for g in db.fin_entries.aggregate([
+        {"$match": match}, {"$group": {"_id": {"d": "$due_date", "t": "$type"}, "c": {"$sum": OPEN_EXPR}}}])]
     prefs = await db.preferences.find_one({"owner_id": owner}) or {}
     minimo = int(((prefs.get("financeiro") or {}).get("caixa_minimo_cents")) or 0)
 
+    inicio = buckets[0][0]
+    anterior = {"entradas_cents": 0, "saidas_cents": 0}
+    totals = [[0, 0, 0, 0] for _ in buckets]   # entradas, saídas, vencidas: entradas, saídas
+    starts = [b[0] for b in buckets]
+    for d, tipo, cents in rows:
+        k = 0 if tipo == RECEBER else 1
+        if ranged and d < inicio:
+            anterior["entradas_cents" if k == 0 else "saidas_cents"] += cents
+            continue
+        i = max(0, bisect_right(starts, d) - 1)
+        totals[i][k] += cents
+        totals[i][k + 2] += cents if d < today else 0
+
     out = []
-    saldo = saldo_atual
-    for i, (ini, fim, label) in enumerate(buckets):
-        ent = sai = v_ent = v_sai = 0
-        for r in rows:
-            d = r["due_date"]
-            if (ini <= d <= fim) or (i == 0 and d < ini):
-                if r["type"] == RECEBER:
-                    ent += r["amount_cents"]
-                    v_ent += r["amount_cents"] if d < today else 0
-                else:
-                    sai += r["amount_cents"]
-                    v_sai += r["amount_cents"] if d < today else 0
+    saldo = saldo_atual + anterior["entradas_cents"] - anterior["saidas_cents"]
+    for (ini, fim, label), (ent, sai, v_ent, v_sai) in zip(buckets, totals):
         final = saldo + ent - sai
-        alerta = "negativo" if final < 0 else ("abaixo_minimo" if minimo and final < minimo else None)
+        # Dia/semana/mês já encerrado não é previsão: nunca vira alerta.
+        alerta = None if fim < today else "negativo" if final < 0 else ("abaixo_minimo" if minimo and final < minimo else None)
         out.append({"inicio": ini, "fim": fim, "label": label, "saldo_inicial_cents": saldo, "entradas_cents": ent,
                     "saidas_cents": sai, "saldo_final_cents": final, "vencidas_entradas_cents": v_ent,
                     "vencidas_saidas_cents": v_sai, "alerta": alerta})
         saldo = final
     return {"saldo_atual_cents": saldo_atual, "contas": contas, "periodos": out, "caixa_minimo_cents": minimo,
-            "today": today, "granularity": granularity}
+            "anterior": anterior, "today": today, "granularity": granularity}
 
 
 # =================== HISTÓRICO (AUDITORIA) ===================
