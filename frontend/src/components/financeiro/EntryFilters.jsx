@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { RangeCalendar } from "@/components/RangeCalendar";
+import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ALL_PERIODS, fmtDate, monthPeriod, periodBounds, periodTitle, quickFilters, shiftPeriod, todaySP } from "@/lib/financeiro";
-import { cn } from "@/lib/utils";
+import { useFinance } from "@/context/FinanceContext";
+import { cardLabel, flowBounds, flowTitle, quickFilters, todaySP } from "@/lib/financeiro";
+import { CardThumb } from "./PaymentFields";
+import { ChipSelect } from "./ui";
 
 // FILTROS COMPARTILHADOS do Financeiro (Visão Geral, A Pagar, A Receber).
 // A página é dona do estado (useEntryFilters) e entrega o MESMO `params` para a
@@ -20,12 +21,12 @@ export const EMPTY_ADV = { type: "", category_id: "", payment_method_id: "", acc
 // `type` fixo (A Pagar / A Receber: abre em "Todos os períodos") ou null (Visão Geral:
 // abre no mês atual). Nada é persistido.
 export function useEntryFilters({ type = null, initialStatus = "" } = {}) {
-  const [period, setPeriod] = useState(() => (type ? ALL_PERIODS : monthPeriod(todaySP())));
+  const [period, setPeriod] = useState(() => ({ mode: type ? "todos" : "mensal", ref: todaySP() }));
   const [status, setStatus] = useState(initialStatus);
   const [qText, setQText] = useState("");
   const q = useDebounced(qText.trim());
   const [adv, setAdv] = useState(EMPTY_ADV);
-  const bounds = periodBounds(period);
+  const bounds = flowBounds(period);
   // Chave estável: muda exatamente quando algum filtro muda.
   const key = JSON.stringify({
     type: type || adv.type || undefined, status: status || undefined, q: q || undefined,
@@ -36,61 +37,6 @@ export function useEntryFilters({ type = null, initialStatus = "" } = {}) {
   });
   const params = useMemo(() => JSON.parse(key), [key]);
   return { type, period, setPeriod, status, setStatus, qText, setQText, adv, setAdv, key, params };
-}
-
-// ‹  Novembro 2026  ›  [calendário]. `allPeriods`: páginas com "Todos os períodos".
-export function PeriodNav({ value, onChange, className, allPeriods }) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ from: "", to: "" });
-  const custom = value.mode === "custom";
-  // No modo mensal o calendário abre limpo (1º clique = início) no mês em exibição.
-  const onOpen = (o) => {
-    if (o) setDraft(custom ? { from: value.from, to: value.to } : { from: "", to: "" });
-    setOpen(o);
-  };
-  const aplicar = (p) => { onChange(p); setOpen(false); };
-  const incompleto = !draft.from || !draft.to;
-  const btn = "flex h-full w-9 shrink-0 items-center justify-center transition-colors hover:bg-[var(--fin-muted-soft)]";
-  return (
-    <div className={cn("inline-flex h-10 max-w-full items-stretch overflow-hidden rounded-lg border", className)} data-testid="fin-period"
-      style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface)", color: "var(--fin-ink-2)" }}>
-      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, -1))} title={value.mode === "all" ? "Mês atual" : "Mês anterior"} aria-label={value.mode === "all" ? "Mês atual" : "Mês anterior"} data-testid="fin-period-prev">
-        <ChevronLeft size={17} />
-      </button>
-      <span className="flex min-w-[132px] items-center justify-center truncate px-1 text-sm font-semibold" style={{ color: "var(--fin-ink)" }}
-        data-testid="fin-period-label" aria-live="polite">
-        {periodTitle(value)}
-      </span>
-      <button type="button" className={btn} onClick={() => onChange(shiftPeriod(value, 1))} title={value.mode === "all" ? "Mês atual" : "Próximo mês"} aria-label={value.mode === "all" ? "Mês atual" : "Próximo mês"} data-testid="fin-period-next">
-        <ChevronRight size={17} />
-      </button>
-      <Popover open={open} onOpenChange={onOpen}>
-        <PopoverTrigger asChild>
-          <button type="button" className={cn(btn, "border-l")} title="Período personalizado" aria-label="Período personalizado" data-testid="fin-period-calendar"
-            style={{ borderColor: "var(--fin-border)", ...(custom ? { background: "var(--fin-primary-soft)", color: "var(--fin-primary)" } : {}) }}>
-            <CalendarDays size={16} />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="fin-scope w-[304px] max-w-[calc(100vw-24px)] p-3" data-testid="fin-period-popover"
-          style={{ background: "var(--fin-surface)", borderColor: "var(--fin-border)" }}>
-          <RangeCalendar value={draft} onChange={setDraft} defaultMonth={periodBounds(value).from} testid="fin-period-range" />
-          <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2.5" style={{ borderColor: "var(--fin-border)" }}>
-            <span className="text-sm" style={{ color: "var(--fin-ink)" }} data-testid="fin-period-draft">
-              {!draft.from ? "Selecione a data inicial" : !draft.to ? `${fmtDate(draft.from)} – …` : `${fmtDate(draft.from)} – ${fmtDate(draft.to)}`}
-            </span>
-            <button type="button" disabled={incompleto} data-testid="fin-period-apply" onClick={() => aplicar({ mode: "custom", from: draft.from, to: draft.to })}
-              className="h-8 rounded-lg bg-[#16A34A] px-3 text-sm font-bold text-white transition-[filter] hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">
-              Aplicar
-            </button>
-          </div>
-          <button type="button" onClick={() => aplicar(allPeriods ? ALL_PERIODS : { mode: "custom", from: "", to: "" })} data-testid="fin-period-all"
-            className="mt-2 block w-full text-center text-sm hover:underline" style={{ color: "var(--fin-ink-2)" }}>
-            {allPeriods ? "Todos os períodos" : "Ver todo o histórico"}
-          </button>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
 }
 
 // Todos / Em aberto / Pago (ou Recebido) / Vencido
@@ -120,7 +66,75 @@ export function QuickFilters({ type, value, onChange }) {
 export function PeriodHeading({ period }) {
   return (
     <p className="mb-3 text-center font-heading text-base font-bold uppercase tracking-[0.14em]" style={{ color: "var(--fin-ink)" }} data-testid="fin-period-heading">
-      {periodTitle(period)}
+      {flowTitle(period)}
     </p>
+  );
+}
+
+// Cartões de crédito em chips (um por vez), na MESMA seleção "Banco / cartão" do painel
+// Filtros. "Todos" = sem cartão. Muitos cartões => rolagem horizontal só aqui.
+export function CardQuickFilter({ value, onChange }) {
+  const { cad } = useFinance();
+  const cartoes = (cad.cartao || []).filter((c) => c.ativo !== false || c.id === value);
+  if (!cartoes.length) return null;
+  const atual = cartoes.some((c) => c.id === value) ? value : "";
+  const chip = (id, label, content, active, onClick) => (
+    <button key={id} type="button" role="radio" aria-checked={active} title={label} onClick={onClick}
+      data-testid={`fin-card-filter-${id}`} data-selected={active || undefined}
+      className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3 text-sm font-semibold transition-colors hover:bg-[var(--fin-muted-soft)]"
+      style={active ? { borderColor: "var(--fin-primary)", background: "var(--fin-primary-soft)", color: "var(--fin-primary)" }
+        : { borderColor: "var(--fin-border)", background: "var(--fin-surface)", color: "var(--fin-ink)" }}>
+      {content}
+    </button>
+  );
+  return (
+    <div className="fin-hscroll flex min-w-[min(100%,240px)] flex-1 items-center gap-2 overflow-x-auto py-0.5" role="radiogroup" aria-label="Cartões de crédito" data-testid="fin-card-filter">
+      {chip("todos", "Todos os cartões", "Todos", !atual, () => atual && onChange(""))}
+      {cartoes.map((c) => chip(c.id, cardLabel(c), (
+        <><CardThumb card={c} /><span className="max-w-[140px] truncate">{c.nome}</span></>
+      ), c.id === atual, () => onChange(c.id === atual ? "" : c.id)))}
+    </div>
+  );
+}
+
+// Tags cadastradas no sistema, ao lado dos cartões (mesmo filtro de tags do painel
+// Filtros, vários = OU). As primeiras ficam visíveis; as demais no dropdown "Mais tags".
+const TAGS_VISIVEIS = 2;
+export function TagQuickFilter({ value, onChange }) {
+  const { cad } = useFinance();
+  const tags = (cad.tag || []).filter((t) => t.ativo !== false || value.includes(t.id));
+  if (!tags.length) return null;
+  const opt = (t) => ({ value: t.id, color: t.cor || "#64748B", title: t.nome,
+    label: <span className="block max-w-[110px] truncate">{t.nome}</span> });
+  const resto = tags.slice(TAGS_VISIVEIS);
+  const marcadas = resto.filter((t) => value.includes(t.id)).length;
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <ChipSelect multiple value={value} onChange={onChange} options={tags.slice(0, TAGS_VISIVEIS).map(opt)} testid="fin-tag-filter"
+      extra={resto.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button type="button" data-testid="fin-tag-filter-more-tags" data-selected={marcadas > 0 || undefined}
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-semibold transition-colors"
+              style={marcadas ? { background: "var(--fin-surface)", color: "var(--fin-primary)", boxShadow: "0 1px 2px rgba(0,0,0,0.08), inset 0 0 0 1px var(--fin-primary)" } : { color: "var(--fin-ink-2)" }}>
+              Mais tags{marcadas ? ` (${marcadas})` : ""} <ChevronDown size={14} />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="fin-scope w-[240px] p-2" style={{ background: "var(--fin-surface)", borderColor: "var(--fin-border)" }}>
+            <ul role="listbox" aria-multiselectable="true" className="max-h-64 overflow-y-auto">
+              {resto.map((t) => (
+                <li key={t.id}>
+                  <button type="button" role="option" aria-selected={value.includes(t.id)} onClick={() => toggle(t.id)} data-testid={`fin-tag-filter-opt-${t.id}`}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--fin-muted-soft)]" style={{ color: "var(--fin-ink)" }}>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: t.cor || "#64748B" }} />
+                    <span className="flex-1 truncate text-left">{t.nome}{t.ativo === false ? " (inativa)" : ""}</span>
+                    {value.includes(t.id) && <Check size={15} className="shrink-0" style={{ color: "var(--fin-primary)" }} />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
+      )} />
   );
 }

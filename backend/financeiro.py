@@ -1508,12 +1508,20 @@ async def _entry_totals(query: dict, today: str) -> dict:
     return out
 
 
+async def _entry_interval(query: dict) -> Optional[dict]:
+    """Primeiro e último vencimento do recorte (texto de "Todos os períodos")."""
+    g = await db.fin_entries.aggregate([{"$match": query}, {"$group": {
+        "_id": None, "inicio": {"$min": "$due_date"}, "fim": {"$max": "$due_date"}}}]).to_list(1)
+    return {"inicio": g[0]["inicio"], "fim": g[0]["fim"]} if g and g[0]["inicio"] else None
+
+
 @fin_router.get("/visao-geral")
 async def overview(f: EntryFilters = Depends(), current=Depends(get_current_user)):
     """Cards da Visão Geral: mesmos filtros (período, status, busca…) da tabela."""
     owner = _owner(current)
     today = today_sp()
-    tot = await _entry_totals(await f.query(current, today), today)
+    query = await f.query(current, today)
+    tot = await _entry_totals(query, today)
     rec, pag = tot[RECEBER], tot[PAGAR]
     pend = await db.fin_requests.aggregate([{"$match": {"owner_id": owner, "status": "pendente"}},
                                             {"$group": {"_id": None, "n": {"$sum": 1}, "t": {"$sum": "$amount_cents"}}}]).to_list(1)
@@ -1525,6 +1533,7 @@ async def overview(f: EntryFilters = Depends(), current=Depends(get_current_user
         "pago_cents": pag["realizado"]["cents"], "pago_count": pag["realizado"]["count"],
         "vencidas": {"receber_cents": rec["vencidas"]["cents"], "receber_count": rec["vencidas"]["count"],
                      "pagar_cents": pag["vencidas"]["cents"], "pagar_count": pag["vencidas"]["count"]},
+        "intervalo": await _entry_interval(query),
         "solicitacoes_pendentes": {"count": pend[0]["n"] if pend else 0, "cents": pend[0]["t"] if pend else 0},
         "today": today,
     }
@@ -1549,6 +1558,7 @@ async def type_summary(f: EntryFilters = Depends(), current=Depends(get_current_
     return {
         "aberto_periodo": tot["aberto"], "vencidas": tot["vencidas"], "realizado_periodo": tot["realizado"],
         "parciais": tot["parciais"], "por_categoria": por_categoria, "today": today,
+        "intervalo": await _entry_interval(query),
     }
 
 

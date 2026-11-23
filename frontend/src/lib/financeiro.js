@@ -80,35 +80,8 @@ export function relativeTime(ts) {
   return `há ${Math.floor(diff / 1440)} d`;
 }
 
-// PERÍODO das páginas (Visão Geral, A Pagar, A Receber): UM único estado, nunca
-// persistido — { mode: "month", month: "2026-11" } ou { mode: "custom", from, to }
-// (limite vazio = sem limite; os dois vazios = todos os vencimentos). A Pagar e
-// A Receber abrem em ALL_PERIODS (sem filtro de data); a 1ª seta vai ao mês atual.
-export const ALL_PERIODS = { mode: "all" };
-export const monthPeriod = (iso) => ({ mode: "month", month: iso.slice(0, 7) });
-export function periodBounds(p) {
-  if (p.mode === "all") return { from: "", to: "" };
-  if (p.mode === "custom") return { from: p.from || "", to: p.to || "" };
-  const [from, to] = monthBounds(`${p.month}-01`);
-  return { from, to };
-}
-// Setas: sempre voltam ao modo mensal (a partir do mês do período atual).
-export function shiftPeriod(p, n) {
-  if (p.mode === "all") return monthPeriod(todaySP());
-  const base = p.mode === "month" ? `${p.month}-01` : (p.from || todaySP());
-  return monthPeriod(monthBounds(base, n)[0]);
-}
-// "Novembro 2026" | "01 nov – 18 nov 2026" | "Todos os vencimentos"
-export function periodTitle(p) {
-  if (p.mode === "all") return "Todos os períodos";
-  if (p.mode === "month") return `${MESES[Number(p.month.slice(5, 7)) - 1]} ${p.month.slice(0, 4)}`;
-  if (!p.from && !p.to) return "Todos os vencimentos";
-  const d = (iso, year) => `${iso.slice(8, 10)} ${MESES[Number(iso.slice(5, 7)) - 1].slice(0, 3).toLowerCase()}${year ? ` ${iso.slice(0, 4)}` : ""}`;
-  if (p.from === p.to) return d(p.from, true);
-  return `${d(p.from, p.from.slice(0, 4) !== p.to.slice(0, 4))} – ${d(p.to, true)}`;
-}
-
-// PERÍODO do Fluxo de Caixa: { mode, ref, from, to } — `ref` é um dia qualquer dentro
+// PERÍODO (Fluxo de Caixa, Visão Geral, A Pagar, A Receber), um estado por página e
+// nunca persistido: { mode, ref, from, to } — `ref` é um dia qualquer dentro
 // do período (modos fixos do calendário); from/to só valem no personalizado.
 export const FLOW_MODES = [
   { value: "mensal", label: "Mensal", months: 1 },
@@ -120,7 +93,7 @@ export const FLOW_MODES = [
 ];
 const flowMonths = (mode) => FLOW_MODES.find((m) => m.value === mode).months;
 export function flowBounds(p) {
-  if (p.mode === "todos") return { from: "", to: "" };   // o backend calcula o horizonte
+  if (p.mode === "todos") return { from: "", to: "" };   // sem datas (Fluxo: o backend calcula o horizonte)
   if (p.mode === "personalizado") return { from: p.from, to: p.to };
   const n = flowMonths(p.mode);
   const first = Math.floor((Number(p.ref.slice(5, 7)) - 1) / n) * n;
@@ -130,7 +103,8 @@ export function flowBounds(p) {
 export const shiftFlow = (p, dir) => ({ ...p, ref: monthBounds(flowBounds(p).from, dir * flowMonths(p.mode))[0] });
 export const setFlowMode = (p, mode) => ({ mode, ref: p.mode === "personalizado" ? p.from : p.ref });
 // "Novembro 2026" | "2º trimestre de 2027" | "1º semestre de 2027" | "2027" | "15/01/2027 — 20/05/2027"
-// Todos os períodos: "Nov/2026 — Mar/2029" (`horizonte` real devolvido pelo backend).
+// Todos os períodos: "Nov/2026 — Mar/2029" (`horizonte` real devolvido pelo backend;
+// sem ele, "Todos os períodos").
 export function flowTitle(p, horizonte) {
   if (p.mode === "todos") {
     if (!horizonte) return "Todos os períodos";

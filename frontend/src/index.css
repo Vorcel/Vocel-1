@@ -403,3 +403,8 @@ input.no-spin[type="number"]::-webkit-inner-spin-button { -webkit-appearance: no
 .fin-sidebar {
   background: linear-gradient(180deg, var(--fin-sidebar-1) 0%, var(--fin-sidebar-2) 100%);
 }
+
+/* Faixa de chips com rolagem horizontal própria (cartões nos filtros do Financeiro). */
+.fin-hscroll { scrollbar-width: thin; scrollbar-color: var(--fin-border) transparent; }
+.fin-hscroll::-webkit-scrollbar { height: 5px; }
+.fin-hscroll::-webkit-scrollbar-thumb { background: var(--fin-border); border-radius: 999px; }

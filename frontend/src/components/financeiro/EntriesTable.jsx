@@ -6,9 +6,10 @@ import { usePersistentPageSize } from "@/hooks/usePersistentPageSize";
 import { usePersistentSort } from "@/hooks/usePersistentSort";
 import { useFinance } from "@/context/FinanceContext";
 import { useAuth } from "@/context/AuthContext";
-import { MODOS, apiError, dueAlert, finApi, fmtDate, isOpenEntry, money, quickFilters, todaySP } from "@/lib/financeiro";
+import { MODOS, apiError, dueAlert, finApi, flowTitle, fmtDate, isOpenEntry, money, quickFilters, todaySP } from "@/lib/financeiro";
 import { EntryRowActions } from "./EntryActions";
-import { EMPTY_ADV, PeriodNav, QuickFilters } from "./EntryFilters";
+import { CardQuickFilter, EMPTY_ADV, TagQuickFilter, QuickFilters } from "./EntryFilters";
+import { PeriodModes, PeriodStepper } from "./PeriodControls";
 import { TagPicker } from "./TagPicker";
 import { Amount, CategoryChip, EmptyState, EntryStatus, FinButton, FinInput, FinSelect, Pager, TagChips, TonePill } from "./ui";
 
@@ -33,7 +34,8 @@ function RowCheckbox({ indeterminate, ...props }) {
 // `onSelectionChange(rows)` liga a seleção por checkbox (A Pagar / A Receber):
 // só linhas VISÍVEIS com saldo em aberto; qualquer mudança de filtro, página ou
 // ordenação limpa a seleção (nunca há item marcado invisível).
-export function EntriesTable({ filters, pageKey, onSelectionChange }) {
+// `intervalo` = primeiro e último vencimento do recorte (texto de "Todos os períodos").
+export function EntriesTable({ filters, pageKey, onSelectionChange, intervalo }) {
   const { type, period, setPeriod, status, setStatus, qText, setQText, adv, setAdv, key: filterKey, params: filterParams } = filters;
   const { cad, version, novoLancamento, acaoLancamento } = useFinance();
   const { can } = useAuth();
@@ -109,20 +111,35 @@ export function EntriesTable({ filters, pageKey, onSelectionChange }) {
   return (
     <div data-testid={`fin-table-${pageKey}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative min-w-[140px] flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--fin-ink-3)" }} />
           <FinInput value={qText} onChange={(e) => setQText(e.target.value)} placeholder={type === "receber" ? "Buscar por descrição, cliente, pregão..." : "Buscar por descrição, fornecedor..."} className="pl-9" data-testid="fin-search" />
         </div>
-        <PeriodNav allPeriods={!!type} value={period} onChange={setPeriod} />
-        <FinButton variant="outline" onClick={() => setShowAdv((s) => !s)} data-testid="fin-filter-more">
+        <PeriodModes compact period={period} onPeriod={setPeriod} testid="fin-period" />
+        <PeriodStepper compact period={period} onPeriod={setPeriod} title={flowTitle(period, intervalo)} testid="fin-period" />
+        <div className="ml-auto flex items-center gap-2">
+        <FinButton variant="outline" className="px-3" onClick={() => setShowAdv((s) => !s)} data-testid="fin-filter-more">
           <SlidersHorizontal size={15} /> Filtros{advCount ? ` (${advCount})` : ""}
         </FinButton>
         {criaveis.length > 0 && (
           <FinButton onClick={() => novoLancamento(type ? { type } : criaveis.length === 1 ? { type: criaveis[0] } : undefined)}
             data-testid="fin-new-entry"><Plus size={16} /> Novo lançamento</FinButton>
         )}
+        </div>
       </div>
-      <div className="mt-3"><QuickFilters type={type} value={status} onChange={setStatus} /></div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="fin-filter-row">
+        <QuickFilters type={type} value={status} onChange={setStatus} />
+        {/* Recebível não tem cartão de crédito: em A Receber a faixa não aparece. */}
+        {type !== "receber" && (
+          <>
+            <span className="hidden h-6 w-px shrink-0 xl:block" style={{ background: "var(--fin-border)" }} />
+            <CardQuickFilter value={adv.account_id} onChange={(account_id) => setAdv((a) => ({ ...a, account_id }))} />
+          </>
+        )}
+        <div className="ml-auto max-w-full shrink-0">
+          <TagQuickFilter value={adv.tag_ids} onChange={(tag_ids) => setAdv((a) => ({ ...a, tag_ids }))} />
+        </div>
+      </div>
       {showAdv && (
         <div className="mt-2 grid grid-cols-1 gap-2 rounded-xl border p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" style={{ borderColor: "var(--fin-border)", background: "var(--fin-surface-2)" }} data-testid="fin-adv-filters">
           {!type && (

@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpFromLine, ChartColum
 import { toast } from "sonner";
 import { useFinance } from "@/context/FinanceContext";
 import { useData } from "@/context/DataContext";
-import { apiError, finApi, money, periodTitle } from "@/lib/financeiro";
+import { apiError, finApi, flowTitle, money } from "@/lib/financeiro";
 import { CashFlowChart, DeficitAlert } from "@/components/financeiro/CashFlowChart";
 import { EntriesTable } from "@/components/financeiro/EntriesTable";
 import { useEntryFilters } from "@/components/financeiro/EntryFilters";
@@ -26,7 +26,7 @@ export default function Overview() {
   const [ov, setOv] = useState(null);
   const [flow, setFlow] = useState(null);
   const queue = useReceivableQueue();
-  const periodText = periodTitle(filters.period);
+  const periodText = flowTitle(filters.period);
   const realizado = filters.status === "realizado";
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export default function Overview() {
       {/* 2 — Lançamentos (tabela completa) */}
       <Panel className="mt-5" icon={ListOrdered} title="Lançamentos" testid="fin-overview-entries"
         subtitle="Contas a pagar e a receber, parcelas e recorrências.">
-        <EntriesTable filters={filters} pageKey="lancamentos" />
+        <EntriesTable intervalo={ov?.intervalo} filters={filters} pageKey="lancamentos" />
       </Panel>
 
       {/* 3 — Fluxo Previsto (Ref10) + fila de aprovação ao lado */}

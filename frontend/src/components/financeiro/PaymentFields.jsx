@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { BankLogo, FinIcon } from "./icons";
 import { ChipSelect, keepScroll } from "./ui";
 
-function CardThumb({ card, size = "sm" }) {
+export function CardThumb({ card, size = "sm" }) {
   const cls = size === "sm" ? "h-[18px] w-[28px]" : "h-[22px] w-[34px]";
   if (card?.imagem_file_id) return <img src={fileUrl(card.imagem_file_id)} alt="" className={cn(cls, "shrink-0 rounded-[4px] object-cover")} />;
   return (

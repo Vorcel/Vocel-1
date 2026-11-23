@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useFinance } from "@/context/FinanceContext";
-import { apiError, finApi, money, periodTitle } from "@/lib/financeiro";
+import { apiError, finApi, flowTitle, money } from "@/lib/financeiro";
 import { EntriesTable } from "@/components/financeiro/EntriesTable";
 import { PeriodHeading, useEntryFilters } from "@/components/financeiro/EntryFilters";
 import { ExecutionUpdates, ReceivableQueue, useReceivableQueue } from "@/components/financeiro/ReceivableQueue";
@@ -42,13 +42,13 @@ export function Pagar() {
       <PageHeader icon={ArrowUpFromLine} title="Contas a Pagar" subtitle="Despesas, parcelas, recorrências e vencimentos." />
       <PeriodHeading period={filters.period} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight flow="out" label={filters.period.mode === "all" ? "Total a pagar" : "A pagar no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo)} />
+        <KpiCard testid="fin-pagar-aberto" icon={ArrowUpFromLine} tone="warning" highlight flow="out" label={filters.period.mode === "todos" ? "Total a pagar" : "A pagar no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo)} />
         <KpiCard testid="fin-pagar-vencidas" icon={AlertTriangle} tone="danger" flow="out" label="Vencidas" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas)} />
         <KpiCard testid="fin-pagar-pagas" icon={CheckCircle2} tone="success" flow="out" label="Pago no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo)} · ${data?.parciais?.count ?? 0} parcialmente pago(s)`} />
         <SelectedCard type="pagar" rows={selecionados} />
       </div>
-      <Panel className="mt-5" bodyClassName="pt-5"><EntriesTable filters={filters} pageKey="pagar" onSelectionChange={setSelecionados} /></Panel>
+      <Panel className="mt-5" bodyClassName="pt-5"><EntriesTable intervalo={data?.intervalo} filters={filters} pageKey="pagar" onSelectionChange={setSelecionados} /></Panel>
       <CategoryBreakdown data={data} period={filters.period} />
     </>
   );
@@ -59,7 +59,7 @@ function CategoryBreakdown({ data, period }) {
   const rows = data?.por_categoria || [];
   const total = rows.reduce((s, r) => s + r.cents, 0);
   return (
-    <Panel className="mt-5" icon={PieChart} title="Despesas por categoria" subtitle={`Distribuição do total a pagar (${money(total)}) · ${periodTitle(period)}, conforme os filtros da tabela.`} testid="fin-pagar-categorias">
+    <Panel className="mt-5" icon={PieChart} title="Despesas por categoria" subtitle={`Distribuição do total a pagar (${money(total)}) · ${flowTitle(period)}, conforme os filtros da tabela.`} testid="fin-pagar-categorias">
       {rows.length ? (
         <ul className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
           {rows.map((r) => {
@@ -92,13 +92,13 @@ export function Receber() {
       <PageHeader icon={ArrowDownToLine} title="Contas a Receber" subtitle="Recebíveis oficiais, aprovações da Execução e baixa de recebimentos." />
       <PeriodHeading period={filters.period} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight flow="in" label={filters.period.mode === "all" ? "Total a receber" : "A receber no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo, "recebível", "recebíveis")} />
+        <KpiCard testid="fin-receber-aberto" icon={ArrowDownToLine} tone="success" highlight flow="in" label={filters.period.mode === "todos" ? "Total a receber" : "A receber no período"} value={money(data?.aberto_periodo?.cents)} sub={cnt(data?.aberto_periodo, "recebível", "recebíveis")} />
         <KpiCard testid="fin-receber-atraso" icon={AlertTriangle} tone="danger" flow="in" label="Em atraso" value={money(data?.vencidas?.cents)} sub={cnt(data?.vencidas, "recebível", "recebíveis")} />
         <KpiCard testid="fin-receber-recebido" icon={CheckCircle2} tone="success" flow="in" label="Recebido no período" value={money(data?.realizado_periodo?.cents)}
           sub={`${cnt(data?.realizado_periodo)} · ${data?.parciais?.count ?? 0} parcialmente recebido(s)`} />
         <SelectedCard type="receber" rows={selecionados} />
       </div>
-      <div className="mt-5 grid grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="mt-5 grid grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel className="2xl:order-2" icon={ClipboardCheck} title="Fila de aprovação" testid="fin-receber-queue"
           subtitle="Solicitações da Execução & Pós-Venda. Ainda não são recebíveis."
           actions={queue.items.length > 0 && <TonePill tone="warning">{queue.items.length} pendente(s) · {money(aguardando)}</TonePill>}>
@@ -106,7 +106,7 @@ export function Receber() {
           <ReceivableQueue items={queue.items} loading={queue.loading} />
         </Panel>
         <Panel className="2xl:order-1" title="Recebíveis" subtitle="Somente recebíveis oficiais (aprovados ou lançados no Financeiro)." bodyClassName="pt-1">
-          <EntriesTable filters={filters} pageKey="receber" onSelectionChange={setSelecionados} />
+          <EntriesTable intervalo={data?.intervalo} filters={filters} pageKey="receber" onSelectionChange={setSelecionados} />
         </Panel>
       </div>
     </>
